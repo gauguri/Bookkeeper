@@ -1,0 +1,4 @@
+Type,DocNumber,TxnDate,CustomerVendor,Account,Amount,ExternalId
+Invoice,INV-1001,2024-01-05,Acme Corp,Sales Revenue,250.00,INV-1001
+Payment,PMT-2001,2024-01-10,Acme Corp,Cash,250.00,PMT-2001
+Bill,BILL-3001,2024-01-08,Beta LLC,Office Supplies,75.00,BILL-3001

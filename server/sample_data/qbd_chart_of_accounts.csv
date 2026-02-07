@@ -1,0 +1,6 @@
+Name,Type,Subtype,NormalBalance,ExternalId
+Cash,Asset,Cash,Debit,1000
+Accounts Receivable,Asset,Receivable,Debit,1100
+Accounts Payable,Liability,Payable,Credit,2000
+Sales Revenue,Income,Sales,Credit,4000
+Office Supplies,Expense,Office,Debit,5000

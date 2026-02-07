@@ -149,3 +149,108 @@ class ImportMapping(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "source_system", "external_type", "external_id", name="uq_import_mapping"),
     )
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    billing_address = Column(Text, nullable=True)
+    shipping_address = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    invoices = relationship("Invoice", back_populates="customer")
+    payments = relationship("Payment", back_populates="customer")
+
+
+class Item(Base):
+    __tablename__ = "items"
+
+    id = Column(Integer, primary_key=True)
+    sku = Column(String(100), nullable=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    income_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    income_account = relationship("Account")
+    invoice_lines = relationship("InvoiceLine", back_populates="item")
+
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    invoice_number = Column(String(20), nullable=False, unique=True)
+    status = Column(
+        Enum("DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "VOID", name="invoice_status"),
+        nullable=False,
+        default="DRAFT",
+    )
+    issue_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=False)
+    notes = Column(Text, nullable=True)
+    terms = Column(Text, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_total = Column(Numeric(14, 2), nullable=False, default=0)
+    total = Column(Numeric(14, 2), nullable=False, default=0)
+    amount_due = Column(Numeric(14, 2), nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer", back_populates="invoices")
+    lines = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan")
+    payment_applications = relationship("PaymentApplication", back_populates="invoice", cascade="all, delete-orphan")
+
+
+class InvoiceLine(Base):
+    __tablename__ = "invoice_lines"
+
+    id = Column(Integer, primary_key=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    description = Column(Text, nullable=True)
+    quantity = Column(Numeric(14, 2), nullable=False, default=1)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    discount = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_rate = Column(Numeric(5, 4), nullable=False, default=0)
+    line_total = Column(Numeric(14, 2), nullable=False, default=0)
+
+    invoice = relationship("Invoice", back_populates="lines")
+    item = relationship("Item", back_populates="invoice_lines")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)
+    payment_date = Column(Date, nullable=False)
+    method = Column(String(50), nullable=True)
+    reference = Column(String(100), nullable=True)
+    memo = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer", back_populates="payments")
+    applications = relationship("PaymentApplication", back_populates="payment", cascade="all, delete-orphan")
+
+
+class PaymentApplication(Base):
+    __tablename__ = "payment_applications"
+
+    id = Column(Integer, primary_key=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    applied_amount = Column(Numeric(14, 2), nullable=False)
+
+    payment = relationship("Payment", back_populates="applications")
+    invoice = relationship("Invoice", back_populates="payment_applications")

@@ -68,17 +68,22 @@ export default function PaymentsPage() {
     loadData();
   }, []);
 
-  const customerInvoices = useMemo(() => {
+  const { openInvoices, draftInvoices, visibleInvoices } = useMemo(() => {
     if (!form.customer_id) {
-      return [];
+      return { openInvoices: [], draftInvoices: [], visibleInvoices: [] };
     }
-    return invoices.filter(
-      (invoice) =>
-        invoice.customer_id === Number(form.customer_id) &&
-        invoice.amount_due > 0 &&
-        invoice.status !== "VOID" &&
-        invoice.status !== "DRAFT"
+    const customerInvoiceList = invoices.filter((invoice) => invoice.customer_id === Number(form.customer_id));
+    const open = customerInvoiceList.filter(
+      (invoice) => invoice.amount_due > 0 && invoice.status !== "VOID" && invoice.status !== "DRAFT"
     );
+    const drafts = customerInvoiceList.filter(
+      (invoice) => invoice.amount_due > 0 && invoice.status === "DRAFT"
+    );
+    return {
+      openInvoices: open,
+      draftInvoices: drafts,
+      visibleInvoices: open.length > 0 ? open : drafts
+    };
   }, [form.customer_id, invoices]);
 
   const totalApplied = applications.reduce((sum, app) => sum + (Number(app.applied_amount) || 0), 0);
@@ -95,7 +100,7 @@ export default function PaymentsPage() {
 
   const autoApply = () => {
     let remaining = Number(form.amount || 0);
-    const nextApplications = customerInvoices.map((invoice) => {
+    const nextApplications = visibleInvoices.map((invoice) => {
       const applied = Math.min(invoice.amount_due, remaining);
       remaining -= applied;
       return { invoice_id: invoice.id, applied_amount: applied.toFixed(2) };
@@ -106,6 +111,10 @@ export default function PaymentsPage() {
   const submitPayment = async () => {
     if (!form.customer_id || !form.amount || !form.payment_date) {
       setError("Customer, amount, and payment date are required.");
+      return;
+    }
+    if (Number(form.amount || 0) !== totalApplied) {
+      setError("Apply the full payment amount to one or more invoices to continue.");
       return;
     }
     const payload = {
@@ -211,8 +220,10 @@ export default function PaymentsPage() {
               Auto-apply
             </button>
           </div>
-          {customerInvoices.length === 0 ? (
+          {!form.customer_id ? (
             <p className="text-sm text-muted">Select a customer to see open invoices.</p>
+          ) : visibleInvoices.length === 0 ? (
+            <p className="text-sm text-muted">No invoices available for this customer. Create an invoice first.</p>
           ) : (
             <table className="min-w-full text-sm">
               <thead className="text-left text-xs uppercase tracking-widest text-muted">
@@ -223,9 +234,16 @@ export default function PaymentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {customerInvoices.map((invoice) => (
+                {visibleInvoices.map((invoice) => (
                   <tr key={invoice.id} className="app-table-row border-t">
-                    <td className="py-2 font-medium">{invoice.invoice_number}</td>
+                    <td className="py-2 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span>{invoice.invoice_number}</span>
+                        {invoice.status === "DRAFT" && (
+                          <span className="app-badge border-border bg-secondary text-muted">Draft</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                     <td className="text-right">
                       <input
@@ -241,6 +259,9 @@ export default function PaymentsPage() {
                 ))}
               </tbody>
             </table>
+          )}
+          {visibleInvoices.length > 0 && draftInvoices.length > 0 && openInvoices.length === 0 && (
+            <p className="text-sm text-muted">Draft invoices will be marked as Sent when you record this payment.</p>
           )}
           <div className="text-sm text-muted">
             Applied total: {currency(totalApplied)} / Payment amount: {currency(Number(form.amount || 0))}

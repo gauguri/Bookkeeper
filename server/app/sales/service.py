@@ -182,8 +182,11 @@ def apply_payment(
     invoices = db.query(Invoice).filter(Invoice.id.in_([app["invoice_id"] for app in applications_data])).all()
     invoice_map = {invoice.id: invoice for invoice in invoices}
     for invoice in invoices:
-        if invoice.status in {"VOID", "DRAFT"}:
+        if invoice.status == "VOID":
             raise ValueError("Payments can only be applied to sent invoices.")
+        if invoice.status == "DRAFT":
+            invoice.status = "SENT"
+            invoice.updated_at = datetime.utcnow()
     applications_inputs: List[PaymentApplicationInput] = []
     for application in applications_data:
         invoice = invoice_map.get(application["invoice_id"])

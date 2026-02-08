@@ -1,4 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
@@ -19,6 +30,14 @@ type CustomerRevenue = {
   total_revenue: number;
 };
 
+const tabs = [
+  { id: "summary", label: "Revenue" },
+  { id: "aging", label: "A/R aging" },
+  { id: "customers", label: "Top customers" }
+] as const;
+
+type TabId = (typeof tabs)[number]["id"];
+
 export default function ReportsPage() {
   const [range, setRange] = useState({ start_date: "", end_date: "" });
   const [asOf, setAsOf] = useState("");
@@ -26,6 +45,7 @@ export default function ReportsPage() {
   const [aging, setAging] = useState<ARAging[]>([]);
   const [revenue, setRevenue] = useState<CustomerRevenue[]>([]);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<TabId>("summary");
 
   const loadReports = async () => {
     if (!range.start_date || !range.end_date || !asOf) {
@@ -49,126 +69,209 @@ export default function ReportsPage() {
     }
   };
 
+  const summaryChart = useMemo(
+    () => summary.map((row) => ({ name: row.status, value: row.total_amount })),
+    [summary]
+  );
+
+  const agingChart = useMemo(
+    () => aging.map((row) => ({ name: `${row.bucket}d`, value: row.amount })),
+    [aging]
+  );
+
+  const revenueChart = useMemo(
+    () => revenue.map((row) => ({ name: row.customer_name, value: row.total_revenue })),
+    [revenue]
+  );
+
   return (
-    <section className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Sales reports</h1>
-        <p className="text-slate-600">Track performance and receivables.</p>
+    <section className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Reports</p>
+          <h1 className="text-3xl font-semibold">Sales analytics</h1>
+          <p className="text-muted">Monitor revenue, collections, and cash flow health.</p>
+        </div>
+        <button className="app-button-secondary">Export PDF</button>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Filters</h2>
+      <div className="app-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Filters</h2>
+          <button className="app-button" onClick={loadReports}>
+            Run reports
+          </button>
+        </div>
         <div className="grid gap-3 md:grid-cols-3">
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={range.start_date}
             onChange={(event) => setRange({ ...range, start_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={range.end_date}
             onChange={(event) => setRange({ ...range, end_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={asOf}
             onChange={(event) => setAsOf(event.target.value)}
           />
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          {error && <p className="text-sm text-rose-600">{error}</p>}
-          <button className="bg-slate-900 text-white rounded px-4 py-2 text-sm" onClick={loadReports}>
-            Run reports
-          </button>
-        </div>
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-          <h2 className="text-xl font-semibold">Invoices summary</h2>
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-slate-500">
-              <tr>
-                <th className="py-2">Status</th>
-                <th>Count</th>
-                <th className="text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.map((row) => (
-                <tr key={row.status} className="border-t border-slate-100">
-                  <td className="py-2">{row.status}</td>
-                  <td>{row.invoice_count}</td>
-                  <td className="text-right">{currency(row.total_amount)}</td>
-                </tr>
-              ))}
-              {summary.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="py-4 text-center text-slate-500">
-                    No summary available.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-          <h2 className="text-xl font-semibold">A/R aging</h2>
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-slate-500">
-              <tr>
-                <th className="py-2">Bucket</th>
-                <th className="text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {aging.map((row) => (
-                <tr key={row.bucket} className="border-t border-slate-100">
-                  <td className="py-2">{row.bucket} days</td>
-                  <td className="text-right">{currency(row.amount)}</td>
-                </tr>
-              ))}
-              {aging.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="py-4 text-center text-slate-500">
-                    No aging data.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Customer revenue</h2>
-        <table className="min-w-full text-sm">
-          <thead className="text-left text-slate-500">
-            <tr>
-              <th className="py-2">Customer</th>
-              <th className="text-right">Total revenue</th>
-            </tr>
-          </thead>
-          <tbody>
-            {revenue.map((row) => (
-              <tr key={row.customer_id} className="border-t border-slate-100">
-                <td className="py-2">{row.customer_name}</td>
-                <td className="text-right">{currency(row.total_revenue)}</td>
-              </tr>
+      <div className="app-card p-6 space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === tab.id
+                    ? "bg-primary text-primary-foreground shadow-glow"
+                    : "border bg-surface text-muted"
+                }`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
             ))}
-            {revenue.length === 0 && (
-              <tr>
-                <td colSpan={2} className="py-4 text-center text-slate-500">
-                  No revenue data.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+          </div>
+          <button className="app-button-ghost text-xs">Export CSV</button>
+        </div>
+
+        {activeTab === "summary" && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+            <div>
+              <h2 className="text-lg font-semibold">Invoices summary</h2>
+              <table className="mt-4 min-w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                  <tr>
+                    <th className="py-2">Status</th>
+                    <th>Count</th>
+                    <th className="text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.map((row) => (
+                    <tr key={row.status} className="border-t">
+                      <td className="py-2 font-medium">{row.status}</td>
+                      <td className="text-muted">{row.invoice_count}</td>
+                      <td className="text-right tabular-nums">{currency(row.total_amount)}</td>
+                    </tr>
+                  ))}
+                  {summary.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-6 text-center text-muted">
+                        No summary available.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={summaryChart}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
+                  <Line type="monotone" dataKey="value" stroke="#6366F1" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "aging" && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+            <div>
+              <h2 className="text-lg font-semibold">A/R aging</h2>
+              <table className="mt-4 min-w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                  <tr>
+                    <th className="py-2">Bucket</th>
+                    <th className="text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aging.map((row) => (
+                    <tr key={row.bucket} className="border-t">
+                      <td className="py-2 font-medium">{row.bucket} days</td>
+                      <td className="text-right tabular-nums">{currency(row.amount)}</td>
+                    </tr>
+                  ))}
+                  {aging.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="py-6 text-center text-muted">
+                        No aging data.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={agingChart}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
+                  <Bar dataKey="value" fill="#6366F1" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "customers" && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+            <div>
+              <h2 className="text-lg font-semibold">Customer revenue</h2>
+              <table className="mt-4 min-w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                  <tr>
+                    <th className="py-2">Customer</th>
+                    <th className="text-right">Total revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {revenue.map((row) => (
+                    <tr key={row.customer_id} className="border-t">
+                      <td className="py-2 font-medium">{row.customer_name}</td>
+                      <td className="text-right tabular-nums">{currency(row.total_revenue)}</td>
+                    </tr>
+                  ))}
+                  {revenue.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="py-6 text-center text-muted">
+                        No revenue data.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={revenueChart} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis type="number" tickLine={false} axisLine={false} />
+                  <YAxis dataKey="name" type="category" tickLine={false} axisLine={false} width={100} />
+                  <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
+                  <Bar dataKey="value" fill="#6366F1" radius={[0, 8, 8, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

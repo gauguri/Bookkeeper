@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
@@ -133,19 +134,28 @@ export default function PaymentsPage() {
   };
 
   return (
-    <section className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Payments</h1>
-        <p className="text-slate-600">Apply incoming payments to outstanding invoices.</p>
+    <section className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Payments</p>
+          <h1 className="text-3xl font-semibold">Cash application</h1>
+          <p className="text-muted">Match incoming payments to outstanding invoices.</p>
+        </div>
+        <button className="app-button" onClick={() => document.getElementById("payment-form")?.scrollIntoView()}>
+          <Plus className="h-4 w-4" /> Record payment
+        </button>
       </div>
 
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Record payment</h2>
+      <div id="payment-form" className="app-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Record payment</h2>
+          <span className="app-badge border-primary/30 bg-primary/10 text-primary">New receipt</span>
+        </div>
         <div className="grid gap-3 md:grid-cols-3">
           <select
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-select"
             value={form.customer_id}
             onChange={(event) => {
               setForm({ ...form, customer_id: event.target.value });
@@ -160,7 +170,7 @@ export default function PaymentsPage() {
             ))}
           </select>
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="number"
             min="0"
             step="0.01"
@@ -169,25 +179,25 @@ export default function PaymentsPage() {
             onChange={(event) => setForm({ ...form, amount: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={form.payment_date}
             onChange={(event) => setForm({ ...form, payment_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Method"
             value={form.method}
             onChange={(event) => setForm({ ...form, method: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Reference"
             value={form.reference}
             onChange={(event) => setForm({ ...form, reference: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Memo"
             value={form.memo}
             onChange={(event) => setForm({ ...form, memo: event.target.value })}
@@ -197,15 +207,15 @@ export default function PaymentsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Apply to invoices</h3>
-            <button className="text-sm text-slate-700" onClick={autoApply} disabled={!form.amount}>
+            <button className="app-button-ghost text-xs" onClick={autoApply} disabled={!form.amount}>
               Auto-apply
             </button>
           </div>
           {customerInvoices.length === 0 ? (
-            <p className="text-sm text-slate-500">Select a customer to see open invoices.</p>
+            <p className="text-sm text-muted">Select a customer to see open invoices.</p>
           ) : (
             <table className="min-w-full text-sm">
-              <thead className="text-left text-slate-500">
+              <thead className="text-left text-xs uppercase tracking-widest text-muted">
                 <tr>
                   <th className="py-2">Invoice</th>
                   <th>Balance</th>
@@ -214,18 +224,16 @@ export default function PaymentsPage() {
               </thead>
               <tbody>
                 {customerInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-t border-slate-100">
-                    <td className="py-2">{invoice.invoice_number}</td>
-                    <td>{currency(invoice.amount_due)}</td>
+                  <tr key={invoice.id} className="app-table-row border-t">
+                    <td className="py-2 font-medium">{invoice.invoice_number}</td>
+                    <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                     <td className="text-right">
                       <input
-                        className="border border-slate-300 rounded px-2 py-1 text-sm w-28 text-right"
+                        className="app-input w-28 text-right"
                         type="number"
                         min="0"
                         step="0.01"
-                        value={
-                          applications.find((app) => app.invoice_id === invoice.id)?.applied_amount ?? ""
-                        }
+                        value={applications.find((app) => app.invoice_id === invoice.id)?.applied_amount ?? ""}
                         onChange={(event) => updateApplication(invoice.id, event.target.value)}
                       />
                     </td>
@@ -234,41 +242,50 @@ export default function PaymentsPage() {
               </tbody>
             </table>
           )}
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-muted">
             Applied total: {currency(totalApplied)} / Payment amount: {currency(Number(form.amount || 0))}
           </div>
         </div>
 
         <div className="flex justify-end">
-          <button className="bg-slate-900 text-white rounded px-4 py-2 text-sm" onClick={submitPayment}>
+          <button className="app-button" onClick={submitPayment}>
             Record payment
           </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Recent payments</h2>
+      <div className="app-card p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Recent payments</h2>
+          <button className="app-button-ghost text-xs">Export CSV</button>
+        </div>
         <table className="min-w-full text-sm">
-          <thead className="text-left text-slate-500">
+          <thead className="text-left text-xs uppercase tracking-widest text-muted">
             <tr>
               <th className="py-2">Date</th>
               <th>Customer</th>
               <th>Method</th>
               <th className="text-right">Amount</th>
+              <th className="text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {payments.map((payment) => (
-              <tr key={payment.id} className="border-t border-slate-100">
+              <tr key={payment.id} className="app-table-row border-t">
                 <td className="py-2">{payment.payment_date}</td>
                 <td>{customers.find((customer) => customer.id === payment.customer_id)?.name ?? "-"}</td>
                 <td>{payment.method ?? "-"}</td>
-                <td className="text-right">{currency(payment.amount)}</td>
+                <td className="text-right tabular-nums">{currency(payment.amount)}</td>
+                <td className="text-right">
+                  <button className="app-button-ghost" aria-label="More">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </td>
               </tr>
             ))}
             {payments.length === 0 && (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-slate-500">
+                <td colSpan={5} className="py-10 text-center text-muted">
                   No payments yet.
                 </td>
               </tr>
@@ -276,6 +293,13 @@ export default function PaymentsPage() {
           </tbody>
         </table>
       </div>
+
+      <button
+        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
+        onClick={() => document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth" })}
+      >
+        <Plus className="h-4 w-4" /> Record
+      </button>
     </section>
   );
 }

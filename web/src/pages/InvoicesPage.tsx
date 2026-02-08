@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
@@ -42,6 +43,14 @@ const emptyLine: LineItem = {
   unit_price: "",
   discount: "0",
   tax_rate: "0"
+};
+
+const statusStyles: Record<string, string> = {
+  DRAFT: "border-border bg-secondary text-muted",
+  SENT: "border-primary/30 bg-primary/10 text-primary",
+  PARTIALLY_PAID: "border-warning/30 bg-warning/10 text-warning",
+  PAID: "border-success/30 bg-success/10 text-success",
+  VOID: "border-danger/30 bg-danger/10 text-danger"
 };
 
 const formatNumber = (value: string) => (value === "" ? 0 : Number(value));
@@ -185,19 +194,28 @@ export default function InvoicesPage() {
   };
 
   return (
-    <section className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Invoices</h1>
-        <p className="text-slate-600">Create invoices and track balances.</p>
+    <section className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Invoices</p>
+          <h1 className="text-3xl font-semibold">Invoice workflow</h1>
+          <p className="text-muted">Create, send, and monitor every invoice lifecycle.</p>
+        </div>
+        <button className="app-button" onClick={() => document.getElementById("invoice-form")?.scrollIntoView()}>
+          <Plus className="h-4 w-4" /> New invoice
+        </button>
       </div>
 
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Invoice list</h2>
-        <div className="grid gap-3 md:grid-cols-3">
+      <div className="app-card p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Invoice list</h2>
+          <button className="app-button-ghost text-xs">Export</button>
+        </div>
+        <div className="sticky top-0 z-10 mt-4 grid gap-3 bg-surface/95 pb-4 backdrop-blur md:grid-cols-3">
           <select
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-select"
             value={filters.status}
             onChange={(event) => setFilters({ ...filters, status: event.target.value })}
           >
@@ -209,7 +227,7 @@ export default function InvoicesPage() {
             <option value="VOID">Void</option>
           </select>
           <select
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-select"
             value={filters.customer_id}
             onChange={(event) => setFilters({ ...filters, customer_id: event.target.value })}
           >
@@ -221,19 +239,19 @@ export default function InvoicesPage() {
             ))}
           </select>
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={filters.start_date}
             onChange={(event) => setFilters({ ...filters, start_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={filters.end_date}
             onChange={(event) => setFilters({ ...filters, end_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="number"
             min="0"
             step="0.01"
@@ -242,7 +260,7 @@ export default function InvoicesPage() {
             onChange={(event) => setFilters({ ...filters, min_total: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="number"
             min="0"
             step="0.01"
@@ -251,7 +269,7 @@ export default function InvoicesPage() {
             onChange={(event) => setFilters({ ...filters, max_total: event.target.value })}
           />
           <button
-            className="bg-slate-900 text-white rounded px-3 py-2 text-sm"
+            className="app-button"
             onClick={async () => {
               try {
                 const data = await loadInvoices();
@@ -264,11 +282,11 @@ export default function InvoicesPage() {
             Apply filters
           </button>
         </div>
-        <div className="overflow-auto">
+        <div className="mt-4 overflow-auto">
           <table className="min-w-full text-sm">
-            <thead className="text-left text-slate-500">
+            <thead className="text-left text-xs uppercase tracking-widest text-muted">
               <tr>
-                <th className="py-2">Invoice</th>
+                <th className="py-3">Invoice</th>
                 <th>Customer</th>
                 <th>Status</th>
                 <th>Total</th>
@@ -278,23 +296,42 @@ export default function InvoicesPage() {
             </thead>
             <tbody>
               {filteredInvoices.map((invoice) => (
-                <tr key={invoice.id} className="border-t border-slate-100">
-                  <td className="py-2">{invoice.invoice_number}</td>
-                  <td>{invoice.customer_name}</td>
-                  <td>{invoice.status}</td>
-                  <td>{currency(invoice.total)}</td>
-                  <td>{currency(invoice.amount_due)}</td>
+                <tr key={invoice.id} className="app-table-row border-t">
+                  <td className="py-3 font-medium">{invoice.invoice_number}</td>
+                  <td className="text-muted">{invoice.customer_name}</td>
+                  <td>
+                    <span className={`app-badge ${statusStyles[invoice.status] ?? "border-border bg-secondary"}`}>
+                      {invoice.status.replace("_", " ")}
+                    </span>
+                  </td>
+                  <td className="text-muted tabular-nums">{currency(invoice.total)}</td>
+                  <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                   <td className="text-right">
-                    <Link className="text-slate-700" to={`/sales/invoices/${invoice.id}`}>
-                      View
-                    </Link>
+                    <div className="inline-flex items-center gap-2">
+                      <Link className="app-button-ghost" to={`/sales/invoices/${invoice.id}`}>
+                        View
+                      </Link>
+                      <button className="app-button-ghost" aria-label="More actions">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {filteredInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-slate-500">
-                    No invoices found.
+                  <td colSpan={6} className="py-10 text-center text-muted">
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+                      <div className="h-14 w-14 rounded-2xl bg-secondary" />
+                      <p className="font-semibold">No invoices found</p>
+                      <p className="text-sm text-muted">Try adjusting your filters or create a new invoice.</p>
+                      <button
+                        className="app-button"
+                        onClick={() => document.getElementById("invoice-form")?.scrollIntoView()}
+                      >
+                        Create invoice
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -303,11 +340,14 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">Create invoice</h2>
+      <div id="invoice-form" className="app-card p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold">Create invoice</h2>
+          <span className="app-badge border-primary/30 bg-primary/10 text-primary">New document</span>
+        </div>
         <div className="grid gap-3 md:grid-cols-3">
           <select
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-select"
             value={form.customer_id}
             onChange={(event) => setForm({ ...form, customer_id: event.target.value })}
           >
@@ -319,13 +359,13 @@ export default function InvoicesPage() {
             ))}
           </select>
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={form.issue_date}
             onChange={(event) => setForm({ ...form, issue_date: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             type="date"
             value={form.due_date}
             onChange={(event) => setForm({ ...form, due_date: event.target.value })}
@@ -333,13 +373,13 @@ export default function InvoicesPage() {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Notes"
             value={form.notes}
             onChange={(event) => setForm({ ...form, notes: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Terms"
             value={form.terms}
             onChange={(event) => setForm({ ...form, terms: event.target.value })}
@@ -347,7 +387,7 @@ export default function InvoicesPage() {
         </div>
 
         <div className="space-y-3">
-          <div className="grid grid-cols-[1.2fr_1.2fr_0.6fr_0.7fr_0.7fr_0.6fr_auto] gap-2 text-xs text-slate-500">
+          <div className="grid grid-cols-[1.2fr_1.2fr_0.6fr_0.7fr_0.7fr_0.6fr_auto] gap-2 text-xs uppercase tracking-widest text-muted">
             <span>Item</span>
             <span>Description</span>
             <span>Qty</span>
@@ -362,7 +402,7 @@ export default function InvoicesPage() {
               className="grid grid-cols-[1.2fr_1.2fr_0.6fr_0.7fr_0.7fr_0.6fr_auto] gap-2"
             >
               <select
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-select"
                 value={line.item_id ?? ""}
                 onChange={(event) => handleItemChange(index, event.target.value)}
               >
@@ -374,20 +414,20 @@ export default function InvoicesPage() {
                 ))}
               </select>
               <input
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-input"
                 placeholder="Description"
                 value={line.description}
                 onChange={(event) => updateLine(index, { description: event.target.value })}
               />
               <input
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-input"
                 type="number"
                 min="0"
                 value={line.quantity}
                 onChange={(event) => updateLine(index, { quantity: event.target.value })}
               />
               <input
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-input"
                 type="number"
                 min="0"
                 step="0.01"
@@ -395,7 +435,7 @@ export default function InvoicesPage() {
                 onChange={(event) => updateLine(index, { unit_price: event.target.value })}
               />
               <input
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-input"
                 type="number"
                 min="0"
                 step="0.01"
@@ -403,7 +443,7 @@ export default function InvoicesPage() {
                 onChange={(event) => updateLine(index, { discount: event.target.value })}
               />
               <input
-                className="border border-slate-300 rounded px-2 py-1 text-sm"
+                className="app-input"
                 type="number"
                 min="0"
                 max="1"
@@ -411,29 +451,36 @@ export default function InvoicesPage() {
                 value={line.tax_rate}
                 onChange={(event) => updateLine(index, { tax_rate: event.target.value })}
               />
-              <button className="text-rose-600 text-sm" onClick={() => removeLine(index)} disabled={lines.length === 1}>
+              <button className="app-button-ghost text-danger" onClick={() => removeLine(index)} disabled={lines.length === 1}>
                 Remove
               </button>
             </div>
           ))}
           <div>
-            <button className="text-sm text-slate-700" onClick={addLine}>
+            <button className="app-button-ghost text-sm" onClick={addLine}>
               + Add line
             </button>
           </div>
         </div>
 
-        <div className="flex justify-between flex-wrap gap-4">
-          <div className="text-sm text-slate-600">
+        <div className="flex flex-wrap justify-between gap-4">
+          <div className="text-sm text-muted">
             <div>Subtotal: {currency(totals.subtotal)}</div>
             <div>Tax: {currency(totals.tax)}</div>
-            <div className="font-semibold text-slate-900">Total: {currency(totals.total)}</div>
+            <div className="font-semibold text-foreground">Total: {currency(totals.total)}</div>
           </div>
-          <button className="bg-slate-900 text-white rounded px-4 py-2 text-sm" onClick={createInvoice}>
+          <button className="app-button" onClick={createInvoice}>
             Create invoice
           </button>
         </div>
       </div>
+
+      <button
+        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
+        onClick={() => document.getElementById("invoice-form")?.scrollIntoView({ behavior: "smooth" })}
+      >
+        <Plus className="h-4 w-4" /> Create
+      </button>
     </section>
   );
 }

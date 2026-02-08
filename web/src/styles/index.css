@@ -2,6 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: "Inter", system-ui, sans-serif;
+@layer base {
+  :root {
+    --background: 220 33% 98%;
+    --foreground: 222 47% 11%;
+    --surface: 0 0% 100%;
+    --surface-strong: 220 20% 96%;
+    --border: 220 15% 88%;
+    --primary: 222 84% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 10% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 52%;
+    --warning-foreground: 20 14% 11%;
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 100%;
+    --muted: 215 16% 47%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 96%;
+    --surface: 222 47% 9%;
+    --surface-strong: 222 40% 12%;
+    --border: 220 14% 20%;
+    --primary: 222 89% 70%;
+    --primary-foreground: 222 47% 10%;
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 210 40% 96%;
+    --success: 142 70% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 40 92% 60%;
+    --warning-foreground: 20 14% 11%;
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 100%;
+    --muted: 215 20% 65%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  * {
+    @apply border-border;
+  }
+}
+
+@layer components {
+  .app-card {
+    @apply rounded-2xl border bg-surface shadow-card;
+  }
+
+  .app-card-muted {
+    @apply rounded-2xl border bg-surface-strong/80 shadow-soft;
+  }
+
+  .app-input {
+    @apply w-full rounded-xl border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .app-select {
+    @apply w-full rounded-xl border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .app-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-soft transition hover:-translate-y-0.5 hover:shadow-glow focus:outline-none focus:ring-2 focus:ring-primary/50;
+  }
+
+  .app-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition hover:-translate-y-0.5 hover:shadow-soft;
+  }
+
+  .app-button-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-foreground transition hover:bg-secondary;
+  }
+
+  .app-badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .app-table-row {
+    @apply transition hover:bg-secondary/70;
+  }
+
+  .app-skeleton {
+    @apply relative overflow-hidden rounded-xl bg-secondary;
+  }
+
+  .app-skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-[shimmer_1.6s_infinite] bg-gradient-to-r from-transparent via-white/50 to-transparent;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }

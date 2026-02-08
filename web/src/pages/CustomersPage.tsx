@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
 
 type Customer = {
@@ -105,36 +106,38 @@ export default function CustomersPage() {
   };
 
   return (
-    <section className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Customers</h1>
-        <p className="text-slate-600">Create and manage customer profiles.</p>
+    <section className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Customers</p>
+          <h1 className="text-3xl font-semibold">Customer ledger</h1>
+          <p className="text-muted">Create, segment, and prioritize your best accounts.</p>
+        </div>
+        <button className="app-button" onClick={() => document.getElementById("customer-form")?.scrollIntoView()}>
+          <Plus className="h-4 w-4" /> New customer
+        </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
+      <div className="app-card p-6">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 bg-surface/95 pb-4 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-2">
             <input
-              className="border border-slate-300 rounded px-3 py-2 text-sm"
+              className="app-input w-60"
               placeholder="Search customers"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <button
-              className="bg-slate-900 text-white rounded px-3 py-2 text-sm"
-              onClick={loadCustomers}
-              disabled={loading}
-            >
+            <button className="app-button-secondary" onClick={loadCustomers} disabled={loading}>
               Search
             </button>
           </div>
-          {error && <p className="text-sm text-rose-600">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
         </div>
-        <div className="overflow-auto">
+        <div className="mt-4 overflow-auto">
           <table className="min-w-full text-sm">
-            <thead className="text-left text-slate-500">
+            <thead className="text-left text-xs uppercase tracking-widest text-muted">
               <tr>
-                <th className="py-2">Name</th>
+                <th className="py-3">Name</th>
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Status</th>
@@ -143,37 +146,54 @@ export default function CustomersPage() {
             </thead>
             <tbody>
               {filtered.map((customer) => (
-                <tr key={customer.id} className="border-t border-slate-100">
-                  <td className="py-2">{customer.name}</td>
-                  <td>{customer.email ?? "-"}</td>
-                  <td>{customer.phone ?? "-"}</td>
+                <tr key={customer.id} className="app-table-row border-t">
+                  <td className="py-3 font-medium text-foreground">{customer.name}</td>
+                  <td className="text-muted">{customer.email ?? "-"}</td>
+                  <td className="text-muted">{customer.phone ?? "-"}</td>
                   <td>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs ${
-                        customer.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                      className={`app-badge ${
+                        customer.is_active
+                          ? "border-success/30 bg-success/10 text-success"
+                          : "border-border bg-secondary text-muted"
                       }`}
                     >
                       {customer.is_active ? "Active" : "Archived"}
                     </span>
                   </td>
-                  <td className="text-right space-x-2">
-                    <button className="text-slate-700 text-sm" onClick={() => startEdit(customer)}>
-                      Edit
-                    </button>
-                    <button
-                      className="text-rose-600 text-sm"
-                      onClick={() => archiveCustomer(customer.id)}
-                      disabled={!customer.is_active}
-                    >
-                      Archive
-                    </button>
+                  <td className="text-right">
+                    <div className="inline-flex items-center gap-2">
+                      <button className="app-button-ghost" onClick={() => startEdit(customer)}>
+                        Edit
+                      </button>
+                      <button
+                        className="app-button-ghost text-danger"
+                        onClick={() => archiveCustomer(customer.id)}
+                        disabled={!customer.is_active}
+                      >
+                        Archive
+                      </button>
+                      <button className="app-button-ghost" aria-label="More actions">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {filtered.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={5} className="py-4 text-center text-slate-500">
-                    No customers found.
+                  <td colSpan={5} className="py-10 text-center text-muted">
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+                      <div className="h-14 w-14 rounded-2xl bg-secondary" />
+                      <p className="font-semibold">No customers found</p>
+                      <p className="text-sm text-muted">Create a customer to start sending invoices.</p>
+                      <button
+                        className="app-button"
+                        onClick={() => document.getElementById("customer-form")?.scrollIntoView()}
+                      >
+                        Create customer
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -182,48 +202,51 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-4">
-        <h2 className="text-xl font-semibold">{editingId ? "Edit customer" : "New customer"}</h2>
+      <div id="customer-form" className="app-card p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold">{editingId ? "Edit customer" : "New customer"}</h2>
+          <span className="app-badge border-primary/30 bg-primary/10 text-primary">Customer profile</span>
+        </div>
         <div className="grid gap-4 md:grid-cols-2">
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Name *"
             value={form.name}
             onChange={(event) => setForm({ ...form, name: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Email"
             value={form.email}
             onChange={(event) => setForm({ ...form, email: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Phone"
             value={form.phone}
             onChange={(event) => setForm({ ...form, phone: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Billing address"
             value={form.billing_address}
             onChange={(event) => setForm({ ...form, billing_address: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Shipping address"
             value={form.shipping_address}
             onChange={(event) => setForm({ ...form, shipping_address: event.target.value })}
           />
           <input
-            className="border border-slate-300 rounded px-3 py-2 text-sm"
+            className="app-input"
             placeholder="Notes"
             value={form.notes}
             onChange={(event) => setForm({ ...form, notes: event.target.value })}
           />
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-600">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted">
             <input
               type="checkbox"
               checked={form.is_active}
@@ -234,7 +257,7 @@ export default function CustomersPage() {
           <div className="flex items-center gap-2">
             {editingId && (
               <button
-                className="border border-slate-300 rounded px-3 py-2 text-sm"
+                className="app-button-secondary"
                 onClick={() => {
                   setEditingId(null);
                   setForm(emptyForm);
@@ -243,12 +266,19 @@ export default function CustomersPage() {
                 Cancel
               </button>
             )}
-            <button className="bg-slate-900 text-white rounded px-4 py-2 text-sm" onClick={handleSubmit}>
+            <button className="app-button" onClick={handleSubmit}>
               {editingId ? "Save changes" : "Create customer"}
             </button>
           </div>
         </div>
       </div>
+
+      <button
+        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
+        onClick={() => document.getElementById("customer-form")?.scrollIntoView({ behavior: "smooth" })}
+      >
+        <Plus className="h-4 w-4" /> Create
+      </button>
     </section>
   );
 }

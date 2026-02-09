@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Area,
@@ -9,6 +10,7 @@ import {
   YAxis
 } from "recharts";
 import { ArrowUpRight } from "lucide-react";
+import { apiFetch } from "../api";
 
 const cards = [
   { title: "Customers", description: "Manage customer profiles and contacts.", to: "/sales/customers" },
@@ -18,24 +20,110 @@ const cards = [
   { title: "Reports", description: "Monitor revenue and receivables.", to: "/sales/reports" }
 ];
 
-const stats = [
-  { label: "Total Revenue", value: "$1.28M", change: "+12.4%" },
-  { label: "Outstanding AR", value: "$84.2K", change: "-4.8%" },
-  { label: "Paid This Month", value: "$312K", change: "+18.1%" },
-  { label: "Open Invoices", value: "142", change: "+6" }
-];
+type RevenueTrendPoint = {
+  month: string;
+  value: number;
+};
 
-const revenueData = [
-  { month: "Jan", value: 120 },
-  { month: "Feb", value: 164 },
-  { month: "Mar", value: 142 },
-  { month: "Apr", value: 188 },
-  { month: "May", value: 210 },
-  { month: "Jun", value: 196 },
-  { month: "Jul", value: 248 }
-];
+type RevenueDashboardResponse = {
+  total_revenue_ytd: number;
+  outstanding_ar: number;
+  paid_this_month: number;
+  open_invoices_count: number;
+  revenue_trend: RevenueTrendPoint[];
+};
+
+const formatCurrencyCompact = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(value);
+
+const formatNumberCompact = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 0
+  }).format(value);
+
+const formatMonthLabel = (value: string) => {
+  const date = new Date(`${value}-01T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString("en-US", { month: "short" });
+};
 
 export default function SalesLanding() {
+  const [metrics, setMetrics] = useState<RevenueDashboardResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+    const loadMetrics = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const data = await apiFetch<RevenueDashboardResponse>("/dashboard/revenue");
+        if (!isActive) {
+          return;
+        }
+        setMetrics(data);
+      } catch (err) {
+        console.error(err);
+        if (!isActive) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Unable to load dashboard metrics.");
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+    loadMetrics();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const stats = useMemo(
+    () => [
+      {
+        label: "Total Revenue",
+        value: formatCurrencyCompact(metrics?.total_revenue_ytd ?? 0),
+        helper: "Year to date"
+      },
+      {
+        label: "Outstanding AR",
+        value: formatCurrencyCompact(metrics?.outstanding_ar ?? 0),
+        helper: "Open receivables"
+      },
+      {
+        label: "Paid This Month",
+        value: formatCurrencyCompact(metrics?.paid_this_month ?? 0),
+        helper: "Cash received"
+      },
+      {
+        label: "Open Invoices",
+        value: formatNumberCompact(metrics?.open_invoices_count ?? 0),
+        helper: "Unpaid invoices"
+      }
+    ],
+    [metrics]
+  );
+
+  const revenueData = useMemo(
+    () =>
+      (metrics?.revenue_trend ?? []).map((point) => ({
+        month: formatMonthLabel(point.month),
+        value: point.value
+      })),
+    [metrics]
+  );
+
   return (
     <section className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -47,6 +135,12 @@ export default function SalesLanding() {
         <button className="app-button">Create invoice</button>
       </div>
 
+      {error ? (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          {error} Please try again.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-4">
         {stats.map((stat, index) => (
           <div
@@ -57,9 +151,13 @@ export default function SalesLanding() {
           >
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{stat.label}</p>
             <div className="mt-3 flex items-end justify-between">
-              <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>
-              <span className="text-xs font-semibold text-success">{stat.change}</span>
+              {isLoading ? (
+                <div className="h-7 w-24 animate-pulse rounded bg-slate-200" />
+              ) : (
+                <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>
+              )}
             </div>
+            <p className="mt-2 text-xs text-muted">{stat.helper}</p>
           </div>
         ))}
       </div>
@@ -74,21 +172,25 @@ export default function SalesLanding() {
             <button className="app-button-secondary text-xs">View report</button>
           </div>
           <div className="mt-6 h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueData}>
-                <defs>
-                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366F1" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
-                <Area type="monotone" dataKey="value" stroke="#6366F1" fill="url(#revenueGradient)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {isLoading ? (
+              <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenueData}>
+                  <defs>
+                    <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366F1" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} />
+                  <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
+                  <Area type="monotone" dataKey="value" stroke="#6366F1" fill="url(#revenueGradient)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import health, sales
+from .routers import dashboard, health, sales
 
 app = FastAPI(title="Bookkeeper API")
 
@@ -15,6 +15,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(sales.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/")

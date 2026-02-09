@@ -55,6 +55,36 @@ const statusStyles: Record<string, string> = {
 
 const formatNumber = (value: string) => (value === "" ? 0 : Number(value));
 
+const parseTermsDays = (terms: string) => {
+  if (!terms.trim()) {
+    return null;
+  }
+  const normalized = terms.trim().toLowerCase();
+  if (normalized === "due on receipt") {
+    return 0;
+  }
+  const netMatch = normalized.match(/net\s*(\d+)/);
+  if (netMatch) {
+    return Number(netMatch[1]);
+  }
+  return null;
+};
+
+const formatDateForInput = (date: Date) => {
+  const timezoneAdjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return timezoneAdjusted.toISOString().slice(0, 10);
+};
+
+const addDaysToDateString = (dateString: string, days: number) => {
+  const [year, month, day] = dateString.split("-").map(Number);
+  if (!year || !month || !day) {
+    return dateString;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
 export default function InvoicesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -70,11 +100,12 @@ export default function InvoicesPage() {
   });
   const [form, setForm] = useState({
     customer_id: "",
-    issue_date: "",
+    issue_date: formatDateForInput(new Date()),
     due_date: "",
     notes: "",
     terms: ""
   });
+  const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([{ ...emptyLine }]);
 
   const loadInvoices = async (filtersOverride = filters) => {
@@ -159,9 +190,53 @@ export default function InvoicesPage() {
     );
   }, [lines]);
 
+  const dueDateInvalid =
+    Boolean(form.issue_date) && Boolean(form.due_date) && form.due_date < form.issue_date;
+
+  const handleIssueDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextIssueDate = event.target.value;
+    const termsDays = parseTermsDays(form.terms);
+    let nextDueDate = form.due_date;
+    let nextDueAuto = dueDateWasAuto;
+
+    if (nextIssueDate && termsDays !== null && (dueDateWasAuto || !form.due_date)) {
+      nextDueDate = addDaysToDateString(nextIssueDate, termsDays);
+      nextDueAuto = true;
+    }
+
+    setForm({ ...form, issue_date: nextIssueDate, due_date: nextDueDate });
+    setDueDateWasAuto(nextDueAuto);
+  };
+
+  const handleDueDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({ ...form, due_date: event.target.value });
+    setDueDateWasAuto(false);
+  };
+
+  const handleTermsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextTerms = event.target.value;
+    const termsDays = parseTermsDays(nextTerms);
+    let nextDueDate = form.due_date;
+    let nextDueAuto = dueDateWasAuto;
+
+    if (!nextTerms.trim()) {
+      nextDueAuto = false;
+    } else if (termsDays !== null && form.issue_date && (dueDateWasAuto || !form.due_date)) {
+      nextDueDate = addDaysToDateString(form.issue_date, termsDays);
+      nextDueAuto = true;
+    }
+
+    setForm({ ...form, terms: nextTerms, due_date: nextDueDate });
+    setDueDateWasAuto(nextDueAuto);
+  };
+
   const createInvoice = async () => {
     if (!form.customer_id || !form.issue_date || !form.due_date) {
       setError("Customer, issue date, and due date are required.");
+      return;
+    }
+    if (dueDateInvalid) {
+      setError("Due date cannot be earlier than the invoice date.");
       return;
     }
     const payload = {
@@ -184,7 +259,14 @@ export default function InvoicesPage() {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      setForm({ customer_id: "", issue_date: "", due_date: "", notes: "", terms: "" });
+      setForm({
+        customer_id: "",
+        issue_date: formatDateForInput(new Date()),
+        due_date: "",
+        notes: "",
+        terms: ""
+      });
+      setDueDateWasAuto(false);
       setLines([{ ...emptyLine }]);
       setError("");
       loadData();
@@ -358,18 +440,27 @@ export default function InvoicesPage() {
               </option>
             ))}
           </select>
-          <input
-            className="app-input"
-            type="date"
-            value={form.issue_date}
-            onChange={(event) => setForm({ ...form, issue_date: event.target.value })}
-          />
-          <input
-            className="app-input"
-            type="date"
-            value={form.due_date}
-            onChange={(event) => setForm({ ...form, due_date: event.target.value })}
-          />
+          <label className="space-y-2 text-sm font-medium">
+            <span className="text-muted">Invoice date</span>
+            <input
+              className="app-input"
+              type="date"
+              value={form.issue_date}
+              onChange={handleIssueDateChange}
+              placeholder="Invoice date"
+            />
+          </label>
+          <label className="space-y-2 text-sm font-medium">
+            <span className="text-muted">Due date</span>
+            <input
+              className="app-input"
+              type="date"
+              value={form.due_date}
+              onChange={handleDueDateChange}
+              placeholder="Due date"
+            />
+            {dueDateInvalid && <span className="text-xs text-danger">Due date must be on or after invoice date.</span>}
+          </label>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <input
@@ -382,7 +473,7 @@ export default function InvoicesPage() {
             className="app-input"
             placeholder="Terms"
             value={form.terms}
-            onChange={(event) => setForm({ ...form, terms: event.target.value })}
+            onChange={handleTermsChange}
           />
         </div>
 
@@ -469,7 +560,7 @@ export default function InvoicesPage() {
             <div>Tax: {currency(totals.tax)}</div>
             <div className="font-semibold text-foreground">Total: {currency(totals.total)}</div>
           </div>
-          <button className="app-button" onClick={createInvoice}>
+          <button className="app-button" onClick={createInvoice} disabled={dueDateInvalid}>
             Create invoice
           </button>
         </div>

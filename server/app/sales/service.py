@@ -13,6 +13,7 @@ from app.sales.calculations import (
     calculate_line_totals,
     validate_payment_applications,
 )
+from app.suppliers.service import get_supplier_link
 
 
 def get_next_invoice_number(db: Session) -> str:
@@ -64,6 +65,8 @@ def build_invoice_lines(
         item: Optional[Item] = None
         description = line.get("description")
         unit_price = line.get("unit_price")
+        unit_cost = line.get("unit_cost")
+        supplier_id = line.get("supplier_id")
         if line.get("item_id"):
             item = db.query(Item).filter(Item.id == line["item_id"]).first()
             if not item:
@@ -72,6 +75,18 @@ def build_invoice_lines(
                 description = item.name
             if unit_price is None:
                 unit_price = item.unit_price
+            if supplier_id:
+                supplier_link = get_supplier_link(db, item.id, supplier_id)
+                if not supplier_link:
+                    raise ValueError("Supplier link not found for item.")
+                if unit_cost is None:
+                    unit_cost = supplier_link.landed_cost
+            elif unit_cost is None:
+                supplier_link = get_supplier_link(db, item.id, None)
+                if supplier_link:
+                    unit_cost = supplier_link.landed_cost
+        elif supplier_id:
+            raise ValueError("Supplier cannot be set without an item.")
         if unit_price is None:
             raise ValueError("Unit price is required.")
         quantity = Decimal(line["quantity"])
@@ -91,6 +106,8 @@ def build_invoice_lines(
                 description=description,
                 quantity=quantity,
                 unit_price=unit_price,
+                unit_cost=Decimal(unit_cost) if unit_cost is not None else None,
+                supplier_id=supplier_id,
                 discount=discount,
                 tax_rate=tax_rate,
                 line_total=line_total,

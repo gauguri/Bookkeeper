@@ -65,6 +65,9 @@ class ItemUpdate(BaseModel):
 class ItemResponse(ItemBase):
     id: int
     created_at: datetime
+    preferred_supplier_id: Optional[int] = None
+    preferred_supplier_name: Optional[str] = None
+    preferred_landed_cost: Optional[DecimalValue] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -74,6 +77,8 @@ class InvoiceLineBase(BaseModel):
     description: Optional[str] = None
     quantity: DecimalValue = Field(..., gt=0)
     unit_price: DecimalValue = Field(..., ge=0)
+    unit_cost: Optional[DecimalValue] = Field(None, ge=0)
+    supplier_id: Optional[int] = None
     discount: DecimalValue = Field(0, ge=0)
     tax_rate: TaxRateValue = Field(0, ge=0, le=1)
 

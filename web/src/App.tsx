@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   Moon,
   Sun,
+  Truck,
   Users
 } from "lucide-react";
 import CustomersPage from "./pages/CustomersPage";
@@ -19,6 +20,7 @@ import PaymentsPage from "./pages/PaymentsPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import ReportsPage from "./pages/ReportsPage";
 import SalesLanding from "./pages/SalesLanding";
+import SuppliersPage from "./pages/SuppliersPage";
 
 const navSections = [
   {
@@ -40,6 +42,10 @@ const navSections = [
       { label: "Chart of Accounts", to: "/accounts", icon: Layers },
       { label: "Import", to: "/import", icon: ClipboardList }
     ]
+  },
+  {
+    title: "Purchasing",
+    items: [{ label: "Suppliers", to: "/purchasing/suppliers", icon: Truck }]
   }
 ];
 
@@ -206,6 +212,7 @@ export default function App() {
         <Route path="/banking" element={<PlaceholderPage title="Banking" />} />
         <Route path="/accounts" element={<PlaceholderPage title="Chart of Accounts" />} />
         <Route path="/import" element={<PlaceholderPage title="Import" />} />
+        <Route path="/purchasing/suppliers" element={<SuppliersPage />} />
       </Routes>
     </Layout>
   );

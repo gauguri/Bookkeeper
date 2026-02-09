@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Column,
@@ -168,6 +169,21 @@ class Customer(Base):
     payments = relationship("Payment", back_populates="customer")
 
 
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    address = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    supplier_items = relationship("SupplierItem", back_populates="supplier", cascade="all, delete-orphan")
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -182,6 +198,59 @@ class Item(Base):
 
     income_account = relationship("Account")
     invoice_lines = relationship("InvoiceLine", back_populates="item")
+    supplier_items = relationship("SupplierItem", back_populates="item", cascade="all, delete-orphan")
+
+    @property
+    def preferred_supplier_link(self):
+        return next((link for link in self.supplier_items if link.is_preferred), None)
+
+    @property
+    def preferred_supplier_id(self):
+        link = self.preferred_supplier_link
+        return link.supplier_id if link else None
+
+    @property
+    def preferred_supplier_name(self):
+        link = self.preferred_supplier_link
+        if link and link.supplier:
+            return link.supplier.name
+        return None
+
+    @property
+    def preferred_landed_cost(self):
+        link = self.preferred_supplier_link
+        return link.landed_cost if link else None
+
+
+class SupplierItem(Base):
+    __tablename__ = "supplier_items"
+
+    id = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    supplier_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    freight_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    tariff_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    is_preferred = Column(Boolean, nullable=False, default=False)
+    supplier_sku = Column(String(100), nullable=True)
+    lead_time_days = Column(Integer, nullable=True)
+    min_order_qty = Column(Numeric(14, 2), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    supplier = relationship("Supplier", back_populates="supplier_items")
+    item = relationship("Item", back_populates="supplier_items")
+
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "item_id", name="uq_supplier_item"),
+    )
+
+    @property
+    def landed_cost(self):
+        return (
+            Decimal(self.supplier_cost or 0)
+            + Decimal(self.freight_cost or 0)
+            + Decimal(self.tariff_cost or 0)
+        )
 
 
 class Invoice(Base):
@@ -220,12 +289,15 @@ class InvoiceLine(Base):
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(14, 2), nullable=False, default=1)
     unit_price = Column(Numeric(14, 2), nullable=False)
+    unit_cost = Column(Numeric(14, 2), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     discount = Column(Numeric(14, 2), nullable=False, default=0)
     tax_rate = Column(Numeric(5, 4), nullable=False, default=0)
     line_total = Column(Numeric(14, 2), nullable=False, default=0)
 
     invoice = relationship("Invoice", back_populates="lines")
     item = relationship("Item", back_populates="invoice_lines")
+    supplier = relationship("Supplier")
 
 
 class Payment(Base):

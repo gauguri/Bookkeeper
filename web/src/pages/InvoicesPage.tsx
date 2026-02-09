@@ -13,6 +13,9 @@ type Item = {
   id: number;
   name: string;
   unit_price: number;
+  preferred_supplier_id?: number | null;
+  preferred_supplier_name?: string | null;
+  preferred_landed_cost?: number | null;
 };
 
 type InvoiceList = {
@@ -32,8 +35,19 @@ type LineItem = {
   description: string;
   quantity: string;
   unit_price: string;
+  unit_cost: string;
+  supplier_id?: number;
+  override_cost: boolean;
   discount: string;
   tax_rate: string;
+};
+
+type SupplierLink = {
+  supplier_id: number;
+  item_id: number;
+  supplier_name: string;
+  landed_cost: number;
+  is_preferred: boolean;
 };
 
 const emptyLine: LineItem = {
@@ -41,6 +55,9 @@ const emptyLine: LineItem = {
   description: "",
   quantity: "1",
   unit_price: "",
+  unit_cost: "",
+  supplier_id: undefined,
+  override_cost: false,
   discount: "0",
   tax_rate: "0"
 };
@@ -107,6 +124,7 @@ export default function InvoicesPage() {
   });
   const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([{ ...emptyLine }]);
+  const [supplierOptions, setSupplierOptions] = useState<Record<number, SupplierLink[]>>({});
 
   const loadInvoices = async (filtersOverride = filters) => {
     const params = new URLSearchParams();
@@ -162,13 +180,68 @@ export default function InvoicesPage() {
     setLines((prev) => prev.map((line, idx) => (idx === index ? { ...line, ...updated } : line)));
   };
 
-  const handleItemChange = (index: number, itemId: string) => {
+  const loadSuppliersForItem = async (itemId: number) => {
+    if (supplierOptions[itemId]) {
+      return supplierOptions[itemId];
+    }
+    const data = await apiFetch<SupplierLink[]>(`/items/${itemId}/suppliers`);
+    setSupplierOptions((prev) => ({ ...prev, [itemId]: data }));
+    return data;
+  };
+
+  const resolveLineCost = (itemId: number, supplierId?: number) => {
+    const suppliers = supplierOptions[itemId] ?? [];
+    const matched = suppliers.find((link) => link.supplier_id === supplierId);
+    if (matched) {
+      return matched.landed_cost.toString();
+    }
+    const preferred = suppliers.find((link) => link.is_preferred);
+    if (preferred) {
+      return preferred.landed_cost.toString();
+    }
+    const item = items.find((entry) => entry.id === itemId);
+    if (item?.preferred_landed_cost != null) {
+      return item.preferred_landed_cost.toString();
+    }
+    return "";
+  };
+
+  const handleItemChange = async (index: number, itemId: string) => {
     const item = items.find((entry) => entry.id === Number(itemId));
+    if (!item) {
+      updateLine(index, {
+        item_id: undefined,
+        description: "",
+        unit_price: "",
+        unit_cost: "",
+        supplier_id: undefined,
+        override_cost: false
+      });
+      return;
+    }
     updateLine(index, {
-      item_id: item ? item.id : undefined,
-      description: item ? item.name : "",
-      unit_price: item ? item.unit_price.toString() : ""
+      item_id: item.id,
+      description: item.name,
+      unit_price: item.unit_price.toString(),
+      supplier_id: item.preferred_supplier_id ?? undefined,
+      unit_cost: item.preferred_landed_cost != null ? item.preferred_landed_cost.toString() : "",
+      override_cost: false
     });
+    try {
+      const suppliersForItem = await loadSuppliersForItem(item.id);
+      if (suppliersForItem.length > 0) {
+        const preferred = suppliersForItem.find((link) => link.is_preferred);
+        const supplierId = item.preferred_supplier_id ?? preferred?.supplier_id;
+        if (supplierId) {
+          updateLine(index, {
+            supplier_id: supplierId,
+            unit_cost: suppliersForItem.find((link) => link.supplier_id === supplierId)?.landed_cost.toString() ?? ""
+          });
+        }
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   const totals = useMemo(() => {
@@ -250,6 +323,8 @@ export default function InvoicesPage() {
         description: line.description || null,
         quantity: Number(line.quantity),
         unit_price: Number(line.unit_price),
+        unit_cost: line.unit_cost ? Number(line.unit_cost) : null,
+        supplier_id: line.supplier_id ?? null,
         discount: Number(line.discount || 0),
         tax_rate: Number(line.tax_rate || 0)
       }))
@@ -478,11 +553,13 @@ export default function InvoicesPage() {
         </div>
 
         <div className="space-y-3">
-          <div className="grid grid-cols-[1.2fr_1.2fr_0.6fr_0.7fr_0.7fr_0.6fr_auto] gap-2 text-xs uppercase tracking-widest text-muted">
+          <div className="grid grid-cols-[1.1fr_1fr_1.1fr_0.5fr_0.6fr_0.6fr_0.6fr_0.6fr_auto] gap-2 text-xs uppercase tracking-widest text-muted">
             <span>Item</span>
+            <span>Supplier</span>
             <span>Description</span>
             <span>Qty</span>
             <span>Unit price</span>
+            <span>Cost</span>
             <span>Discount</span>
             <span>Tax rate</span>
             <span />
@@ -490,7 +567,7 @@ export default function InvoicesPage() {
           {lines.map((line, index) => (
             <div
               key={index}
-              className="grid grid-cols-[1.2fr_1.2fr_0.6fr_0.7fr_0.7fr_0.6fr_auto] gap-2"
+              className="grid grid-cols-[1.1fr_1fr_1.1fr_0.5fr_0.6fr_0.6fr_0.6fr_0.6fr_auto] gap-2"
             >
               <select
                 className="app-select"
@@ -501,6 +578,31 @@ export default function InvoicesPage() {
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="app-select"
+                value={line.supplier_id ?? ""}
+                onChange={(event) => {
+                  const supplierId = event.target.value ? Number(event.target.value) : undefined;
+                  if (!line.item_id) {
+                    return;
+                  }
+                  const nextCost = line.override_cost
+                    ? line.unit_cost
+                    : resolveLineCost(line.item_id, supplierId);
+                  updateLine(index, {
+                    supplier_id: supplierId,
+                    unit_cost: nextCost
+                  });
+                }}
+                disabled={!line.item_id || (supplierOptions[line.item_id]?.length ?? 0) === 0}
+              >
+                <option value="">Preferred</option>
+                {(line.item_id ? supplierOptions[line.item_id] ?? [] : []).map((supplier) => (
+                  <option key={supplier.supplier_id} value={supplier.supplier_id}>
+                    {supplier.supplier_name}
                   </option>
                 ))}
               </select>
@@ -525,6 +627,35 @@ export default function InvoicesPage() {
                 value={line.unit_price}
                 onChange={(event) => updateLine(index, { unit_price: event.target.value })}
               />
+              <div className="space-y-1">
+                <input
+                  className="app-input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={line.unit_cost}
+                  disabled={!line.override_cost}
+                  onChange={(event) => updateLine(index, { unit_cost: event.target.value })}
+                />
+                <label className="flex items-center gap-1 text-xs text-muted">
+                  <input
+                    type="checkbox"
+                    checked={line.override_cost}
+                    onChange={(event) => {
+                      const override = event.target.checked;
+                      const nextCost =
+                        !override && line.item_id
+                          ? resolveLineCost(line.item_id, line.supplier_id)
+                          : line.unit_cost;
+                      updateLine(index, {
+                        override_cost: override,
+                        unit_cost: nextCost
+                      });
+                    }}
+                  />
+                  Override
+                </label>
+              </div>
               <input
                 className="app-input"
                 type="number"

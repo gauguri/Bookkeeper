@@ -119,7 +119,7 @@ class AuditEvent(Base):
     before_hash = Column(String(64), nullable=True)
     after_hash = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    metadata_ = Column("metadata", Text, nullable=True)
+    event_metadata = Column(Text, nullable=True)
 
 
 class ImportBatch(Base):

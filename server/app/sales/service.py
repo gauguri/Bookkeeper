@@ -177,18 +177,39 @@ def update_invoice(db: Session, invoice: Invoice, payload: dict) -> Invoice:
 def apply_payment(
     db: Session,
     payment_data: dict,
-    applications_data: List[dict],
+    applications_data: Sequence[object],
 ) -> Payment:
-    invoices = db.query(Invoice).filter(Invoice.id.in_([app["invoice_id"] for app in applications_data])).all()
+    if not applications_data:
+        raise ValueError("At least one payment application is required.")
+
+    normalized_applications: List[dict] = []
+    for application in applications_data:
+        if hasattr(application, "model_dump"):
+            normalized = application.model_dump()
+        elif isinstance(application, dict):
+            normalized = application
+        else:
+            raise ValueError("Invalid payment application payload.")
+        normalized_applications.append(normalized)
+
+    invoice_ids = [application["invoice_id"] for application in normalized_applications]
+    invoices = db.query(Invoice).filter(Invoice.id.in_(invoice_ids)).all()
     invoice_map = {invoice.id: invoice for invoice in invoices}
+    if len(invoice_map) != len(set(invoice_ids)):
+        raise ValueError("Invoice not found.")
+    if payment_data.get("customer_id") is not None:
+        for invoice in invoices:
+            if invoice.customer_id != payment_data["customer_id"]:
+                raise ValueError("Invoice does not belong to the payment customer.")
     for invoice in invoices:
         if invoice.status == "VOID":
             raise ValueError("Payments can only be applied to sent invoices.")
         if invoice.status == "DRAFT":
+            # Payments against drafts mark them as sent before updating balances.
             invoice.status = "SENT"
             invoice.updated_at = datetime.utcnow()
     applications_inputs: List[PaymentApplicationInput] = []
-    for application in applications_data:
+    for application in normalized_applications:
         invoice = invoice_map.get(application["invoice_id"])
         if not invoice:
             raise ValueError("Invoice not found.")
@@ -214,7 +235,7 @@ def apply_payment(
         PaymentApplication(
             invoice_id=application["invoice_id"], applied_amount=application["applied_amount"]
         )
-        for application in applications_data
+        for application in normalized_applications
     ]
     db.add(payment)
     db.flush()

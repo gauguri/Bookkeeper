@@ -3,9 +3,9 @@ from decimal import Decimal
 from typing import Iterable, List, Optional, Sequence
 
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models import Customer, Invoice, InvoiceLine, Item, Payment, PaymentApplication
+from app.models import Customer, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
 from app.sales.calculations import (
     InvoiceLineInput,
     PaymentApplicationInput,
@@ -125,7 +125,7 @@ def list_customers(db: Session, search: Optional[str]) -> Sequence[Customer]:
 
 
 def list_items(db: Session, search: Optional[str]) -> Sequence[Item]:
-    query = db.query(Item)
+    query = db.query(Item).options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
     if search:
         like = f"%{search.lower()}%"
         query = query.filter(func.lower(Item.name).like(like))

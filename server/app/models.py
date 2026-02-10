@@ -182,6 +182,7 @@ class Supplier(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     supplier_items = relationship("SupplierItem", back_populates="supplier", cascade="all, delete-orphan")
+    items = relationship("Item", secondary="supplier_items", viewonly=True)
 
 
 class Item(Base):
@@ -199,6 +200,7 @@ class Item(Base):
     income_account = relationship("Account")
     invoice_lines = relationship("InvoiceLine", back_populates="item")
     supplier_items = relationship("SupplierItem", back_populates="item", cascade="all, delete-orphan")
+    suppliers = relationship("Supplier", secondary="supplier_items", viewonly=True)
 
     @property
     def preferred_supplier_link(self):

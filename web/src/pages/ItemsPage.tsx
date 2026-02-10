@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
+import SupplierItemLinkModal, { SupplierItemLinkForm } from "../components/SupplierItemLinkModal";
 import { currency } from "../utils/format";
 
 type Item = {
@@ -54,8 +55,8 @@ export default function ItemsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
-  const [supplierForm, setSupplierForm] = useState({
-    supplier_id: "",
+  const [supplierForm, setSupplierForm] = useState<SupplierItemLinkForm>({
+    related_id: "",
     supplier_cost: "",
     freight_cost: "",
     tariff_cost: "",
@@ -177,7 +178,7 @@ export default function ItemsPage() {
     if (link) {
       setEditingSupplierId(link.supplier_id);
       setSupplierForm({
-        supplier_id: link.supplier_id.toString(),
+        related_id: link.supplier_id.toString(),
         supplier_cost: link.supplier_cost.toString(),
         freight_cost: link.freight_cost.toString(),
         tariff_cost: link.tariff_cost.toString(),
@@ -190,7 +191,7 @@ export default function ItemsPage() {
     } else {
       setEditingSupplierId(null);
       setSupplierForm({
-        supplier_id: "",
+        related_id: "",
         supplier_cost: "",
         freight_cost: "",
         tariff_cost: "",
@@ -212,12 +213,12 @@ export default function ItemsPage() {
     if (!editingId) {
       return;
     }
-    if (!supplierForm.supplier_id) {
+    if (!supplierForm.related_id) {
       setError("Select a supplier to link.");
       return;
     }
     const payload = {
-      supplier_id: Number(supplierForm.supplier_id),
+      supplier_id: Number(supplierForm.related_id),
       supplier_cost: Number(supplierForm.supplier_cost || 0),
       freight_cost: Number(supplierForm.freight_cost || 0),
       tariff_cost: Number(supplierForm.tariff_cost || 0),
@@ -525,105 +526,19 @@ export default function ItemsPage() {
         </div>
       )}
 
-      {supplierModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="app-card w-full max-w-xl space-y-4 p-6 shadow-glow">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Supplier costs</p>
-              <h3 className="text-lg font-semibold">
-                {editingSupplierId ? "Edit supplier costs" : "Add supplier"}
-              </h3>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <select
-                className="app-select md:col-span-2"
-                value={supplierForm.supplier_id}
-                onChange={(event) => setSupplierForm({ ...supplierForm, supplier_id: event.target.value })}
-                disabled={Boolean(editingSupplierId)}
-              >
-                <option value="">Select supplier</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Supplier cost"
-                value={supplierForm.supplier_cost}
-                onChange={(event) => setSupplierForm({ ...supplierForm, supplier_cost: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Freight cost"
-                value={supplierForm.freight_cost}
-                onChange={(event) => setSupplierForm({ ...supplierForm, freight_cost: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Tariff cost"
-                value={supplierForm.tariff_cost}
-                onChange={(event) => setSupplierForm({ ...supplierForm, tariff_cost: event.target.value })}
-              />
-              <input
-                className="app-input"
-                placeholder="Supplier SKU"
-                value={supplierForm.supplier_sku}
-                onChange={(event) => setSupplierForm({ ...supplierForm, supplier_sku: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                placeholder="Lead time (days)"
-                value={supplierForm.lead_time_days}
-                onChange={(event) => setSupplierForm({ ...supplierForm, lead_time_days: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Min order qty"
-                value={supplierForm.min_order_qty}
-                onChange={(event) => setSupplierForm({ ...supplierForm, min_order_qty: event.target.value })}
-              />
-              <input
-                className="app-input md:col-span-2"
-                placeholder="Notes"
-                value={supplierForm.notes}
-                onChange={(event) => setSupplierForm({ ...supplierForm, notes: event.target.value })}
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm text-muted">
-              <input
-                type="checkbox"
-                checked={supplierForm.is_preferred}
-                onChange={(event) => setSupplierForm({ ...supplierForm, is_preferred: event.target.checked })}
-              />
-              Mark as preferred supplier
-            </label>
-            <div className="flex justify-end gap-2">
-              <button className="app-button-ghost" onClick={closeSupplierModal}>
-                Cancel
-              </button>
-              <button className="app-button" onClick={submitSupplierLink}>
-                {editingSupplierId ? "Save changes" : "Add supplier"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SupplierItemLinkModal
+        isOpen={supplierModalOpen}
+        title={editingSupplierId ? "Edit supplier costs" : "Add supplier"}
+        subtitle="Supplier costs"
+        entityLabel="Supplier"
+        options={suppliers.map((supplier) => ({ value: supplier.id.toString(), label: supplier.name }))}
+        form={supplierForm}
+        disableSelection={Boolean(editingSupplierId)}
+        primaryActionLabel={editingSupplierId ? "Save changes" : "Add supplier"}
+        onClose={closeSupplierModal}
+        onSubmit={submitSupplierLink}
+        onChange={setSupplierForm}
+      />
 
       <button
         className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"

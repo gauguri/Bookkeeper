@@ -193,6 +193,9 @@ class Item(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     unit_price = Column(Numeric(14, 2), nullable=False)
+    on_hand_qty = Column(Numeric(14, 2), nullable=False, default=0)
+    reserved_qty = Column(Numeric(14, 2), nullable=False, default=0)
+    reorder_point = Column(Numeric(14, 2), nullable=True)
     income_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -201,6 +204,10 @@ class Item(Base):
     invoice_lines = relationship("InvoiceLine", back_populates="item")
     supplier_items = relationship("SupplierItem", back_populates="item", cascade="all, delete-orphan")
     suppliers = relationship("Supplier", secondary="supplier_items", viewonly=True)
+
+    @property
+    def available_qty(self):
+        return Decimal(self.on_hand_qty or 0) - Decimal(self.reserved_qty or 0)
 
     @property
     def preferred_supplier_link(self):
@@ -328,3 +335,102 @@ class PaymentApplication(Base):
 
     payment = relationship("Payment", back_populates="applications")
     invoice = relationship("Invoice", back_populates="payment_applications")
+
+
+class InventoryTransaction(Base):
+    __tablename__ = "inventory_transactions"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    txn_type = Column(
+        Enum("ADJUSTMENT", "RECEIPT", "RESERVATION", "RELEASE", name="inventory_txn_type"),
+        nullable=False,
+    )
+    qty_delta = Column(Numeric(14, 2), nullable=False)
+    reference_type = Column(String(50), nullable=True)
+    reference_id = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+
+
+class SalesRequest(Base):
+    __tablename__ = "sales_requests"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    requested_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(
+        Enum("DRAFT", "OPEN", "FULFILLED", "CANCELLED", name="sales_request_status"),
+        nullable=False,
+        default="DRAFT",
+    )
+    requested_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    notes = Column(Text, nullable=True)
+
+    customer = relationship("Customer")
+    requested_by = relationship("User")
+    lines = relationship("SalesRequestLine", back_populates="sales_request", cascade="all, delete-orphan")
+
+
+class SalesRequestLine(Base):
+    __tablename__ = "sales_request_lines"
+
+    id = Column(Integer, primary_key=True)
+    sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty_requested = Column(Numeric(14, 2), nullable=False)
+    qty_reserved = Column(Numeric(14, 2), nullable=False, default=0)
+    unit_price_quote = Column(Numeric(14, 2), nullable=True)
+    status = Column(
+        Enum("PENDING", "ALLOCATED", "BACKORDERED", "CANCELLED", name="sales_request_line_status"),
+        nullable=False,
+        default="PENDING",
+    )
+
+    sales_request = relationship("SalesRequest", back_populates="lines")
+    item = relationship("Item")
+
+
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+
+    id = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    status = Column(
+        Enum(
+            "DRAFT",
+            "SENT",
+            "PARTIALLY_RECEIVED",
+            "RECEIVED",
+            "CANCELLED",
+            name="purchase_order_status",
+        ),
+        nullable=False,
+        default="DRAFT",
+    )
+    order_date = Column(Date, nullable=False)
+    expected_date = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    supplier = relationship("Supplier")
+    lines = relationship("PurchaseOrderLine", back_populates="purchase_order", cascade="all, delete-orphan")
+
+
+class PurchaseOrderLine(Base):
+    __tablename__ = "purchase_order_lines"
+
+    id = Column(Integer, primary_key=True)
+    purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty_ordered = Column(Numeric(14, 2), nullable=False)
+    unit_cost = Column(Numeric(14, 2), nullable=False)
+    freight_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    tariff_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    landed_cost = Column(Numeric(14, 2), nullable=False)
+    qty_received = Column(Numeric(14, 2), nullable=False, default=0)
+
+    purchase_order = relationship("PurchaseOrder", back_populates="lines")
+    item = relationship("Item")

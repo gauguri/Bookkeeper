@@ -24,6 +24,9 @@ def upgrade() -> None:
     op.add_column("sales_requests", sa.Column("requested_fulfillment_date", sa.Date(), nullable=True))
     op.add_column("sales_requests", sa.Column("status_v2", sa.String(length=20), nullable=False, server_default="OPEN"))
 
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE sales_request_status ADD VALUE IF NOT EXISTS 'IN_PROGRESS';")
+
     op.execute(
         """
         UPDATE sales_requests

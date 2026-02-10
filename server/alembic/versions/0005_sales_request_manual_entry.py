@@ -70,18 +70,39 @@ def upgrade() -> None:
     op.drop_column("sales_request_lines", "unit_price_quote")
     op.drop_column("sales_request_lines", "status")
 
-    op.execute(
-        """
-        WITH numbered AS (
-          SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq
-          FROM sales_requests
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute(
+            """
+            WITH numbered AS (
+              SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY created_at NULLS LAST, id) AS seq,
+                COALESCE(created_at, NOW()) AS dt
+              FROM sales_requests
+            )
+            UPDATE sales_requests AS sr
+            SET request_number = 'SR-' || to_char(numbered.dt, 'YYYY') || '-' || lpad(numbered.seq::text, 4, '0')
+            FROM numbered
+            WHERE sr.id = numbered.id
+            """
         )
-        UPDATE sales_requests
-        SET request_number = 'SR-' || strftime('%Y', created_at) || '-' || printf('%04d', numbered.seq)
-        FROM numbered
-        WHERE sales_requests.id = numbered.id
-        """
-    )
+    else:
+        op.execute(
+            """
+            WITH numbered AS (
+              SELECT
+                id,
+                ROW_NUMBER() OVER (ORDER BY created_at IS NULL, created_at, id) AS seq,
+                COALESCE(created_at, CURRENT_TIMESTAMP) AS dt
+              FROM sales_requests
+            )
+            UPDATE sales_requests
+            SET request_number = 'SR-' || strftime('%Y', dt) || '-' || printf('%04d', seq)
+            FROM numbered
+            WHERE sales_requests.id = numbered.id
+            """
+        )
 
     op.create_unique_constraint("uq_sales_requests_request_number", "sales_requests", ["request_number"])
     op.alter_column("sales_requests", "request_number", nullable=False)

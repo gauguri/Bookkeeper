@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { apiFetch } from "../api";
 import SalesRequestForm from "../components/SalesRequestForm";
@@ -26,10 +27,16 @@ type SalesRequest = {
 type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
 
+const statusStyles: Record<string, string> = {
+  OPEN: "border-primary/30 bg-primary/10 text-primary",
+  IN_PROGRESS: "border-warning/30 bg-warning/10 text-warning",
+  CLOSED: "border-success/30 bg-success/10 text-success",
+};
+
 const formatDate = (value?: string | null) => {
-  if (!value) return "—";
+  if (!value) return "\u2014";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "\u2014";
   return date.toLocaleDateString();
 };
 
@@ -37,15 +44,15 @@ const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
 export default function SalesRequestsPage() {
+  const navigate = useNavigate();
   const [requests, setRequests] = useState<SalesRequest[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [formKey, setFormKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -81,11 +88,6 @@ export default function SalesRequestsPage() {
     loadSalesRequests();
   }, [loadSalesRequests]);
 
-  const selectedRequest = useMemo(
-    () => requests.find((request) => request.id === selectedId) ?? null,
-    [requests, selectedId]
-  );
-
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -93,25 +95,31 @@ export default function SalesRequestsPage() {
           <h2 className="text-2xl font-semibold">Sales Requests</h2>
           <p className="text-sm text-muted">Internal rep-entered requests. No automatic external ingestion.</p>
         </div>
-        <button className="app-button" onClick={() => setShowCreate((prev) => !prev)}>
+        <button
+          className="app-button"
+          onClick={() => {
+            setFormKey((prev) => prev + 1);
+            setShowCreate((prev) => !prev);
+          }}
+        >
           <Plus className="h-4 w-4" /> New Sales Request
         </button>
       </header>
 
-      {notice ? <section className="app-card text-sm text-success">{notice}</section> : null}
+      {notice ? <section className="app-card text-sm text-success p-4">{notice}</section> : null}
 
       {showCreate ? (
         <SalesRequestForm
+          key={formKey}
           customers={customers}
           items={items}
           createdByUserId={1}
           onCancel={() => setShowCreate(false)}
           onCreated={async () => {
-            setIsSubmitting(true);
             await loadSalesRequests();
-            setIsSubmitting(false);
             setShowCreate(false);
             setNotice("Sales Request created successfully.");
+            setTimeout(() => setNotice(""), 5000);
           }}
         />
       ) : null}
@@ -130,13 +138,13 @@ export default function SalesRequestsPage() {
             onChange={(event) => setCustomerFilter(event.target.value)}
             placeholder="Filter by customer"
           />
-          <button className="app-button-secondary" onClick={loadSalesRequests} disabled={isLoading || isSubmitting}>
-            <RefreshCw className={`h-4 w-4 ${(isLoading || isSubmitting) ? "animate-spin" : ""}`} />
+          <button className="app-button-secondary" onClick={loadSalesRequests} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             Refresh
           </button>
         </div>
 
-        {isLoading ? <p className="text-sm text-muted">Loading sales requests…</p> : null}
+        {isLoading ? <p className="text-sm text-muted">Loading sales requests...</p> : null}
         {error ? (
           <div className="space-y-2" role="alert">
             <p className="font-semibold">Unable to load sales requests</p>
@@ -168,12 +176,16 @@ export default function SalesRequestsPage() {
                   <tr
                     key={request.id}
                     className="cursor-pointer border-b border-border/70 last:border-b-0 hover:bg-secondary/60"
-                    onClick={() => setSelectedId(request.id)}
+                    onClick={() => navigate(`/sales-requests/${request.id}`)}
                   >
                     <td className="px-4 py-3 font-medium">{request.request_number}</td>
                     <td className="px-4 py-3">{request.customer_name ?? "Walk-in customer"}</td>
                     <td className="px-4 py-3">{formatCurrency(request.total_amount)}</td>
-                    <td className="px-4 py-3">{request.status}</td>
+                    <td className="px-4 py-3">
+                      <span className={`app-badge ${statusStyles[request.status] ?? "border-border bg-secondary"}`}>
+                        {request.status.replace(/_/g, " ")}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">{formatDate(request.created_at)}</td>
                   </tr>
                 ))}
@@ -182,22 +194,6 @@ export default function SalesRequestsPage() {
           </div>
         ) : null}
       </section>
-
-      {selectedRequest ? (
-        <section className="app-card space-y-3 p-4">
-          <h3 className="text-lg font-semibold">Request details · {selectedRequest.request_number}</h3>
-          <p className="text-sm text-muted">Customer: {selectedRequest.customer_name ?? "Walk-in customer"}</p>
-          <p className="text-sm text-muted">Fulfillment date: {formatDate(selectedRequest.requested_fulfillment_date)}</p>
-          <p className="text-sm text-muted">Notes: {selectedRequest.notes || "—"}</p>
-          <div className="space-y-1">
-            {selectedRequest.lines.map((line) => (
-              <div key={line.id} className="text-sm text-muted">
-                {line.item_name} — {line.quantity} × {formatCurrency(line.unit_price)} = {formatCurrency(line.line_total)}
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }

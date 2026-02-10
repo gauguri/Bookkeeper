@@ -1,33 +1,59 @@
-from typing import List
+from decimal import Decimal
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import SalesRequest
 from app.sales_requests import schemas
-from app.sales_requests.service import cancel_sales_request, create_sales_request, submit_sales_request
+from app.sales_requests.service import calculate_sales_request_total, create_sales_request, update_sales_request_status
 
 
 router = APIRouter(prefix="/api/sales-requests", tags=["sales-requests"])
 
 
-@router.get("", response_model=List[schemas.SalesRequestResponse])
-def list_sales_requests(db: Session = Depends(get_db)):
-    return (
-        db.query(SalesRequest)
-        .options(selectinload(SalesRequest.lines))
-        .order_by(SalesRequest.requested_at.desc())
-        .all()
+def _to_response(sales_request: SalesRequest) -> schemas.SalesRequestResponse:
+    return schemas.SalesRequestResponse(
+        id=sales_request.id,
+        request_number=sales_request.request_number,
+        customer_id=sales_request.customer_id,
+        customer_name=sales_request.customer_name,
+        status=sales_request.status,
+        created_at=sales_request.created_at,
+        updated_at=sales_request.updated_at,
+        created_by_user_id=sales_request.created_by_user_id,
+        notes=sales_request.notes,
+        requested_fulfillment_date=sales_request.requested_fulfillment_date,
+        total_amount=Decimal(calculate_sales_request_total(sales_request)),
+        lines=sales_request.lines,
     )
+
+
+@router.get("", response_model=List[schemas.SalesRequestResponse])
+def list_sales_requests(
+    status_filter: Optional[schemas.SalesRequestStatus] = Query(None, alias="status"),
+    customer: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).order_by(SalesRequest.created_at.desc())
+    if status_filter:
+        query = query.filter(SalesRequest.status == status_filter)
+    if customer:
+        like_value = f"%{customer.strip()}%"
+        query = query.filter(SalesRequest.customer_name.ilike(like_value))
+    return [_to_response(request) for request in query.all()]
 
 
 @router.post("", response_model=schemas.SalesRequestResponse, status_code=status.HTTP_201_CREATED)
 def create_sales_request_endpoint(payload: schemas.SalesRequestCreate, db: Session = Depends(get_db)):
-    sales_request = create_sales_request(db, payload.model_dump())
+    try:
+        sales_request = create_sales_request(db, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
     db.refresh(sales_request)
-    return sales_request
+    return _to_response(sales_request)
 
 
 @router.get("/{sales_request_id}", response_model=schemas.SalesRequestResponse)
@@ -40,39 +66,15 @@ def get_sales_request(sales_request_id: int, db: Session = Depends(get_db)):
     )
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
-    return sales_request
+    return _to_response(sales_request)
 
 
-@router.post("/{sales_request_id}/submit", response_model=schemas.SalesRequestSubmitResponse)
-def submit_sales_request_endpoint(sales_request_id: int, db: Session = Depends(get_db)):
-    sales_request = (
-        db.query(SalesRequest)
-        .options(selectinload(SalesRequest.lines))
-        .filter(SalesRequest.id == sales_request_id)
-        .first()
-    )
+@router.patch("/{sales_request_id}", response_model=schemas.SalesRequestResponse)
+def patch_sales_request(sales_request_id: int, payload: schemas.SalesRequestUpdate, db: Session = Depends(get_db)):
+    sales_request = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).filter(SalesRequest.id == sales_request_id).first()
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
-    try:
-        submit_sales_request(db, sales_request)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    update_sales_request_status(sales_request, payload.status)
     db.commit()
     db.refresh(sales_request)
-    return sales_request
-
-
-@router.post("/{sales_request_id}/cancel", response_model=schemas.SalesRequestSubmitResponse)
-def cancel_sales_request_endpoint(sales_request_id: int, db: Session = Depends(get_db)):
-    sales_request = (
-        db.query(SalesRequest)
-        .options(selectinload(SalesRequest.lines))
-        .filter(SalesRequest.id == sales_request_id)
-        .first()
-    )
-    if not sales_request:
-        raise HTTPException(status_code=404, detail="Sales request not found.")
-    cancel_sales_request(db, sales_request)
-    db.commit()
-    db.refresh(sales_request)
-    return sales_request
+    return _to_response(sales_request)

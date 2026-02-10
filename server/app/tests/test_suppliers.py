@@ -2,11 +2,14 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.db import Base
+from app.db import Base, get_db
+from app.main import app
 from app.models import Customer, Item, Supplier, SupplierItem, Invoice
 from app.sales.service import build_invoice_lines
 from app.suppliers.service import set_preferred_supplier
@@ -37,6 +40,30 @@ def create_customer(db, name="Cost Customer"):
     db.add(customer)
     db.flush()
     return customer
+
+
+@pytest.fixture()
+def client():
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(engine)
 
 
 def test_create_supplier():
@@ -153,3 +180,75 @@ def test_invoice_line_unit_cost_snapshot():
     link.supplier_cost = Decimal("9.00")
     db.commit()
     assert invoice.lines[0].unit_cost == Decimal("5.50")
+
+
+def test_api_create_supplier_item_link(client):
+    supplier = client.post("/api/suppliers", json={"name": "Supply Co"}).json()
+    item = client.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    response = client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["supplier_id"] == supplier["id"]
+    assert payload["item_id"] == item["id"]
+    assert payload["landed_cost"] == 5.5
+
+
+def test_api_prevent_duplicate_supplier_item_link(client):
+    supplier = client.post("/api/suppliers", json={"name": "Supply Co"}).json()
+    item = client.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+    response = client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Supplier already linked to item."
+
+
+def test_api_preferred_supplier_uniqueness(client):
+    supplier_one = client.post("/api/suppliers", json={"name": "Primary Supply"}).json()
+    supplier_two = client.post("/api/suppliers", json={"name": "Backup Supply"}).json()
+    item = client.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier_one["id"], "supplier_cost": 2.0, "is_preferred": True},
+    )
+    client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier_two["id"], "supplier_cost": 2.25, "is_preferred": True},
+    )
+    list_response = client.get(f"/api/items/{item['id']}/suppliers")
+
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    preferred = [link for link in payload if link["is_preferred"]]
+    assert len(preferred) == 1
+    assert preferred[0]["supplier_id"] == supplier_two["id"]
+
+
+def test_api_update_costs_recomputes_landed_cost(client):
+    supplier = client.post("/api/suppliers", json={"name": "Supply Co"}).json()
+    item = client.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+    response = client.patch(
+        f"/api/items/{item['id']}/suppliers/{supplier['id']}",
+        json={"supplier_cost": 6.0, "freight_cost": 2.0, "tariff_cost": 1.0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["landed_cost"] == 9.0

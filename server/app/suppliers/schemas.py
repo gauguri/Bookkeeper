@@ -49,6 +49,10 @@ class SupplierItemCreate(SupplierItemBase):
     supplier_id: int
 
 
+class SupplierItemCreateForSupplier(SupplierItemBase):
+    item_id: int
+
+
 class SupplierItemUpdate(BaseModel):
     supplier_cost: Optional[DecimalValue] = Field(None, ge=0)
     freight_cost: Optional[DecimalValue] = Field(None, ge=0)
@@ -64,6 +68,17 @@ class SupplierItemResponse(SupplierItemBase):
     supplier_id: int
     item_id: int
     supplier_name: str
+    landed_cost: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierItemBySupplierResponse(SupplierItemBase):
+    supplier_id: int
+    item_id: int
+    item_name: str
+    item_sku: Optional[str] = None
+    item_unit_price: Decimal
     landed_cost: Decimal
 
     model_config = ConfigDict(from_attributes=True)

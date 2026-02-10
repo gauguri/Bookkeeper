@@ -3,11 +3,13 @@ import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Banknote,
+  Boxes,
   ClipboardList,
   FileText,
   Layers,
   LayoutGrid,
   Moon,
+  PackageCheck,
   Sun,
   Truck,
   Users
@@ -15,11 +17,14 @@ import {
 import CustomersPage from "./pages/CustomersPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
+import InventoryPage from "./pages/InventoryPage";
 import ItemsPage from "./pages/ItemsPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
+import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
 import SalesLanding from "./pages/SalesLanding";
+import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 
 const navSections = [
@@ -29,6 +34,7 @@ const navSections = [
       { label: "Overview", to: "/sales", icon: LayoutGrid },
       { label: "Customers", to: "/sales/customers", icon: Users },
       { label: "Items", to: "/sales/items", icon: ClipboardList },
+      { label: "Sales Requests", to: "/sales/requests", icon: ClipboardList },
       { label: "Invoices", to: "/sales/invoices", icon: FileText },
       { label: "Payments", to: "/sales/payments", icon: Banknote },
       { label: "Reports", to: "/sales/reports", icon: Layers }
@@ -45,7 +51,14 @@ const navSections = [
   },
   {
     title: "Purchasing",
-    items: [{ label: "Suppliers", to: "/purchasing/suppliers", icon: Truck }]
+    items: [
+      { label: "Suppliers", to: "/purchasing/suppliers", icon: Truck },
+      { label: "Purchase Orders", to: "/purchasing/purchase-orders", icon: PackageCheck }
+    ]
+  },
+  {
+    title: "Inventory",
+    items: [{ label: "Inventory", to: "/inventory", icon: Boxes }]
   }
 ];
 
@@ -204,6 +217,7 @@ export default function App() {
         <Route path="/sales" element={<SalesLanding />} />
         <Route path="/sales/customers" element={<CustomersPage />} />
         <Route path="/sales/items" element={<ItemsPage />} />
+        <Route path="/sales/requests" element={<SalesRequestsPage />} />
         <Route path="/sales/invoices" element={<InvoicesPage />} />
         <Route path="/sales/invoices/:id" element={<InvoiceDetailPage />} />
         <Route path="/sales/payments" element={<PaymentsPage />} />
@@ -213,6 +227,8 @@ export default function App() {
         <Route path="/accounts" element={<PlaceholderPage title="Chart of Accounts" />} />
         <Route path="/import" element={<PlaceholderPage title="Import" />} />
         <Route path="/purchasing/suppliers" element={<SuppliersPage />} />
+        <Route path="/purchasing/purchase-orders" element={<PurchaseOrdersPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
       </Routes>
     </Layout>
   );

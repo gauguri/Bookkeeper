@@ -34,7 +34,7 @@ const navSections = [
       { label: "Overview", to: "/sales", icon: LayoutGrid },
       { label: "Customers", to: "/sales/customers", icon: Users },
       { label: "Items", to: "/sales/items", icon: ClipboardList },
-      { label: "Sales Requests", to: "/sales/requests", icon: ClipboardList },
+      { label: "Sales Requests", to: "/sales-requests", icon: ClipboardList },
       { label: "Invoices", to: "/sales/invoices", icon: FileText },
       { label: "Payments", to: "/sales/payments", icon: Banknote },
       { label: "Reports", to: "/sales/reports", icon: Layers }
@@ -217,6 +217,7 @@ export default function App() {
         <Route path="/sales" element={<SalesLanding />} />
         <Route path="/sales/customers" element={<CustomersPage />} />
         <Route path="/sales/items" element={<ItemsPage />} />
+        <Route path="/sales-requests" element={<SalesRequestsPage />} />
         <Route path="/sales/requests" element={<SalesRequestsPage />} />
         <Route path="/sales/invoices" element={<InvoicesPage />} />
         <Route path="/sales/invoices/:id" element={<InvoiceDetailPage />} />

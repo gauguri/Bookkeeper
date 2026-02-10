@@ -359,18 +359,18 @@ class SalesRequest(Base):
     __tablename__ = "sales_requests"
 
     id = Column(Integer, primary_key=True)
+    request_number = Column(String(30), nullable=False, unique=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
-    requested_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    status = Column(
-        Enum("DRAFT", "OPEN", "FULFILLED", "CANCELLED", name="sales_request_status"),
-        nullable=False,
-        default="DRAFT",
-    )
-    requested_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    customer_name = Column(String(200), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="OPEN")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    requested_fulfillment_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
 
     customer = relationship("Customer")
-    requested_by = relationship("User")
+    created_by = relationship("User")
     lines = relationship("SalesRequestLine", back_populates="sales_request", cascade="all, delete-orphan")
 
 
@@ -380,14 +380,10 @@ class SalesRequestLine(Base):
     id = Column(Integer, primary_key=True)
     sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=False)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
-    qty_requested = Column(Numeric(14, 2), nullable=False)
-    qty_reserved = Column(Numeric(14, 2), nullable=False, default=0)
-    unit_price_quote = Column(Numeric(14, 2), nullable=True)
-    status = Column(
-        Enum("PENDING", "ALLOCATED", "BACKORDERED", "CANCELLED", name="sales_request_line_status"),
-        nullable=False,
-        default="PENDING",
-    )
+    item_name = Column(String(200), nullable=False)
+    quantity = Column(Numeric(14, 2), nullable=False)
+    unit_price = Column(Numeric(14, 2), nullable=False)
+    line_total = Column(Numeric(14, 2), nullable=False)
 
     sales_request = relationship("SalesRequest", back_populates="lines")
     item = relationship("Item")

@@ -1,163 +1,201 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { apiFetch } from "../api";
+import SalesRequestForm from "../components/SalesRequestForm";
 
-type SalesRequestApi = {
+type SalesRequestLine = {
   id: number;
-  customer_name?: string | null;
-  customer?: { name?: string | null } | null;
-  amount?: number | null;
-  total?: number | null;
-  status?: string | null;
-  requested_at?: string | null;
-  created_at?: string | null;
-  lines?: Array<{ qty_requested?: number | null }> | null;
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
 };
 
-type SalesRequestRow = {
+type SalesRequest = {
   id: number;
-  customer: string;
-  amount: number;
-  status: string;
-  createdDate: string;
+  request_number: string;
+  customer_name: string | null;
+  status: "OPEN" | "IN_PROGRESS" | "CLOSED";
+  created_at: string;
+  requested_fulfillment_date: string | null;
+  notes?: string | null;
+  total_amount: number;
+  lines: SalesRequestLine[];
 };
 
-const mockSalesRequests: SalesRequestRow[] = [
-  {
-    id: 3201,
-    customer: "Mercury Retail Group",
-    amount: 1240,
-    status: "Pending",
-    createdDate: "2026-01-12"
-  },
-  {
-    id: 3202,
-    customer: "Northwind Studio",
-    amount: 780,
-    status: "Approved",
-    createdDate: "2026-01-11"
-  },
-  {
-    id: 3203,
-    customer: "Horizon Foods",
-    amount: 440,
-    status: "In Review",
-    createdDate: "2026-01-10"
-  }
-];
+type Customer = { id: number; name: string };
+type Item = { id: number; name: string; unit_price: number };
 
-const formatDate = (value: string) => {
+const formatDate = (value?: string | null) => {
+  if (!value) return "—";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
+  if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString();
 };
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
-const toSalesRequestRow = (request: SalesRequestApi): SalesRequestRow => {
-  const derivedAmount = (request.lines ?? []).reduce((sum, line) => sum + Number(line.qty_requested ?? 0), 0);
-  return {
-    id: request.id,
-    customer: request.customer_name ?? request.customer?.name ?? "Walk-in customer",
-    amount: Number(request.amount ?? request.total ?? derivedAmount),
-    status: request.status ?? "Draft",
-    createdDate: request.requested_at ?? request.created_at ?? ""
-  };
-};
-
 export default function SalesRequestsPage() {
-  const [rows, setRows] = useState<SalesRequestRow[]>([]);
+  const [requests, setRequests] = useState<SalesRequest[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const loadDependencies = useCallback(async () => {
+    const [customersData, itemsData] = await Promise.all([apiFetch<Customer[]>("/customers"), apiFetch<Item[]>("/items")]);
+    setCustomers(customersData);
+    setItems(itemsData);
+  }, []);
 
   const loadSalesRequests = useCallback(async () => {
     setIsLoading(true);
     setError("");
-
     try {
-      // TODO: Replace this list fetch with dedicated Sales Requests endpoint once contract is finalized.
-      const response = await apiFetch<SalesRequestApi[]>("/sales-requests");
-      const mappedRows = Array.isArray(response) ? response.map(toSalesRequestRow) : [];
-      setRows(mappedRows);
+      const params = new URLSearchParams();
+      if (statusFilter) params.set("status", statusFilter);
+      if (customerFilter.trim()) params.set("customer", customerFilter.trim());
+      const query = params.toString();
+      const data = await apiFetch<SalesRequest[]>(`/sales-requests${query ? `?${query}` : ""}`);
+      setRequests(data);
     } catch (err) {
-      const message = (err as Error).message;
-      setError(message || "We could not load sales requests.");
-      setRows([]);
+      setError((err as Error).message || "Unable to load sales requests.");
+      setRequests([]);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [customerFilter, statusFilter]);
+
+  useEffect(() => {
+    loadDependencies().catch(() => undefined);
+  }, [loadDependencies]);
 
   useEffect(() => {
     loadSalesRequests();
   }, [loadSalesRequests]);
 
-  const hasRows = rows.length > 0;
-  const displayRows = useMemo(() => (hasRows ? rows : mockSalesRequests), [hasRows, rows]);
+  const selectedRequest = useMemo(
+    () => requests.find((request) => request.id === selectedId) ?? null,
+    [requests, selectedId]
+  );
 
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
-        <h2 className="text-2xl font-semibold">Sales Requests</h2>
-        <p className="text-sm text-muted">Track incoming sales demand and fulfilment readiness.</p>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold">Sales Requests</h2>
+          <p className="text-sm text-muted">Internal rep-entered requests. No automatic external ingestion.</p>
+        </div>
+        <button className="app-button" onClick={() => setShowCreate((prev) => !prev)}>
+          <Plus className="h-4 w-4" /> New Sales Request
+        </button>
       </header>
 
-      {isLoading ? (
-        <section className="app-card flex items-center gap-3" role="status" aria-live="polite">
-          <RefreshCw className="h-4 w-4 animate-spin text-primary" />
-          <p className="text-sm text-muted">Loading sales requests…</p>
-        </section>
+      {notice ? <section className="app-card text-sm text-success">{notice}</section> : null}
+
+      {showCreate ? (
+        <SalesRequestForm
+          customers={customers}
+          items={items}
+          createdByUserId={1}
+          onCancel={() => setShowCreate(false)}
+          onCreated={async () => {
+            setIsSubmitting(true);
+            await loadSalesRequests();
+            setIsSubmitting(false);
+            setShowCreate(false);
+            setNotice("Sales Request created successfully.");
+          }}
+        />
       ) : null}
 
-      {!isLoading && error ? (
-        <section className="app-card space-y-3" role="alert">
-          <h3 className="text-lg font-semibold">We hit a snag loading Sales Requests</h3>
-          <p className="text-sm text-muted">{error}</p>
-          <button className="app-button-primary" onClick={loadSalesRequests}>
-            Retry
+      <section className="app-card space-y-4 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="app-input w-48" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All statuses</option>
+            <option value="OPEN">Open</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="CLOSED">Closed</option>
+          </select>
+          <input
+            className="app-input w-72"
+            value={customerFilter}
+            onChange={(event) => setCustomerFilter(event.target.value)}
+            placeholder="Filter by customer"
+          />
+          <button className="app-button-secondary" onClick={loadSalesRequests} disabled={isLoading || isSubmitting}>
+            <RefreshCw className={`h-4 w-4 ${(isLoading || isSubmitting) ? "animate-spin" : ""}`} />
+            Refresh
           </button>
-        </section>
-      ) : null}
+        </div>
 
-      {!isLoading && !error && !hasRows ? (
-        <section className="app-card space-y-3">
-          <h3 className="text-lg font-semibold">No sales requests yet</h3>
-          <p className="text-sm text-muted">
-            When new requests arrive, they will appear here. Mock records are shown below in the meantime.
-          </p>
-          <button className="app-button-primary" onClick={loadSalesRequests}>
-            Refresh requests
-          </button>
-        </section>
-      ) : null}
+        {isLoading ? <p className="text-sm text-muted">Loading sales requests…</p> : null}
+        {error ? (
+          <div className="space-y-2" role="alert">
+            <p className="font-semibold">Unable to load sales requests</p>
+            <p className="text-sm text-muted">{error}</p>
+          </div>
+        ) : null}
 
-      {!isLoading && !error ? (
-        <section className="app-card overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-3">Request ID</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Created Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayRows.map((request) => (
-                <tr key={request.id} className="border-b border-border/70 last:border-b-0">
-                  <td className="px-4 py-3 font-medium">#{request.id}</td>
-                  <td className="px-4 py-3">{request.customer}</td>
-                  <td className="px-4 py-3">{formatCurrency(request.amount)}</td>
-                  <td className="px-4 py-3">{request.status}</td>
-                  <td className="px-4 py-3">{formatDate(request.createdDate)}</td>
+        {!isLoading && !error && requests.length === 0 ? (
+          <div className="space-y-1">
+            <p className="font-semibold">No sales requests yet</p>
+            <p className="text-sm text-muted">Create your first internal sales request using the button above.</p>
+          </div>
+        ) : null}
+
+        {!error && requests.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-3">Request #</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Created</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {requests.map((request) => (
+                  <tr
+                    key={request.id}
+                    className="cursor-pointer border-b border-border/70 last:border-b-0 hover:bg-secondary/60"
+                    onClick={() => setSelectedId(request.id)}
+                  >
+                    <td className="px-4 py-3 font-medium">{request.request_number}</td>
+                    <td className="px-4 py-3">{request.customer_name ?? "Walk-in customer"}</td>
+                    <td className="px-4 py-3">{formatCurrency(request.total_amount)}</td>
+                    <td className="px-4 py-3">{request.status}</td>
+                    <td className="px-4 py-3">{formatDate(request.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+
+      {selectedRequest ? (
+        <section className="app-card space-y-3 p-4">
+          <h3 className="text-lg font-semibold">Request details · {selectedRequest.request_number}</h3>
+          <p className="text-sm text-muted">Customer: {selectedRequest.customer_name ?? "Walk-in customer"}</p>
+          <p className="text-sm text-muted">Fulfillment date: {formatDate(selectedRequest.requested_fulfillment_date)}</p>
+          <p className="text-sm text-muted">Notes: {selectedRequest.notes || "—"}</p>
+          <div className="space-y-1">
+            {selectedRequest.lines.map((line) => (
+              <div key={line.id} className="text-sm text-muted">
+                {line.item_name} — {line.quantity} × {formatCurrency(line.unit_price)} = {formatCurrency(line.line_total)}
+              </div>
+            ))}
+          </div>
         </section>
       ) : null}
     </div>

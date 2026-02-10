@@ -6,9 +6,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.inventory.service import adjust_inventory
-from app.models import Item, SalesRequest, SalesRequestLine, Supplier, SupplierItem
+from app.models import Item, Supplier, SupplierItem
 from app.purchasing.service import create_purchase_order, receive_purchase_order
-from app.sales_requests.service import cancel_sales_request, submit_sales_request
 
 
 def create_session():
@@ -40,58 +39,6 @@ def test_inventory_adjustment_updates_on_hand():
     db.refresh(item)
 
     assert item.on_hand_qty == Decimal("5")
-
-
-def test_sales_request_submit_reserves_when_stock_available():
-    db = create_session()
-    item = create_item(db, on_hand=Decimal("5"))
-    sales_request = SalesRequest(status="DRAFT")
-    sales_request.lines = [SalesRequestLine(item_id=item.id, qty_requested=Decimal("3"))]
-    db.add(sales_request)
-    db.commit()
-
-    submit_sales_request(db, sales_request)
-    db.commit()
-    db.refresh(item)
-
-    assert sales_request.lines[0].status == "ALLOCATED"
-    assert item.reserved_qty == Decimal("3")
-
-
-def test_sales_request_submit_marks_backorder_when_insufficient_stock():
-    db = create_session()
-    item = create_item(db, on_hand=Decimal("2"))
-    sales_request = SalesRequest(status="DRAFT")
-    sales_request.lines = [SalesRequestLine(item_id=item.id, qty_requested=Decimal("5"))]
-    db.add(sales_request)
-    db.commit()
-
-    submit_sales_request(db, sales_request)
-    db.commit()
-    db.refresh(item)
-
-    assert sales_request.lines[0].status == "BACKORDERED"
-    assert item.reserved_qty == Decimal("0")
-
-
-def test_cancel_sales_request_releases_reservations():
-    db = create_session()
-    item = create_item(db, on_hand=Decimal("5"))
-    sales_request = SalesRequest(status="DRAFT")
-    sales_request.lines = [SalesRequestLine(item_id=item.id, qty_requested=Decimal("3"))]
-    db.add(sales_request)
-    db.commit()
-
-    submit_sales_request(db, sales_request)
-    db.commit()
-    db.refresh(item)
-
-    cancel_sales_request(db, sales_request)
-    db.commit()
-    db.refresh(item)
-
-    assert sales_request.status == "CANCELLED"
-    assert item.reserved_qty == Decimal("0")
 
 
 def test_purchase_order_defaults_costs_from_supplier_items():

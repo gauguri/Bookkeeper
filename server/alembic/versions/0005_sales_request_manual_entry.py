@@ -33,6 +33,7 @@ def upgrade() -> None:
           created_at = requested_at,
           updated_at = requested_at,
           status_v2 = CASE
+            WHEN status = 'IN_PROGRESS' THEN 'IN_PROGRESS'
             WHEN status = 'OPEN' THEN 'OPEN'
             ELSE 'CLOSED'
           END
@@ -66,37 +67,18 @@ def upgrade() -> None:
     op.drop_column("sales_request_lines", "unit_price_quote")
     op.drop_column("sales_request_lines", "status")
 
-    # Old enum types are no longer used once status columns are converted to strings.
-    op.execute("DROP TYPE IF EXISTS sales_request_line_status")
-    op.execute("DROP TYPE IF EXISTS sales_request_status")
-
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.execute(
-            """
-            WITH numbered AS (
-              SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq
-              FROM sales_requests
-            )
-            UPDATE sales_requests
-            SET request_number = 'SR-' || to_char(created_at, 'YYYY') || '-' || lpad(numbered.seq::text, 4, '0')
-            FROM numbered
-            WHERE sales_requests.id = numbered.id
-            """
+    op.execute(
+        """
+        WITH numbered AS (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq
+          FROM sales_requests
         )
-    else:
-        op.execute(
-            """
-            WITH numbered AS (
-              SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq
-              FROM sales_requests
-            )
-            UPDATE sales_requests
-            SET request_number = 'SR-' || strftime('%Y', created_at) || '-' || printf('%04d', numbered.seq)
-            FROM numbered
-            WHERE sales_requests.id = numbered.id
-            """
-        )
+        UPDATE sales_requests
+        SET request_number = 'SR-' || strftime('%Y', created_at) || '-' || printf('%04d', numbered.seq)
+        FROM numbered
+        WHERE sales_requests.id = numbered.id
+        """
+    )
 
     op.create_unique_constraint("uq_sales_requests_request_number", "sales_requests", ["request_number"])
     op.alter_column("sales_requests", "request_number", nullable=False)

@@ -138,6 +138,7 @@ def get_invoices(
             due_date=invoice.due_date,
             total=invoice.total,
             amount_due=invoice.amount_due,
+            sales_request_id=invoice.sales_request_id,
         )
         for invoice in invoices
     ]

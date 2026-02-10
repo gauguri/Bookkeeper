@@ -56,6 +56,16 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
   const addLine = () => setLines((prev) => [...prev, { ...emptyLine }]);
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, lineIndex) => lineIndex !== index));
 
+  const resetForm = () => {
+    setCustomerId("");
+    setWalkInName("");
+    setNotes("");
+    setRequestedFulfillmentDate("");
+    setStatus("OPEN");
+    setLines([{ ...emptyLine }]);
+    setError("");
+  };
+
   const handleSubmit = async () => {
     setError("");
     if (!customerId) {
@@ -71,15 +81,15 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
       return;
     }
     for (const line of lines) {
-      if (!line.item_id) {
+      if (!line.item_id && line.item_id !== 0) {
         setError("Please select an item for each line.");
         return;
       }
-      if (Number(line.quantity) <= 0) {
+      if (Number(line.quantity) <= 0 || Number.isNaN(Number(line.quantity))) {
         setError("Quantity must be greater than 0.");
         return;
       }
-      if (Number(line.unit_price) < 0) {
+      if (Number(line.unit_price) < 0 || Number.isNaN(Number(line.unit_price))) {
         setError("Unit price cannot be negative.");
         return;
       }
@@ -103,6 +113,7 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
           }))
         })
       });
+      resetForm();
       onCreated();
     } catch (err) {
       setError((err as Error).message || "Unable to create sales request.");
@@ -161,7 +172,10 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
             <select
               className="app-input"
               value={line.item_id}
-              onChange={(event) => updateLine(index, { item_id: Number(event.target.value) })}
+              onChange={(event) => {
+                const val = event.target.value;
+                updateLine(index, { item_id: val ? Number(val) : "" });
+              }}
             >
               <option value="">Select item *</option>
               {items.map((item) => (

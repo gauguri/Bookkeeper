@@ -281,10 +281,12 @@ class Invoice(Base):
     tax_total = Column(Numeric(14, 2), nullable=False, default=0)
     total = Column(Numeric(14, 2), nullable=False, default=0)
     amount_due = Column(Numeric(14, 2), nullable=False, default=0)
+    sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     customer = relationship("Customer", back_populates="invoices")
+    sales_request = relationship("SalesRequest", back_populates="invoice")
     lines = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan")
     payment_applications = relationship("PaymentApplication", back_populates="invoice", cascade="all, delete-orphan")
 
@@ -372,6 +374,7 @@ class SalesRequest(Base):
     customer = relationship("Customer")
     created_by = relationship("User")
     lines = relationship("SalesRequestLine", back_populates="sales_request", cascade="all, delete-orphan")
+    invoice = relationship("Invoice", back_populates="sales_request", uselist=False)
 
 
 class SalesRequestLine(Base):

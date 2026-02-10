@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.models import SalesRequest
 from app.sales_requests import schemas
-from app.sales_requests.service import calculate_sales_request_total, create_sales_request, update_sales_request_status
+from app.sales_requests.service import (
+    calculate_sales_request_total,
+    create_sales_request,
+    generate_invoice_from_sales_request,
+    get_sales_request_detail,
+    update_sales_request_status,
+)
 
 
 router = APIRouter(prefix="/api/sales-requests", tags=["sales-requests"])
@@ -67,6 +73,61 @@ def get_sales_request(sales_request_id: int, db: Session = Depends(get_db)):
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
     return _to_response(sales_request)
+
+
+@router.get("/{sales_request_id}/detail", response_model=schemas.SalesRequestDetailResponse)
+def get_sales_request_detail_endpoint(sales_request_id: int, db: Session = Depends(get_db)):
+    result = get_sales_request_detail(db, sales_request_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    sr = result["sales_request"]
+    return schemas.SalesRequestDetailResponse(
+        id=sr.id,
+        request_number=sr.request_number,
+        customer_id=sr.customer_id,
+        customer_name=sr.customer_name,
+        status=sr.status,
+        created_at=sr.created_at,
+        updated_at=sr.updated_at,
+        created_by_user_id=sr.created_by_user_id,
+        notes=sr.notes,
+        requested_fulfillment_date=sr.requested_fulfillment_date,
+        total_amount=Decimal(calculate_sales_request_total(sr)),
+        lines=result["enriched_lines"],
+        linked_invoice_id=result["linked_invoice_id"],
+        linked_invoice_number=result["linked_invoice_number"],
+    )
+
+
+@router.post(
+    "/{sales_request_id}/generate-invoice",
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_invoice_endpoint(
+    sales_request_id: int,
+    payload: schemas.GenerateInvoiceFromSRRequest,
+    db: Session = Depends(get_db),
+):
+    sales_request = (
+        db.query(SalesRequest)
+        .options(selectinload(SalesRequest.lines))
+        .filter(SalesRequest.id == sales_request_id)
+        .first()
+    )
+    if not sales_request:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    try:
+        invoice = generate_invoice_from_sales_request(db, sales_request, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    db.refresh(invoice)
+    return {
+        "invoice_id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "total": str(invoice.total),
+        "status": invoice.status,
+    }
 
 
 @router.patch("/{sales_request_id}", response_model=schemas.SalesRequestResponse)

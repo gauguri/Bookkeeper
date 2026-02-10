@@ -122,6 +122,7 @@ class InvoiceResponse(InvoiceBase):
     tax_total: DecimalValue
     total: DecimalValue
     amount_due: DecimalValue
+    sales_request_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     line_items: List[InvoiceLineResponse] = Field(alias="lines")
@@ -139,6 +140,7 @@ class InvoiceListResponse(BaseModel):
     due_date: date
     total: DecimalValue
     amount_due: DecimalValue
+    sales_request_id: Optional[int] = None
 
 
 class PaymentApplicationCreate(BaseModel):

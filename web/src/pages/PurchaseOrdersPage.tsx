@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ApiRequestError,
   createPurchaseOrder,
+  deletePurchaseOrder,
   getPurchaseOrder,
   listPurchaseOrders,
   PurchaseOrderPayload,
@@ -57,6 +59,8 @@ type FormLine = {
 
 const today = new Date().toISOString().slice(0, 10);
 const emptyLine = (): FormLine => ({ item_id: "", quantity: "1", unit_cost: "0" });
+
+const actionButtonClass = "app-button h-10 min-w-[110px] justify-center";
 
 export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderListRow[]>([]);
@@ -213,6 +217,27 @@ export default function PurchaseOrdersPage() {
     }
   };
 
+  const removePurchaseOrder = async (po: PurchaseOrderListRow) => {
+    const confirmDelete = window.confirm(`Delete purchase order ${po.po_number}? This cannot be undone.`);
+    if (!confirmDelete) return;
+
+    setError("");
+    try {
+      await deletePurchaseOrder(po.id);
+      setPurchaseOrders((prev) => prev.filter((row) => row.id !== po.id));
+      if (editingId === po.id) {
+        resetForm();
+      }
+    } catch (err) {
+      const requestError = err as ApiRequestError;
+      if (requestError.status === 409) {
+        setError(requestError.message);
+        return;
+      }
+      setError("Unable to delete purchase order. Please try again.");
+    }
+  };
+
   const updateLine = (index: number, key: keyof FormLine, value: string) => {
     setForm((prev) => ({
       ...prev,
@@ -312,7 +337,7 @@ export default function PurchaseOrdersPage() {
           </div>
 
           <div className="mt-6 max-w-5xl space-y-4 border-t border-border pt-4">
-            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(220px,1fr)_6rem_8rem_7rem_6rem] md:items-center md:gap-3">
+            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[200px_6rem_8rem_7rem_6rem] md:items-center md:gap-3">
               <span className="pl-1">Item</span>
               <span>Qty</span>
               <span>Unit cost</span>
@@ -321,11 +346,11 @@ export default function PurchaseOrdersPage() {
             </div>
             {form.lines.map((line, index) => (
               <div key={index} className="rounded-xl border border-muted/30 px-3 py-2">
-                <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-[minmax(220px,1fr)_6rem_8rem_7rem_6rem] md:items-center">
+                <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-[200px_6rem_8rem_7rem_6rem] md:items-center">
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Item</span>
                     <select
-                      className="app-input h-10 rounded-lg px-3"
+                      className="app-input h-10 w-full rounded-lg px-3"
                       value={line.item_id}
                       onChange={(event) => updateLine(index, "item_id", event.target.value)}
                     >
@@ -364,9 +389,9 @@ export default function PurchaseOrdersPage() {
                   <p className="w-28 text-right text-sm font-medium md:pt-0.5">
                     ${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}
                   </p>
-                  <div className="flex w-24 md:justify-end">
+                  <div className="flex w-full md:w-24 md:justify-end">
                     <button
-                      className="app-button-secondary"
+                      className="app-button h-10 w-full md:w-24 justify-center"
                       onClick={() => removeLine(index)}
                       disabled={form.lines.length === 1}
                     >
@@ -377,7 +402,7 @@ export default function PurchaseOrdersPage() {
               </div>
             ))}
             <div className="flex flex-wrap items-center gap-3">
-              <button className="app-button-secondary" onClick={addLine}>
+              <button className="app-button h-10 min-w-[140px] justify-center" onClick={addLine}>
                 Add line item
               </button>
             </div>
@@ -390,8 +415,8 @@ export default function PurchaseOrdersPage() {
           </div>
 
           <div className="border-t border-border mt-6 pt-4 flex items-center gap-3">
-            <button className="app-button h-10 min-w-[120px]" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
-            <button className="app-button-secondary h-10 min-w-[120px]" onClick={resetForm}>Cancel</button>
+            <button className="app-button h-10 min-w-[120px]" onClick={submit}>{editingId ? "Update" : "Submit"}</button>
+            <button className="app-button h-10 min-w-[120px] justify-center" onClick={resetForm}>Cancel</button>
           </div>
         </section>
       ) : null}
@@ -412,6 +437,7 @@ export default function PurchaseOrdersPage() {
             {purchaseOrders.map((po) => {
               const canEdit = po.status === "DRAFT" || po.status === "SENT";
               const canSend = po.status !== "RECEIVED" && po.status !== "PARTIALLY_RECEIVED";
+              const canDelete = po.status === "DRAFT";
 
               return (
                 <tr key={po.id} className="border-t border-muted/20">
@@ -421,20 +447,28 @@ export default function PurchaseOrdersPage() {
                   <td className="px-4 py-3">{po.status}</td>
                   <td className="px-4 py-3">${Number(po.total).toFixed(2)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
-                        className="app-button-secondary"
+                        className={actionButtonClass}
                         onClick={() => startEdit(po.id)}
                         disabled={!canEdit}
                       >
-                        {po.status === "SENT" ? "Update" : "Edit"}
+                        Update
                       </button>
                       <button
-                        className="app-button-primary"
+                        className={actionButtonClass}
                         onClick={() => send(po.id)}
                         disabled={!canSend}
                       >
-                        {po.status === "SENT" ? "Resend" : "Send"}
+                        Resend
+                      </button>
+                      <button
+                        className={actionButtonClass}
+                        onClick={() => removePurchaseOrder(po)}
+                        disabled={!canDelete}
+                        title={canDelete ? "" : "Cannot delete SENT PO; use Update/Resend."}
+                      >
+                        Delete
                       </button>
                     </div>
                   </td>

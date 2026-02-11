@@ -336,9 +336,9 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <button className="app-button-primary h-10 rounded-lg px-4" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
-            <button className="app-button-secondary" onClick={resetForm}>Cancel</button>
+          <div className="border-t border-border mt-6 pt-4 flex items-center gap-3">
+            <button className="app-button h-10 min-w-[120px]" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
+            <button className="app-button-secondary h-10 min-w-[120px]" onClick={resetForm}>Cancel</button>
           </div>
         </section>
       ) : null}

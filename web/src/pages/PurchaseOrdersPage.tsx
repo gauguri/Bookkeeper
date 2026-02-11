@@ -252,15 +252,18 @@ export default function PurchaseOrdersPage() {
               </div>
             </label>
 
-            <label className="block text-sm">
-              <span className="text-sm font-medium text-slate-700">Notes</span>
+            <div className="mt-4 flex flex-col gap-1">
+              <label className="text-sm font-medium text-slate-700" htmlFor="purchase-order-notes">
+                Notes
+              </label>
               <textarea
-                className="app-input mt-1 w-full rounded-lg border-slate-200 md:max-w-3xl"
+                id="purchase-order-notes"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 md:max-w-3xl"
                 rows={4}
                 value={form.notes}
                 onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
               />
-            </label>
+            </div>
           </div>
 
           <div className="mt-6 max-w-5xl space-y-4 border-t border-border pt-4">

@@ -175,7 +175,7 @@ export default function PurchaseOrdersPage() {
     setError("");
     try {
       await sendPurchaseOrder(poId);
-      setPurchaseOrders((prev) => prev.map((po) => (po.id === poId ? { ...po, status: "SENT" } : po)));
+      await loadData();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -242,6 +242,7 @@ export default function PurchaseOrdersPage() {
                 onChange={(event) => setForm((prev) => ({ ...prev, expected_date: event.target.value }))}
               />
             </label>
+            <div className="hidden md:block" aria-hidden="true" />
             <label className="space-y-1 text-sm md:col-span-2">
               <span>Notes</span>
               <textarea
@@ -252,58 +253,80 @@ export default function PurchaseOrdersPage() {
             </label>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
+            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(220px,1fr)_90px_120px_110px_90px] md:gap-3">
+              <span>Item</span>
+              <span>Qty</span>
+              <span>Unit cost</span>
+              <span className="text-right">Line total</span>
+              <span className="text-right">Action</span>
+            </div>
             {form.lines.map((line, index) => (
-              <div key={index} className="grid gap-3 rounded-xl border border-muted/30 p-3 md:grid-cols-12">
-                <select
-                  className="app-input md:col-span-5"
-                  value={line.item_id}
-                  onChange={(event) => updateLine(index, "item_id", event.target.value)}
-                >
-                  <option value="">Select item</option>
-                  {items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="app-input md:col-span-2"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={line.quantity}
-                  onChange={(event) => updateLine(index, "quantity", event.target.value)}
-                  placeholder="Qty"
-                />
-                <input
-                  className="app-input md:col-span-2"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={line.unit_cost}
-                  onChange={(event) => updateLine(index, "unit_cost", event.target.value)}
-                  placeholder="Unit cost"
-                />
-                <p className="flex items-center text-sm md:col-span-2">
-                  ${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}
-                </p>
-                <button
-                  className="app-button-secondary md:col-span-1"
-                  onClick={() => removeLine(index)}
-                  disabled={form.lines.length === 1}
-                >
-                  Remove
-                </button>
+              <div key={index} className="rounded-xl border border-muted/30 p-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_90px_120px_110px_90px] md:items-center">
+                  <label className="space-y-1 text-sm md:space-y-0">
+                    <span className="md:sr-only">Item</span>
+                    <select
+                      className="app-input h-10"
+                      value={line.item_id}
+                      onChange={(event) => updateLine(index, "item_id", event.target.value)}
+                    >
+                      <option value="">Select item</option>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-sm md:space-y-0">
+                    <span className="md:sr-only">Qty</span>
+                    <input
+                      className="app-input h-10"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.quantity}
+                      onChange={(event) => updateLine(index, "quantity", event.target.value)}
+                      placeholder="Qty"
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm md:space-y-0">
+                    <span className="md:sr-only">Unit cost</span>
+                    <input
+                      className="app-input h-10"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.unit_cost}
+                      onChange={(event) => updateLine(index, "unit_cost", event.target.value)}
+                      placeholder="Unit cost"
+                    />
+                  </label>
+                  <p className="text-right text-sm font-medium md:pt-0.5">
+                    ${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}
+                  </p>
+                  <div className="flex md:justify-end">
+                    <button
+                      className="app-button-secondary"
+                      onClick={() => removeLine(index)}
+                      disabled={form.lines.length === 1}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
-            <button className="app-button-secondary" onClick={addLine}>
-              Add line item
-            </button>
-            <p className="text-sm font-semibold">Subtotal: ${subtotal.toFixed(2)}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="app-button-secondary" onClick={addLine}>
+                Add line item
+              </button>
+              <p className="text-sm font-semibold">Subtotal: ${subtotal.toFixed(2)}</p>
+            </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button className="app-button-primary" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
             <button className="app-button-secondary" onClick={resetForm}>Cancel</button>
           </div>
@@ -323,7 +346,11 @@ export default function PurchaseOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {purchaseOrders.map((po) => (
+            {purchaseOrders.map((po) => {
+              const canEdit = po.status === "DRAFT" || po.status === "SENT";
+              const canSend = po.status !== "RECEIVED" && po.status !== "PARTIALLY_RECEIVED";
+
+              return (
               <tr key={po.id} className="border-t border-muted/20">
                 <td className="px-4 py-3">{po.po_number}</td>
                 <td className="px-4 py-3">{po.supplier_name}</td>
@@ -335,21 +362,22 @@ export default function PurchaseOrdersPage() {
                     <button
                       className="app-button-secondary"
                       onClick={() => startEdit(po.id)}
-                      disabled={po.status !== "DRAFT"}
+                      disabled={!canEdit}
                     >
-                      Edit
+                      {po.status === "SENT" ? "Update" : "Edit"}
                     </button>
                     <button
                       className="app-button-primary"
                       onClick={() => send(po.id)}
-                      disabled={po.status === "SENT"}
+                      disabled={!canSend}
                     >
-                      Send
+                      {po.status === "SENT" ? "Resend" : "Send"}
                     </button>
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </section>

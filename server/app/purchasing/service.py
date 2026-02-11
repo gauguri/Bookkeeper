@@ -54,8 +54,8 @@ def create_purchase_order(db: Session, payload: dict) -> PurchaseOrder:
 
 
 def update_purchase_order(db: Session, po: PurchaseOrder, payload: dict) -> PurchaseOrder:
-    if po.status != "DRAFT":
-        raise ValueError("Only DRAFT purchase orders can be edited.")
+    if po.status not in {"DRAFT", "SENT"}:
+        raise ValueError("Only DRAFT or SENT purchase orders can be edited.")
 
     lines_payload = payload.pop("lines", None)
     for key, value in payload.items():
@@ -69,8 +69,6 @@ def update_purchase_order(db: Session, po: PurchaseOrder, payload: dict) -> Purc
 
 
 def send_purchase_order(db: Session, po: PurchaseOrder) -> PurchaseOrder:
-    if po.status == "SENT":
-        return po
     if not po.lines:
         raise ValueError("Purchase order must include at least one line item.")
     if any(Decimal(line.qty_ordered or 0) <= 0 for line in po.lines):

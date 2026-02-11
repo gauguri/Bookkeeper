@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
@@ -5,6 +7,20 @@ from .db import SessionLocal
 from .models import Company, User, Account
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _truncate_to_bcrypt_limit(password: str) -> str:
+    """Truncate to bcrypt's 72-byte limit to avoid backend ValueError."""
+    encoded = password.encode("utf-8")
+    if len(encoded) <= 72:
+        return password
+
+    truncated = encoded[:72]
+    while True:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
 
 
 ROOT_ACCOUNTS = [
@@ -119,10 +135,13 @@ def _get_or_create_user(db: Session, company_id: int) -> User:
             user.is_active = True
         return user
 
+    seed_password = _truncate_to_bcrypt_limit("password123")
+
     user = User(
         company_id=company_id,
         email="demo@bookkeeper.local",
-        hashed_password=pwd_context.hash("password123"),
+        # passlib+bcrypt enforces bcrypt's 72-byte input limit.
+        hashed_password=pwd_context.hash(seed_password),
         role="admin",
     )
     db.add(user)
@@ -257,7 +276,13 @@ def run_seed():
     db: Session = SessionLocal()
     try:
         company = _get_or_create_company(db)
-        _get_or_create_user(db, company.id)
+
+        if os.getenv("SEED_SKIP_AUTH", "0") not in {"1", "true", "TRUE", "yes", "YES"}:
+            try:
+                _get_or_create_user(db, company.id)
+            except Exception as exc:
+                print(f"Skipping auth seed user creation due to error: {exc}")
+
         _seed_chart_of_accounts(db, company.id)
         db.commit()
     finally:

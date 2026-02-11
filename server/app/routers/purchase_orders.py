@@ -1,7 +1,8 @@
 from decimal import Decimal
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -19,6 +20,12 @@ from app.purchasing.service import (
 
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
+
+
+DELETE_BLOCKED_DETAIL = (
+    "Cannot delete purchase order because it has dependent records (inventory landed / send log). "
+    "Use Cancel instead or remove dependencies."
+)
 
 
 def _to_detail_response(po: PurchaseOrder) -> schemas.PurchaseOrderResponse:
@@ -184,3 +191,28 @@ def receive_purchase_order_endpoint(
     db.commit()
     db.refresh(po)
     return _to_detail_response(po)
+
+
+@router.delete("/{purchase_order_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_purchase_order_endpoint(purchase_order_id: int, db: Session = Depends(get_db)):
+    po = (
+        db.query(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.lines))
+        .filter(PurchaseOrder.id == purchase_order_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found.")
+    if po.status != "DRAFT" or po.inventory_landed:
+        raise HTTPException(status_code=409, detail=DELETE_BLOCKED_DETAIL)
+
+    try:
+        po.lines.clear()
+        db.flush()
+        db.delete(po)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=DELETE_BLOCKED_DETAIL)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

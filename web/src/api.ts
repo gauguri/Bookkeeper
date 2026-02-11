@@ -4,6 +4,10 @@ export type ApiError = {
   detail?: string;
 };
 
+export type ApiRequestError = Error & {
+  status: number;
+};
+
 export type PurchaseOrderLinePayload = {
   item_id: number;
   quantity: number;
@@ -38,8 +42,15 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     } catch (error) {
       // ignore parse errors
     }
-    throw new Error(message);
+    const requestError = new Error(message) as ApiRequestError;
+    requestError.status = response.status;
+    throw requestError;
   }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return (await response.json()) as T;
 }
 
@@ -67,4 +78,9 @@ export function updatePurchaseOrder<T>(id: number, payload: PurchaseOrderPayload
 
 export function sendPurchaseOrder<T>(id: number) {
   return apiFetch<T>(`/purchase-orders/${id}/send`, { method: "POST" });
+}
+
+
+export function deletePurchaseOrder(id: number) {
+  return apiFetch<void>(`/purchase-orders/${id}`, { method: "DELETE" });
 }

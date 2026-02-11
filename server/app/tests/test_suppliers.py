@@ -323,3 +323,59 @@ def test_api_delete_supplier_returns_conflict_when_referenced(client_with_fk):
         delete_response.json()["detail"]
         == "Cannot delete supplier because it is referenced by purchase orders/items. Remove associations first."
     )
+
+
+def test_api_delete_purchase_order_success_when_draft(client_with_fk):
+    supplier = client_with_fk.post("/api/suppliers", json={"name": "Supply Co", "email": "buyer@supplyco.test"}).json()
+    item = client_with_fk.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+    client_with_fk.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+
+    po_response = client_with_fk.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "order_date": "2024-01-01",
+            "lines": [{"item_id": item["id"], "quantity": 2}],
+        },
+    )
+    assert po_response.status_code == 201
+
+    po = po_response.json()
+    delete_response = client_with_fk.delete(f"/api/purchase-orders/{po['id']}")
+
+    assert delete_response.status_code == 204
+    assert client_with_fk.get(f"/api/purchase-orders/{po['id']}").status_code == 404
+
+
+def test_api_delete_purchase_order_returns_conflict_when_sent(client_with_fk):
+    supplier = client_with_fk.post("/api/suppliers", json={"name": "Supply Co", "email": "buyer@supplyco.test"}).json()
+    item = client_with_fk.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+    client_with_fk.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0, "freight_cost": 1.0, "tariff_cost": 0.5},
+    )
+
+    po_response = client_with_fk.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "order_date": "2024-01-01",
+            "lines": [{"item_id": item["id"], "quantity": 2}],
+        },
+    )
+    assert po_response.status_code == 201
+    po = po_response.json()
+
+    send_response = client_with_fk.post(f"/api/purchase-orders/{po['id']}/send")
+    assert send_response.status_code == 200
+
+    delete_response = client_with_fk.delete(f"/api/purchase-orders/{po['id']}")
+
+    assert delete_response.status_code == 409
+    assert (
+        delete_response.json()["detail"]
+        == "Cannot delete purchase order because it has dependent records (inventory landed / send log). Use Cancel instead or remove dependencies."
+    )

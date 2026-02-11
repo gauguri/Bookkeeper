@@ -470,6 +470,15 @@ export default function PurchaseOrdersPage() {
                       >
                         Delete
                       </button>
+                      <span title={canDelete ? "" : "Cannot delete SENT PO; use Update/Resend."}>
+                        <button
+                          className={canDelete ? actionButtonClass : disabledDeleteButtonClass}
+                          onClick={() => removePurchaseOrder(po)}
+                          disabled={!canDelete}
+                        >
+                          Delete
+                        </button>
+                      </span>
                     </div>
                   </td>
                 </tr>

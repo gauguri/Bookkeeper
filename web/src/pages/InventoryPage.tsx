@@ -1,74 +1,118 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "../api";
 
-type InventoryItem = {
+type InventoryRow = {
   id: number;
-  sku?: string | null;
+  item_id: number;
+  item_name: string;
+  item_sku?: string | null;
+  quantity_on_hand: number;
+  landed_unit_cost: number;
+  total_value: number;
+  last_updated_at: string;
+};
+
+type Item = {
+  id: number;
   name: string;
-  on_hand_qty: number;
-  reserved_qty: number;
-  available_qty: number;
-  reorder_point?: number | null;
 };
 
-type AdjustmentForm = {
+type InventoryForm = {
   item_id: string;
-  qty_delta: string;
-  reason: string;
+  quantity_on_hand: string;
+  landed_unit_cost: string;
 };
 
-const emptyAdjustment: AdjustmentForm = {
+const emptyForm: InventoryForm = {
   item_id: "",
-  qty_delta: "",
-  reason: ""
+  quantity_on_hand: "0",
+  landed_unit_cost: "0"
 };
 
 export default function InventoryPage() {
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [search, setSearch] = useState("");
+  const [rows, setRows] = useState<InventoryRow[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [error, setError] = useState("");
-  const [adjustment, setAdjustment] = useState<AdjustmentForm>(emptyAdjustment);
+  const [editing, setEditing] = useState<InventoryRow | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState<InventoryForm>(emptyForm);
 
-  const filtered = useMemo(() => {
-    if (!search) {
-      return items;
-    }
-    return items.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
-  }, [items, search]);
-
-  const loadItems = async () => {
+  const loadData = async () => {
     try {
-      const data = await apiFetch<InventoryItem[]>(
-        `/inventory/items?search=${encodeURIComponent(search)}`
-      );
-      setItems(data);
+      const [inventoryData, itemData] = await Promise.all([
+        apiFetch<InventoryRow[]>("/inventory"),
+        apiFetch<Item[]>("/items")
+      ]);
+      setRows(inventoryData);
+      setItems(itemData);
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
   useEffect(() => {
-    loadItems();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadData();
   }, []);
 
-  const submitAdjustment = async () => {
-    if (!adjustment.item_id || !adjustment.qty_delta) {
-      setError("Select an item and enter a quantity adjustment.");
+  const openCreate = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setFormOpen(true);
+    setError("");
+  };
+
+  const openEdit = (row: InventoryRow) => {
+    setEditing(row);
+    setForm({
+      item_id: String(row.item_id),
+      quantity_on_hand: String(row.quantity_on_hand),
+      landed_unit_cost: String(row.landed_unit_cost)
+    });
+    setFormOpen(true);
+    setError("");
+  };
+
+  const save = async () => {
+    if (!form.item_id || Number(form.quantity_on_hand) < 0 || Number(form.landed_unit_cost) < 0) {
+      setError("Item, quantity, and landed unit cost are required. Values must be 0 or greater.");
+      return;
+    }
+
+    setError("");
+    try {
+      if (editing) {
+        await apiFetch(`/inventory/${editing.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            quantity_on_hand: Number(form.quantity_on_hand),
+            landed_unit_cost: Number(form.landed_unit_cost)
+          })
+        });
+      } else {
+        await apiFetch("/inventory", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: Number(form.item_id),
+            quantity_on_hand: Number(form.quantity_on_hand),
+            landed_unit_cost: Number(form.landed_unit_cost)
+          })
+        });
+      }
+      setFormOpen(false);
+      await loadData();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const remove = async (row: InventoryRow) => {
+    if (!window.confirm(`Delete inventory record for ${row.item_name}?`)) {
       return;
     }
     setError("");
     try {
-      await apiFetch("/inventory/adjustments", {
-        method: "POST",
-        body: JSON.stringify({
-          item_id: Number(adjustment.item_id),
-          qty_delta: Number(adjustment.qty_delta),
-          reason: adjustment.reason || null
-        })
-      });
-      setAdjustment(emptyAdjustment);
-      loadItems();
+      await apiFetch(`/inventory/${row.id}`, { method: "DELETE" });
+      await loadData();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -76,99 +120,96 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Inventory Dashboard</h2>
-          <p className="text-sm text-muted">
-            Track on-hand stock, reservations, and availability in real time.
-          </p>
+          <h2 className="text-2xl font-semibold">Inventory</h2>
+          <p className="text-sm text-muted">Real-time inventory levels and landed values.</p>
         </div>
-        <input
-          className="app-input w-full max-w-xs"
-          placeholder="Search items"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <button className="app-button" onClick={openCreate}>Add Inventory</button>
       </header>
 
       {error ? <p className="text-sm text-rose-500">{error}</p> : null}
 
-      <section className="app-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-muted">
-              <tr>
-                <th className="px-4 py-3">Item</th>
-                <th className="px-4 py-3">SKU</th>
-                <th className="px-4 py-3">On hand</th>
-                <th className="px-4 py-3">Reserved</th>
-                <th className="px-4 py-3">Available</th>
-                <th className="px-4 py-3">Reorder point</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((item) => (
-                <tr key={item.id} className="border-t border-muted/20">
-                  <td className="px-4 py-3 font-medium">{item.name}</td>
-                  <td className="px-4 py-3 text-muted">{item.sku || "—"}</td>
-                  <td className="px-4 py-3">{item.on_hand_qty}</td>
-                  <td className="px-4 py-3">{item.reserved_qty}</td>
-                  <td className="px-4 py-3 font-semibold">{item.available_qty}</td>
-                  <td className="px-4 py-3 text-muted">{item.reorder_point ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {formOpen ? (
+        <section className="app-card space-y-4 p-6">
+          <h3 className="text-lg font-semibold">{editing ? "Edit Inventory" : "Add Inventory"}</h3>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted">Item</label>
+              <select
+                className="app-input mt-2 w-full"
+                value={form.item_id}
+                onChange={(event) => setForm((prev) => ({ ...prev, item_id: event.target.value }))}
+                disabled={Boolean(editing)}
+              >
+                <option value="">Select item</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted">Quantity</label>
+              <input
+                className="app-input mt-2 w-full"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.quantity_on_hand}
+                onChange={(event) => setForm((prev) => ({ ...prev, quantity_on_hand: event.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase text-muted">Landed unit cost</label>
+              <input
+                className="app-input mt-2 w-full"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.landed_unit_cost}
+                onChange={(event) => setForm((prev) => ({ ...prev, landed_unit_cost: event.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="app-button-primary" onClick={save}>Save</button>
+            <button className="app-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+          </div>
+        </section>
+      ) : null}
 
-      <section className="app-card space-y-4">
-        <h3 className="text-lg font-semibold">Adjust inventory</h3>
-        <div className="grid gap-4 md:grid-cols-4">
-          <div>
-            <label className="text-xs font-semibold uppercase text-muted">Item</label>
-            <select
-              className="app-input mt-2 w-full"
-              value={adjustment.item_id}
-              onChange={(event) =>
-                setAdjustment((prev) => ({ ...prev, item_id: event.target.value }))
-              }
-            >
-              <option value="">Select item</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-semibold uppercase text-muted">Qty delta</label>
-            <input
-              className="app-input mt-2 w-full"
-              type="number"
-              value={adjustment.qty_delta}
-              onChange={(event) =>
-                setAdjustment((prev) => ({ ...prev, qty_delta: event.target.value }))
-              }
-              placeholder="e.g. 5 or -2"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold uppercase text-muted">Reason</label>
-            <input
-              className="app-input mt-2 w-full"
-              value={adjustment.reason}
-              onChange={(event) =>
-                setAdjustment((prev) => ({ ...prev, reason: event.target.value }))
-              }
-              placeholder="Optional note"
-            />
-          </div>
-        </div>
-        <button className="app-button-primary" onClick={submitAdjustment}>
-          Post adjustment
-        </button>
+      <section className="app-card overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="text-xs uppercase text-muted">
+            <tr>
+              <th className="px-4 py-3">Item</th>
+              <th className="px-4 py-3">Quantity On Hand</th>
+              <th className="px-4 py-3">Landed Unit Cost</th>
+              <th className="px-4 py-3">Total Value</th>
+              <th className="px-4 py-3">Last Updated</th>
+              <th className="px-4 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-t border-muted/20">
+                <td className="px-4 py-3 font-medium">{row.item_name}</td>
+                <td className="px-4 py-3">{Number(row.quantity_on_hand).toFixed(2)}</td>
+                <td className="px-4 py-3">${Number(row.landed_unit_cost).toFixed(2)}</td>
+                <td className="px-4 py-3">${Number(row.total_value).toFixed(2)}</td>
+                <td className="px-4 py-3">{new Date(row.last_updated_at).toLocaleString()}</td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
+                    <button className="app-button-secondary" onClick={() => openEdit(row)}>Edit</button>
+                    <button className="app-button-secondary" onClick={() => remove(row)}>Delete</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
     </div>
   );

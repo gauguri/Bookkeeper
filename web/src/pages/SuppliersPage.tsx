@@ -158,6 +158,7 @@ export default function SuppliersPage() {
       phone: supplier.phone ?? "",
       address: supplier.address ?? ""
     });
+    document.getElementById("supplier-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const deleteSupplier = async (supplierId: number) => {
@@ -278,7 +279,7 @@ export default function SuppliersPage() {
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null;
 
   return (
-    <section className="space-y-8">
+    <section className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Suppliers</p>
@@ -290,21 +291,96 @@ export default function SuppliersPage() {
         </button>
       </div>
 
-      <div className="app-card p-6">
-        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 bg-surface/95 pb-4 backdrop-blur">
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="app-input w-60"
-              placeholder="Search suppliers"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <button className="app-button-secondary" onClick={loadSuppliers} disabled={loading}>
-              Search
+      {error && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      <div id="supplier-form" className="app-card space-y-6 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold">New supplier</h2>
+          <span className="app-badge border-primary/30 bg-primary/10 text-primary">VENDOR PROFILE</span>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
+              <span className="font-medium text-foreground">Name *</span>
+              <input
+                className="app-input"
+                value={form.name}
+                onChange={(event) => setForm({ ...form, name: event.target.value })}
+              />
+            </label>
+            <label className="space-y-2 text-sm text-muted">
+              <span className="font-medium text-foreground">Email</span>
+              <input
+                className="app-input"
+                value={form.email}
+                onChange={(event) => setForm({ ...form, email: event.target.value })}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm text-muted">
+              <span className="font-medium text-foreground">Phone</span>
+              <input
+                className="app-input"
+                value={form.phone}
+                onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              />
+            </label>
+            <div className="hidden md:block" />
+          </div>
+
+          <div>
+            <label className="space-y-2 text-sm text-muted">
+              <span className="font-medium text-foreground">Address</span>
+              <input
+                className="app-input"
+                value={form.address}
+                onChange={(event) => setForm({ ...form, address: event.target.value })}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="text-xs text-muted">Last updated —</div>
+          <div className="flex items-center gap-2">
+            {editingId && (
+              <button
+                className="app-button-secondary"
+                onClick={() => {
+                  setEditingId(null);
+                  setForm(emptyForm);
+                }}
+              >
+                Cancel
+              </button>
+            )}
+            <button className="app-button" onClick={handleSubmit}>
+              {editingId ? "Update supplier" : "Create supplier"}
             </button>
           </div>
-          {error && <p className="text-sm text-danger">{error}</p>}
         </div>
+      </div>
+
+      <div className="app-card p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="app-input w-full sm:w-72"
+            placeholder="Search suppliers"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <button className="app-button-secondary" onClick={loadSuppliers} disabled={loading}>
+            Search
+          </button>
+        </div>
+
         <div className="mt-4 overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-widest text-muted">
@@ -358,10 +434,7 @@ export default function SuppliersPage() {
                       <div className="h-14 w-14 rounded-2xl bg-secondary" />
                       <p className="font-semibold">No suppliers found</p>
                       <p className="text-sm text-muted">Create a supplier to start tracking vendor costs.</p>
-                      <button
-                        className="app-button"
-                        onClick={() => document.getElementById("supplier-form")?.scrollIntoView()}
-                      >
+                      <button className="app-button" onClick={() => document.getElementById("supplier-form")?.scrollIntoView()}>
                         Create supplier
                       </button>
                     </div>
@@ -373,18 +446,17 @@ export default function SuppliersPage() {
         </div>
       </div>
 
-      <div className="app-card p-6 space-y-4">
+      <div className="app-card space-y-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold">Items supplied</h2>
-            <p className="text-sm text-muted">
-              {selectedSupplier ? `Manage catalog for ${selectedSupplier.name}.` : "Select a supplier to manage items."}
-            </p>
+            <p className="text-sm text-muted">Select a supplier to manage items.</p>
           </div>
           <button className="app-button-secondary" onClick={() => openItemModal()} disabled={!selectedSupplierId}>
             <Plus className="h-4 w-4" /> Add item
           </button>
         </div>
+
         {selectedSupplier ? (
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
@@ -461,58 +533,6 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      <div id="supplier-form" className="app-card p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">{editingId ? "Edit supplier" : "New supplier"}</h2>
-          <span className="app-badge border-primary/30 bg-primary/10 text-primary">Vendor profile</span>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <input
-            className="app-input"
-            placeholder="Name *"
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-          />
-          <input
-            className="app-input"
-            placeholder="Email"
-            value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-          />
-          <input
-            className="app-input"
-            placeholder="Phone"
-            value={form.phone}
-            onChange={(event) => setForm({ ...form, phone: event.target.value })}
-          />
-          <input
-            className="app-input md:col-span-2"
-            placeholder="Address"
-            value={form.address}
-            onChange={(event) => setForm({ ...form, address: event.target.value })}
-          />
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-muted">Last updated {editingId ? "recently" : "—"}</div>
-          <div className="flex items-center gap-2">
-            {editingId && (
-              <button
-                className="app-button-secondary"
-                onClick={() => {
-                  setEditingId(null);
-                  setForm(emptyForm);
-                }}
-              >
-                Cancel
-              </button>
-            )}
-            <button className="app-button" onClick={handleSubmit}>
-              {editingId ? "Save changes" : "Create supplier"}
-            </button>
-          </div>
-        </div>
-      </div>
-
       <SupplierItemLinkModal
         isOpen={itemModalOpen}
         title={editingItemId ? "Edit supplied item" : "Add item"}
@@ -530,13 +550,6 @@ export default function SuppliersPage() {
         onSubmit={submitSupplierItem}
         onChange={setItemForm}
       />
-
-      <button
-        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
-        onClick={() => document.getElementById("supplier-form")?.scrollIntoView({ behavior: "smooth" })}
-      >
-        <Plus className="h-4 w-4" /> Create
-      </button>
     </section>
   );
 }

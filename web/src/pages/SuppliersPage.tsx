@@ -169,7 +169,8 @@ export default function SuppliersPage() {
         setSupplierItems([]);
       }
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setError(message === "Internal Server Error" ? "Failed to delete supplier." : message);
     }
   };
 

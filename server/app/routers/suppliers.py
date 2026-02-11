@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import Item, Supplier, SupplierItem
+from app.models import InvoiceLine, Item, PurchaseOrder, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.suppliers import schemas
 from app.suppliers.service import get_supplier_link, set_preferred_supplier
 
@@ -56,8 +56,28 @@ def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found.")
-    db.delete(supplier)
-    db.commit()
+
+    has_dependencies = (
+        db.query(PurchaseOrder.id).filter(PurchaseOrder.supplier_id == supplier_id).first() is not None
+        or db.query(InvoiceLine.id).filter(InvoiceLine.supplier_id == supplier_id).first() is not None
+        or db.query(PurchaseOrderSendLog.id).filter(PurchaseOrderSendLog.supplier_id == supplier_id).first() is not None
+    )
+    if has_dependencies:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete supplier because it is referenced by purchase orders/items. Remove associations first.",
+        )
+
+    try:
+        db.delete(supplier)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete supplier because it is referenced by purchase orders/items. Remove associations first.",
+        ) from None
+
     return supplier
 
 

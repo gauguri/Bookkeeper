@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -49,6 +49,38 @@ def client():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(engine)
+
+
+@pytest.fixture()
+def client_with_fk():
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+        del connection_record
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
 
@@ -252,3 +284,42 @@ def test_api_update_costs_recomputes_landed_cost(client):
 
     assert response.status_code == 200
     assert response.json()["landed_cost"] == 9.0
+
+
+def test_api_delete_supplier_success_without_dependencies(client):
+    supplier = client.post("/api/suppliers", json={"name": "Disposable Supply"}).json()
+
+    response = client.delete(f"/api/suppliers/{supplier['id']}")
+
+    assert response.status_code == 200
+    get_response = client.get(f"/api/suppliers/{supplier['id']}")
+    assert get_response.status_code == 404
+
+
+def test_api_delete_supplier_returns_conflict_when_referenced(client_with_fk):
+    supplier = client_with_fk.post("/api/suppliers", json={"name": "Linked Supply"}).json()
+    item = client_with_fk.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    link_response = client_with_fk.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"], "supplier_cost": 4.0},
+    )
+    assert link_response.status_code == 201
+
+    po_response = client_with_fk.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "order_date": "2024-01-01",
+            "lines": [{"item_id": item["id"], "quantity": 1}],
+        },
+    )
+    assert po_response.status_code == 201
+
+    delete_response = client_with_fk.delete(f"/api/suppliers/{supplier['id']}")
+
+    assert delete_response.status_code == 409
+    assert (
+        delete_response.json()["detail"]
+        == "Cannot delete supplier because it is referenced by purchase orders/items. Remove associations first."
+    )

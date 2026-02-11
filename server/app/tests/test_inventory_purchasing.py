@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.inventory.service import adjust_inventory
-from app.models import Item, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.models import Inventory, Item, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.purchasing.service import create_purchase_order, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
@@ -180,6 +180,80 @@ def test_send_purchase_order_allows_resend_and_adds_new_log():
     assert po.status == "SENT"
     assert send_log_count == 2
 
+
+
+
+def test_send_purchase_order_lands_inventory_with_po_level_costs():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("10.00"),
+        freight_cost=Decimal("0.00"),
+        tariff_cost=Decimal("0.00"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "freight_cost": Decimal("20.00"),
+            "tariff_cost": Decimal("10.00"),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5"), "unit_cost": Decimal("10.00")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    db.commit()
+
+    inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+    assert inventory is not None
+    assert inventory.quantity_on_hand == Decimal("5")
+    assert inventory.landed_unit_cost == Decimal("16")
+
+
+def test_send_purchase_order_resend_does_not_double_land_inventory():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("4.00"),
+        freight_cost=Decimal("0.00"),
+        tariff_cost=Decimal("0.00"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "freight_cost": Decimal("2.00"),
+            "tariff_cost": Decimal("3.00"),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5"), "unit_cost": Decimal("4.00")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    send_purchase_order(db, po)
+    db.commit()
+
+    inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+    assert inventory.quantity_on_hand == Decimal("5")
 
 def test_update_purchase_order_allowed_when_sent():
     db = create_session()

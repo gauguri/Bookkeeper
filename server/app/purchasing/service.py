@@ -5,7 +5,7 @@ import json
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.inventory.service import receive_inventory
+from app.inventory.service import land_inventory_from_purchase_order, receive_inventory
 from app.models import Item, PurchaseOrder, PurchaseOrderLine, PurchaseOrderSendLog, Supplier, SupplierItem
 
 
@@ -14,8 +14,16 @@ def _next_po_number(db: Session) -> str:
     return f"PO-{count + 1:05d}"
 
 
-def po_total(po: PurchaseOrder) -> Decimal:
+def po_items_subtotal(po: PurchaseOrder) -> Decimal:
     return sum((Decimal(line.qty_ordered or 0) * Decimal(line.unit_cost or 0) for line in po.lines), Decimal("0"))
+
+
+def po_extra_costs_total(po: PurchaseOrder) -> Decimal:
+    return Decimal(po.freight_cost or 0) + Decimal(po.tariff_cost or 0)
+
+
+def po_total(po: PurchaseOrder) -> Decimal:
+    return po_items_subtotal(po) + po_extra_costs_total(po)
 
 
 def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrderLine:
@@ -45,6 +53,8 @@ def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrde
 
 def create_purchase_order(db: Session, payload: dict) -> PurchaseOrder:
     lines_payload = payload.pop("lines")
+    payload.setdefault("freight_cost", Decimal("0"))
+    payload.setdefault("tariff_cost", Decimal("0"))
     if not payload.get("po_number"):
         payload["po_number"] = _next_po_number(db)
     po = PurchaseOrder(**payload)
@@ -96,6 +106,8 @@ def send_purchase_order(db: Session, po: PurchaseOrder) -> PurchaseOrder:
             }
             for line in po.lines
         ],
+        "items_subtotal": str(po_items_subtotal(po)),
+        "extra_costs_total": str(po_extra_costs_total(po)),
         "total": str(po_total(po)),
     }
     db.add(
@@ -105,6 +117,12 @@ def send_purchase_order(db: Session, po: PurchaseOrder) -> PurchaseOrder:
             payload=json.dumps(log_payload),
         )
     )
+
+    if not po.inventory_landed:
+        land_inventory_from_purchase_order(db, po)
+        po.inventory_landed = True
+        po.landed_at = datetime.utcnow()
+
     po.status = "SENT"
     po.sent_at = datetime.utcnow()
     return po

@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.models import PurchaseOrder, PurchaseOrderLine
 from app.purchasing import schemas
-from app.purchasing.service import create_purchase_order, po_total, receive_purchase_order, send_purchase_order, update_purchase_order
+from app.purchasing.service import (
+    create_purchase_order,
+    po_extra_costs_total,
+    po_items_subtotal,
+    po_total,
+    receive_purchase_order,
+    send_purchase_order,
+    update_purchase_order,
+)
 
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase-orders"])
@@ -21,7 +29,11 @@ def _to_detail_response(po: PurchaseOrder) -> schemas.PurchaseOrderResponse:
         order_date=po.order_date,
         expected_date=po.expected_date,
         notes=po.notes,
+        freight_cost=po.freight_cost,
+        tariff_cost=po.tariff_cost,
         status=po.status,
+        items_subtotal=po_items_subtotal(po),
+        extra_costs_total=po_extra_costs_total(po),
         total=po_total(po),
         created_at=po.created_at,
         updated_at=po.updated_at,
@@ -59,6 +71,10 @@ def list_purchase_orders(db: Session = Depends(get_db)):
             supplier_name=po.supplier.name if po.supplier else f"Supplier #{po.supplier_id}",
             order_date=po.order_date,
             status=po.status,
+            items_subtotal=po_items_subtotal(po),
+            extra_costs_total=po_extra_costs_total(po),
+            freight_cost=po.freight_cost,
+            tariff_cost=po.tariff_cost,
             total=po_total(po),
         )
         for po in pos

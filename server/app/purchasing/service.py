@@ -1,10 +1,21 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+import json
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.inventory.service import receive_inventory
-from app.models import Item, PurchaseOrder, PurchaseOrderLine, SupplierItem
+from app.models import Item, PurchaseOrder, PurchaseOrderLine, PurchaseOrderSendLog, Supplier, SupplierItem
+
+
+def _next_po_number(db: Session) -> str:
+    count = db.query(func.count(PurchaseOrder.id)).scalar() or 0
+    return f"PO-{count + 1:05d}"
+
+
+def po_total(po: PurchaseOrder) -> Decimal:
+    return sum((Decimal(line.qty_ordered or 0) * Decimal(line.unit_cost or 0) for line in po.lines), Decimal("0"))
 
 
 def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrderLine:
@@ -24,7 +35,7 @@ def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrde
     landed_cost = unit_cost + freight_cost + tariff_cost
     return PurchaseOrderLine(
         item_id=item.id,
-        qty_ordered=payload["qty_ordered"],
+        qty_ordered=payload["quantity"],
         unit_cost=unit_cost,
         freight_cost=freight_cost,
         tariff_cost=tariff_cost,
@@ -34,6 +45,8 @@ def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrde
 
 def create_purchase_order(db: Session, payload: dict) -> PurchaseOrder:
     lines_payload = payload.pop("lines")
+    if not payload.get("po_number"):
+        payload["po_number"] = _next_po_number(db)
     po = PurchaseOrder(**payload)
     po.lines = [_build_po_line(db, po.supplier_id, line) for line in lines_payload]
     db.add(po)
@@ -41,8 +54,61 @@ def create_purchase_order(db: Session, payload: dict) -> PurchaseOrder:
 
 
 def update_purchase_order(db: Session, po: PurchaseOrder, payload: dict) -> PurchaseOrder:
+    if po.status != "DRAFT":
+        raise ValueError("Only DRAFT purchase orders can be edited.")
+
+    lines_payload = payload.pop("lines", None)
     for key, value in payload.items():
         setattr(po, key, value)
+
+    if lines_payload is not None:
+        po.lines.clear()
+        db.flush()
+        po.lines = [_build_po_line(db, po.supplier_id, line) for line in lines_payload]
+    return po
+
+
+def send_purchase_order(db: Session, po: PurchaseOrder) -> PurchaseOrder:
+    if po.status == "SENT":
+        return po
+    if not po.lines:
+        raise ValueError("Purchase order must include at least one line item.")
+    if any(Decimal(line.qty_ordered or 0) <= 0 for line in po.lines):
+        raise ValueError("All line item quantities must be greater than zero.")
+
+    supplier = db.query(Supplier).filter(Supplier.id == po.supplier_id).first()
+    if not supplier:
+        raise ValueError("Supplier not found.")
+    if not (supplier.email or supplier.phone):
+        raise ValueError("Supplier must have contact info before sending.")
+
+    log_payload = {
+        "po_number": po.po_number,
+        "supplier": {
+            "id": supplier.id,
+            "name": supplier.name,
+            "email": supplier.email,
+            "phone": supplier.phone,
+        },
+        "line_items": [
+            {
+                "item_id": line.item_id,
+                "quantity": str(line.qty_ordered),
+                "unit_cost": str(line.unit_cost),
+            }
+            for line in po.lines
+        ],
+        "total": str(po_total(po)),
+    }
+    db.add(
+        PurchaseOrderSendLog(
+            purchase_order_id=po.id,
+            supplier_id=supplier.id,
+            payload=json.dumps(log_payload),
+        )
+    )
+    po.status = "SENT"
+    po.sent_at = datetime.utcnow()
     return po
 
 

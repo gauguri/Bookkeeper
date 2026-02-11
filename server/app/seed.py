@@ -309,8 +309,6 @@ def run_seed():
             try:
                 _get_or_create_user(db, company.id)
             except Exception as exc:
-                db.rollback()
-                company = _get_or_create_company(db)
                 print(f"Skipping auth seed user creation due to error: {exc}")
 
         _seed_chart_of_accounts(db, company.id)

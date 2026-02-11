@@ -206,68 +206,78 @@ export default function PurchaseOrdersPage() {
       {error ? <p className="text-sm text-rose-500">{error}</p> : null}
 
       {formOpen ? (
-        <section className="app-card space-y-4">
+        <section className="app-card space-y-6 p-6">
           <h3 className="text-lg font-semibold">{editingId ? "Edit Purchase Order" : "New Purchase Order"}</h3>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">
-              <span>Supplier</span>
-              <select
-                className="app-input"
-                value={form.supplier_id}
-                onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}
-              >
-                <option value="">Select supplier</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
+          <div className="max-w-5xl space-y-4">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <label className="text-sm">
+                <span className="text-sm font-medium text-slate-700">Supplier</span>
+                <div className="mt-1 w-full max-w-xl">
+                  <select
+                    className="app-input h-10 rounded-lg px-3"
+                    value={form.supplier_id}
+                    onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}
+                  >
+                    <option value="">Select supplier</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+              <label className="text-sm">
+                <span className="text-sm font-medium text-slate-700">Order date</span>
+                <div className="mt-1 w-full md:max-w-sm">
+                  <input
+                    className="app-input h-10 rounded-lg px-3"
+                    type="date"
+                    value={form.order_date}
+                    onChange={(event) => setForm((prev) => ({ ...prev, order_date: event.target.value }))}
+                  />
+                </div>
+              </label>
+            </div>
+
+            <label className="block text-sm">
+              <span className="text-sm font-medium text-slate-700">Expected date</span>
+              <div className="mt-1 w-full md:max-w-sm">
+                <input
+                  className="app-input h-10 rounded-lg px-3"
+                  type="date"
+                  value={form.expected_date}
+                  onChange={(event) => setForm((prev) => ({ ...prev, expected_date: event.target.value }))}
+                />
+              </div>
             </label>
-            <label className="space-y-1 text-sm">
-              <span>Order date</span>
-              <input
-                className="app-input"
-                type="date"
-                value={form.order_date}
-                onChange={(event) => setForm((prev) => ({ ...prev, order_date: event.target.value }))}
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              <span>Expected date</span>
-              <input
-                className="app-input"
-                type="date"
-                value={form.expected_date}
-                onChange={(event) => setForm((prev) => ({ ...prev, expected_date: event.target.value }))}
-              />
-            </label>
-            <div className="hidden md:block" aria-hidden="true" />
-            <label className="space-y-1 text-sm md:col-span-2">
-              <span>Notes</span>
+
+            <label className="block text-sm">
+              <span className="text-sm font-medium text-slate-700">Notes</span>
               <textarea
-                className="app-input min-h-20"
+                className="app-input mt-1 w-full rounded-lg border-slate-200 md:max-w-3xl"
+                rows={4}
                 value={form.notes}
                 onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
               />
             </label>
           </div>
 
-          <div className="space-y-4">
-            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(220px,1fr)_90px_120px_110px_90px] md:gap-3">
-              <span>Item</span>
+          <div className="mt-6 max-w-5xl space-y-4 border-t border-border pt-4">
+            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(220px,1fr)_6rem_8rem_7rem_6rem] md:items-center md:gap-3">
+              <span className="pl-1">Item</span>
               <span>Qty</span>
               <span>Unit cost</span>
               <span className="text-right">Line total</span>
               <span className="text-right">Action</span>
             </div>
             {form.lines.map((line, index) => (
-              <div key={index} className="rounded-xl border border-muted/30 p-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(220px,1fr)_90px_120px_110px_90px] md:items-center">
+              <div key={index} className="rounded-xl border border-muted/30 px-3 py-2">
+                <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-[minmax(220px,1fr)_6rem_8rem_7rem_6rem] md:items-center">
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Item</span>
                     <select
-                      className="app-input h-10"
+                      className="app-input h-10 rounded-lg px-3"
                       value={line.item_id}
                       onChange={(event) => updateLine(index, "item_id", event.target.value)}
                     >
@@ -282,7 +292,7 @@ export default function PurchaseOrdersPage() {
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Qty</span>
                     <input
-                      className="app-input h-10"
+                      className="app-input h-10 w-24 rounded-lg px-3"
                       type="number"
                       min="0"
                       step="0.01"
@@ -294,7 +304,7 @@ export default function PurchaseOrdersPage() {
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Unit cost</span>
                     <input
-                      className="app-input h-10"
+                      className="app-input h-10 w-32 rounded-lg px-3"
                       type="number"
                       min="0"
                       step="0.01"
@@ -303,10 +313,10 @@ export default function PurchaseOrdersPage() {
                       placeholder="Unit cost"
                     />
                   </label>
-                  <p className="text-right text-sm font-medium md:pt-0.5">
+                  <p className="w-28 text-right text-sm font-medium md:pt-0.5">
                     ${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}
                   </p>
-                  <div className="flex md:justify-end">
+                  <div className="flex w-24 md:justify-end">
                     <button
                       className="app-button-secondary"
                       onClick={() => removeLine(index)}
@@ -326,8 +336,8 @@ export default function PurchaseOrdersPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button className="app-button-primary" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
+          <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-4">
+            <button className="app-button-primary h-10 rounded-lg px-4" onClick={submit}>{editingId ? "Save" : "Submit"}</button>
             <button className="app-button-secondary" onClick={resetForm}>Cancel</button>
           </div>
         </section>

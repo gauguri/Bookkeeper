@@ -160,7 +160,19 @@ def _resolve_parent(db: Session, company_id: int, name: str, account_type: str) 
         )
         .first()
     )
+    if not parent:
+        # Legacy data may have the same account name with a stale/missing type.
+        parent = (
+            db.query(Account)
+            .filter(
+                Account.company_id == company_id,
+                Account.name == name,
+            )
+            .first()
+        )
     if parent:
+        parent.code = None
+        parent.type = account_type
         parent.parent_id = None
         parent.is_active = True
         parent.normal_balance = _normal_balance(account_type)
@@ -193,7 +205,19 @@ def _resolve_child_parent(db: Session, company_id: int, parent: Account, name: s
         )
         .first()
     )
+    if not child_parent:
+        # Legacy rows can exist with matching name but outdated type/code values.
+        child_parent = (
+            db.query(Account)
+            .filter(
+                Account.company_id == company_id,
+                Account.name == name,
+            )
+            .first()
+        )
     if child_parent:
+        child_parent.code = None
+        child_parent.type = parent.type
         child_parent.parent_id = parent.id
         child_parent.is_active = True
         child_parent.normal_balance = _normal_balance(parent.type)
@@ -224,7 +248,11 @@ def _upsert_numbered_account(
     account_type: str,
 ) -> Account:
     account = db.query(Account).filter(Account.company_id == company_id, Account.code == code).first()
+    if not account:
+        # Reconcile pre-existing chart rows that were seeded before account codes were introduced.
+        account = db.query(Account).filter(Account.company_id == company_id, Account.name == name).first()
     if account:
+        account.code = code
         account.name = name
         account.type = account_type
         account.parent_id = parent.id

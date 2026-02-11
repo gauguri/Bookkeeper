@@ -1,6 +1,6 @@
 """add purchase order extra costs and landed inventory table
 
-Revision ID: 0008_po_costs_and_inventory_table
+Revision ID: 0008_po_costs_inventory
 Revises: 0007_purchase_order_workflow
 Create Date: 2026-02-11 00:20:00.000000
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0008_po_costs_and_inventory_table"
+revision = "0008_po_costs_inventory"
 down_revision = "0007_purchase_order_workflow"
 branch_labels = None
 depends_on = None

@@ -1,6 +1,6 @@
 """add purchase order extra costs and landed inventory table
 
-Revision ID: 0008_po_costs_inv
+Revision ID: 0008_po_costs_and_inventory_table
 Revises: 0007_purchase_order_workflow
 Create Date: 2026-02-11 00:20:00.000000
 """
@@ -9,23 +9,13 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0008_po_costs_inv"
+revision = "0008_po_costs_and_inventory_table"
 down_revision = "0007_purchase_order_workflow"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.alter_column(
-            "alembic_version",
-            "version_num",
-            existing_type=sa.String(length=32),
-            type_=sa.String(length=64),
-            existing_nullable=False,
-        )
-
     op.add_column("purchase_orders", sa.Column("freight_cost", sa.Numeric(14, 2), nullable=False, server_default="0"))
     op.add_column("purchase_orders", sa.Column("tariff_cost", sa.Numeric(14, 2), nullable=False, server_default="0"))
     op.add_column("purchase_orders", sa.Column("inventory_landed", sa.Boolean(), nullable=False, server_default=sa.false()))
@@ -50,15 +40,6 @@ def upgrade():
 
 def downgrade():
     op.drop_table("inventory")
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.alter_column(
-            "alembic_version",
-            "version_num",
-            existing_type=sa.String(length=64),
-            type_=sa.String(length=32),
-            existing_nullable=False,
-        )
     op.drop_column("purchase_orders", "landed_at")
     op.drop_column("purchase_orders", "inventory_landed")
     op.drop_column("purchase_orders", "tariff_cost")

@@ -24,26 +24,50 @@ def run_seed():
 
         cash = Account(
             company_id=company.id,
+            code="1000",
             name="Cash",
-            type="asset",
-            subtype="cash",
+            type="ASSET",
+            subtype="Cash",
+            description="Cash on hand and bank balances",
             normal_balance="debit",
         )
         ar = Account(
             company_id=company.id,
+            code="1100",
             name="Accounts Receivable",
-            type="asset",
-            subtype="receivable",
+            type="ASSET",
+            subtype="Accounts Receivable",
+            description="Outstanding customer invoices",
             normal_balance="debit",
+        )
+        ap = Account(
+            company_id=company.id,
+            code="2000",
+            name="Accounts Payable",
+            type="LIABILITY",
+            subtype="Accounts Payable",
+            description="Amounts owed to suppliers",
+            normal_balance="credit",
         )
         revenue = Account(
             company_id=company.id,
-            name="Sales Revenue",
-            type="income",
-            subtype="sales",
+            code="4000",
+            name="Sales",
+            type="INCOME",
+            subtype="Sales",
+            description="Primary sales revenue",
             normal_balance="credit",
         )
-        db.add_all([cash, ar, revenue])
+        supplies = Account(
+            company_id=company.id,
+            code="6100",
+            name="Supplies Expense",
+            type="EXPENSE",
+            subtype="Supplies",
+            description="Office and operational supplies",
+            normal_balance="debit",
+        )
+        db.add_all([cash, ar, ap, revenue, supplies])
         db.commit()
     finally:
         db.close()

@@ -14,6 +14,7 @@ import {
   Truck,
   Users
 } from "lucide-react";
+import ChartOfAccountsPage from "./pages/ChartOfAccountsPage";
 import CustomersPage from "./pages/CustomersPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
@@ -227,7 +228,7 @@ export default function App() {
         <Route path="/sales/reports" element={<ReportsPage />} />
         <Route path="/expenses" element={<PlaceholderPage title="Expenses" />} />
         <Route path="/banking" element={<PlaceholderPage title="Banking" />} />
-        <Route path="/accounts" element={<PlaceholderPage title="Chart of Accounts" />} />
+        <Route path="/accounts" element={<ChartOfAccountsPage />} />
         <Route path="/import" element={<PlaceholderPage title="Import" />} />
         <Route path="/purchasing/suppliers" element={<SuppliersPage />} />
         <Route path="/purchasing/purchase-orders" element={<PurchaseOrdersPage />} />

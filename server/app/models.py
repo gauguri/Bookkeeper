@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -50,19 +51,27 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    code = Column(String(50), nullable=True)
     name = Column(String(200), nullable=False)
     type = Column(String(50), nullable=False)
     subtype = Column(String(50), nullable=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     normal_balance = Column(String(10), nullable=False)
     parent_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     external_id = Column(String(100), nullable=True)
     source_system = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     company = relationship("Company", back_populates="accounts")
     parent = relationship("Account", remote_side=[id])
 
     __table_args__ = (
         UniqueConstraint("company_id", "name", name="uq_account_company_name"),
+        UniqueConstraint("company_id", "code", name="uq_account_company_code"),
+        Index("ix_accounts_type", "type"),
+        Index("ix_accounts_is_active", "is_active"),
     )
 
 

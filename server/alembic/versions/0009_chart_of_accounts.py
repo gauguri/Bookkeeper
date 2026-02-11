@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.add_column("accounts", sa.Column("created_at", sa.DateTime(), nullable=True))
     op.add_column("accounts", sa.Column("updated_at", sa.DateTime(), nullable=True))
 
-    op.execute("UPDATE accounts SET is_active = 1 WHERE is_active IS NULL")
+    op.execute("UPDATE accounts SET is_active = TRUE WHERE is_active IS NULL")
     op.execute("UPDATE accounts SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
     op.execute("UPDATE accounts SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 

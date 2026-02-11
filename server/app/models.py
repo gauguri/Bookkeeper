@@ -396,6 +396,7 @@ class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
 
     id = Column(Integer, primary_key=True)
+    po_number = Column(String(30), nullable=False, unique=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
     status = Column(
         Enum(
@@ -413,6 +414,8 @@ class PurchaseOrder(Base):
     expected_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    sent_at = Column(DateTime, nullable=True)
 
     supplier = relationship("Supplier")
     lines = relationship("PurchaseOrderLine", back_populates="purchase_order", cascade="all, delete-orphan")
@@ -433,3 +436,16 @@ class PurchaseOrderLine(Base):
 
     purchase_order = relationship("PurchaseOrder", back_populates="lines")
     item = relationship("Item")
+
+
+class PurchaseOrderSendLog(Base):
+    __tablename__ = "purchase_order_send_log"
+
+    id = Column(Integer, primary_key=True)
+    purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    payload = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    purchase_order = relationship("PurchaseOrder")
+    supplier = relationship("Supplier")

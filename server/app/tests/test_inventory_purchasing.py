@@ -6,8 +6,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.inventory.service import adjust_inventory
-from app.models import Item, Supplier, SupplierItem
-from app.purchasing.service import create_purchase_order, receive_purchase_order
+from app.models import Item, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.purchasing.service import create_purchase_order, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
 def create_session():
@@ -61,7 +61,7 @@ def test_purchase_order_defaults_costs_from_supplier_items():
         {
             "supplier_id": supplier.id,
             "order_date": date.today(),
-            "lines": [{"item_id": item.id, "qty_ordered": Decimal("5")}],
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
         },
     )
     db.commit()
@@ -91,7 +91,7 @@ def test_receiving_purchase_order_increases_on_hand():
         {
             "supplier_id": supplier.id,
             "order_date": date.today(),
-            "lines": [{"item_id": item.id, "qty_ordered": Decimal("5")}],
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
         },
     )
     db.commit()
@@ -106,3 +106,74 @@ def test_receiving_purchase_order_increases_on_hand():
     db.refresh(item)
 
     assert item.on_hand_qty == Decimal("4")
+
+
+def test_send_purchase_order_sets_status_and_logs_send():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("4.00"),
+        freight_cost=Decimal("1.00"),
+        tariff_cost=Decimal("0.50"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    db.commit()
+
+    send_log = db.query(PurchaseOrderSendLog).filter(PurchaseOrderSendLog.purchase_order_id == po.id).first()
+    assert po.status == "SENT"
+    assert send_log is not None
+
+
+def test_update_purchase_order_rejected_when_not_draft():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("4.00"),
+        freight_cost=Decimal("1.00"),
+        tariff_cost=Decimal("0.50"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    db.commit()
+
+    try:
+        update_purchase_order(db, po, {"notes": "late update"})
+    except ValueError as exc:
+        assert "DRAFT" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when editing sent PO")

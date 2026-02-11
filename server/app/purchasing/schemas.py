@@ -40,6 +40,8 @@ class PurchaseOrderBase(BaseModel):
     order_date: date
     expected_date: Optional[date] = None
     notes: Optional[str] = None
+    freight_cost: DecimalValue = Field(default=Decimal("0"), ge=0)
+    tariff_cost: DecimalValue = Field(default=Decimal("0"), ge=0)
 
 
 class PurchaseOrderCreate(PurchaseOrderBase):
@@ -52,6 +54,8 @@ class PurchaseOrderUpdate(BaseModel):
     order_date: Optional[date] = None
     expected_date: Optional[date] = None
     notes: Optional[str] = None
+    freight_cost: Optional[DecimalValue] = Field(default=None, ge=0)
+    tariff_cost: Optional[DecimalValue] = Field(default=None, ge=0)
     lines: Optional[List[PurchaseOrderLineCreate]] = None
 
 
@@ -61,6 +65,10 @@ class PurchaseOrderListResponse(BaseModel):
     supplier_name: str
     order_date: date
     status: str
+    items_subtotal: DecimalValue
+    extra_costs_total: DecimalValue
+    freight_cost: DecimalValue
+    tariff_cost: DecimalValue
     total: DecimalValue
 
 
@@ -74,6 +82,8 @@ class PurchaseOrderResponse(PurchaseOrderBase):
     id: int
     po_number: str
     status: str
+    items_subtotal: DecimalValue
+    extra_costs_total: DecimalValue
     total: DecimalValue
     created_at: datetime
     updated_at: datetime

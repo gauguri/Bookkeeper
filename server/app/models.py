@@ -413,12 +413,28 @@ class PurchaseOrder(Base):
     order_date = Column(Date, nullable=False)
     expected_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
+    freight_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    tariff_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    inventory_landed = Column(Boolean, nullable=False, default=False)
+    landed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     sent_at = Column(DateTime, nullable=True)
 
     supplier = relationship("Supplier")
     lines = relationship("PurchaseOrderLine", back_populates="purchase_order", cascade="all, delete-orphan")
+
+
+class Inventory(Base):
+    __tablename__ = "inventory"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, unique=True)
+    quantity_on_hand = Column(Numeric(14, 2), nullable=False, default=0)
+    landed_unit_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
 
 
 class PurchaseOrderLine(Base):

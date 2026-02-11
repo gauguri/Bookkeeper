@@ -43,6 +43,8 @@ type PurchaseOrderDetail = {
   order_date: string;
   expected_date?: string | null;
   notes?: string | null;
+  freight_cost: number;
+  tariff_cost: number;
   status: string;
   lines: PurchaseOrderDetailLine[];
 };
@@ -68,6 +70,8 @@ export default function PurchaseOrdersPage() {
     order_date: today,
     expected_date: "",
     notes: "",
+    freight_cost: "0",
+    tariff_cost: "0",
     lines: [emptyLine()]
   });
 
@@ -93,10 +97,18 @@ export default function PurchaseOrdersPage() {
   const resetForm = () => {
     setEditingId(null);
     setFormOpen(false);
-    setForm({ supplier_id: "", order_date: today, expected_date: "", notes: "", lines: [emptyLine()] });
+    setForm({
+      supplier_id: "",
+      order_date: today,
+      expected_date: "",
+      notes: "",
+      freight_cost: "0",
+      tariff_cost: "0",
+      lines: [emptyLine()]
+    });
   };
 
-  const subtotal = useMemo(
+  const itemsSubtotal = useMemo(
     () =>
       form.lines.reduce((sum, line) => {
         const quantity = Number(line.quantity || 0);
@@ -106,9 +118,17 @@ export default function PurchaseOrdersPage() {
     [form.lines]
   );
 
+  const freightCost = Number(form.freight_cost || 0);
+  const tariffCost = Number(form.tariff_cost || 0);
+  const grandTotal = itemsSubtotal + freightCost + tariffCost;
+
   const submit = async () => {
     if (!form.supplier_id) {
       setError("Supplier is required.");
+      return;
+    }
+    if (freightCost < 0 || tariffCost < 0) {
+      setError("Freight and tariff costs must be 0 or greater.");
       return;
     }
     if (!form.lines.length || form.lines.some((line) => !line.item_id || Number(line.quantity) <= 0)) {
@@ -121,6 +141,8 @@ export default function PurchaseOrdersPage() {
       order_date: form.order_date,
       expected_date: form.expected_date || null,
       notes: form.notes || null,
+      freight_cost: freightCost,
+      tariff_cost: tariffCost,
       lines: form.lines.map((line) => ({
         item_id: Number(line.item_id),
         quantity: Number(line.quantity),
@@ -146,7 +168,15 @@ export default function PurchaseOrdersPage() {
     setError("");
     setFormOpen(true);
     setEditingId(null);
-    setForm({ supplier_id: "", order_date: today, expected_date: "", notes: "", lines: [emptyLine()] });
+    setForm({
+      supplier_id: "",
+      order_date: today,
+      expected_date: "",
+      notes: "",
+      freight_cost: "0",
+      tariff_cost: "0",
+      lines: [emptyLine()]
+    });
   };
 
   const startEdit = async (poId: number) => {
@@ -160,6 +190,8 @@ export default function PurchaseOrdersPage() {
         order_date: po.order_date,
         expected_date: po.expected_date ?? "",
         notes: po.notes ?? "",
+        freight_cost: String(po.freight_cost ?? 0),
+        tariff_cost: String(po.tariff_cost ?? 0),
         lines: po.lines.map((line) => ({
           item_id: String(line.item_id),
           quantity: String(line.quantity),
@@ -210,59 +242,72 @@ export default function PurchaseOrdersPage() {
           <h3 className="text-lg font-semibold">{editingId ? "Edit Purchase Order" : "New Purchase Order"}</h3>
           <div className="max-w-5xl space-y-4">
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <label className="text-sm">
-                <span className="text-sm font-medium text-slate-700">Supplier</span>
-                <div className="mt-1 w-full max-w-xl">
-                  <select
-                    className="app-input h-10 rounded-lg px-3"
-                    value={form.supplier_id}
-                    onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}
-                  >
-                    <option value="">Select supplier</option>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <label className="text-sm font-medium text-muted">
+                Supplier
+                <select
+                  className="app-input mt-1"
+                  value={form.supplier_id}
+                  onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}
+                >
+                  <option value="">Select supplier</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
               </label>
-              <label className="text-sm">
-                <span className="text-sm font-medium text-slate-700">Order date</span>
-                <div className="mt-1 w-full md:max-w-sm">
-                  <input
-                    className="app-input h-10 rounded-lg px-3"
-                    type="date"
-                    value={form.order_date}
-                    onChange={(event) => setForm((prev) => ({ ...prev, order_date: event.target.value }))}
-                  />
-                </div>
-              </label>
-            </div>
-
-            <label className="block text-sm">
-              <span className="text-sm font-medium text-slate-700">Expected date</span>
-              <div className="mt-1 w-full md:max-w-sm">
+              <label className="text-sm font-medium text-muted">
+                Order date
                 <input
-                  className="app-input h-10 rounded-lg px-3"
+                  className="app-input mt-1"
+                  type="date"
+                  value={form.order_date}
+                  onChange={(event) => setForm((prev) => ({ ...prev, order_date: event.target.value }))}
+                />
+              </label>
+              <label className="text-sm font-medium text-muted">
+                Expected date
+                <input
+                  className="app-input mt-1"
                   type="date"
                   value={form.expected_date}
                   onChange={(event) => setForm((prev) => ({ ...prev, expected_date: event.target.value }))}
                 />
-              </div>
-            </label>
-
-            <div className="mt-4 flex flex-col gap-1">
-              <label className="text-sm font-medium text-slate-700" htmlFor="purchase-order-notes">
-                Notes
               </label>
-              <textarea
-                id="purchase-order-notes"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 md:max-w-3xl"
-                rows={4}
-                value={form.notes}
-                onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-              />
+              <label className="text-sm font-medium text-muted">
+                Notes
+                <textarea
+                  className="app-input mt-1 min-h-[104px]"
+                  value={form.notes}
+                  onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  placeholder="Optional notes"
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <label className="text-sm font-medium text-muted">
+                Freight cost
+                <input
+                  className="app-input mt-1"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.freight_cost}
+                  onChange={(event) => setForm((prev) => ({ ...prev, freight_cost: event.target.value }))}
+                />
+              </label>
+              <label className="text-sm font-medium text-muted">
+                Tariff cost
+                <input
+                  className="app-input mt-1"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.tariff_cost}
+                  onChange={(event) => setForm((prev) => ({ ...prev, tariff_cost: event.target.value }))}
+                />
+              </label>
             </div>
           </div>
 
@@ -335,7 +380,12 @@ export default function PurchaseOrdersPage() {
               <button className="app-button-secondary" onClick={addLine}>
                 Add line item
               </button>
-              <p className="text-sm font-semibold">Subtotal: ${subtotal.toFixed(2)}</p>
+            </div>
+            <div className="space-y-1 text-sm font-semibold">
+              <p>Items Subtotal: ${itemsSubtotal.toFixed(2)}</p>
+              <p>Freight: ${freightCost.toFixed(2)}</p>
+              <p>Tariff: ${tariffCost.toFixed(2)}</p>
+              <p>Grand Total: ${grandTotal.toFixed(2)}</p>
             </div>
           </div>
 
@@ -364,31 +414,31 @@ export default function PurchaseOrdersPage() {
               const canSend = po.status !== "RECEIVED" && po.status !== "PARTIALLY_RECEIVED";
 
               return (
-              <tr key={po.id} className="border-t border-muted/20">
-                <td className="px-4 py-3">{po.po_number}</td>
-                <td className="px-4 py-3">{po.supplier_name}</td>
-                <td className="px-4 py-3">{po.order_date}</td>
-                <td className="px-4 py-3">{po.status}</td>
-                <td className="px-4 py-3">${Number(po.total).toFixed(2)}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <button
-                      className="app-button-secondary"
-                      onClick={() => startEdit(po.id)}
-                      disabled={!canEdit}
-                    >
-                      {po.status === "SENT" ? "Update" : "Edit"}
-                    </button>
-                    <button
-                      className="app-button-primary"
-                      onClick={() => send(po.id)}
-                      disabled={!canSend}
-                    >
-                      {po.status === "SENT" ? "Resend" : "Send"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                <tr key={po.id} className="border-t border-muted/20">
+                  <td className="px-4 py-3">{po.po_number}</td>
+                  <td className="px-4 py-3">{po.supplier_name}</td>
+                  <td className="px-4 py-3">{po.order_date}</td>
+                  <td className="px-4 py-3">{po.status}</td>
+                  <td className="px-4 py-3">${Number(po.total).toFixed(2)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button
+                        className="app-button-secondary"
+                        onClick={() => startEdit(po.id)}
+                        disabled={!canEdit}
+                      >
+                        {po.status === "SENT" ? "Update" : "Edit"}
+                      </button>
+                      <button
+                        className="app-button-primary"
+                        onClick={() => send(po.id)}
+                        disabled={!canSend}
+                      >
+                        {po.status === "SENT" ? "Resend" : "Send"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
           </tbody>

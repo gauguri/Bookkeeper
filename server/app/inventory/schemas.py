@@ -37,3 +37,31 @@ class InventoryAdjustmentResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class InventoryRecordBase(BaseModel):
+    item_id: int
+    quantity_on_hand: DecimalValue = Field(default=Decimal("0"), ge=0)
+    landed_unit_cost: DecimalValue = Field(default=Decimal("0"), ge=0)
+
+
+class InventoryRecordCreate(InventoryRecordBase):
+    pass
+
+
+class InventoryRecordUpdate(BaseModel):
+    quantity_on_hand: DecimalValue = Field(..., ge=0)
+    landed_unit_cost: DecimalValue = Field(..., ge=0)
+
+
+class InventoryRecordResponse(BaseModel):
+    id: int
+    item_id: int
+    item_name: str
+    item_sku: Optional[str] = None
+    quantity_on_hand: DecimalValue
+    landed_unit_cost: DecimalValue
+    total_value: DecimalValue
+    last_updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -18,6 +18,8 @@ export type PurchaseOrderPayload = {
   order_date: string;
   expected_date?: string | null;
   notes?: string | null;
+  freight_cost?: number;
+  tariff_cost?: number;
   lines: PurchaseOrderLinePayload[];
 };
 

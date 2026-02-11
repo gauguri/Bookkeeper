@@ -61,6 +61,7 @@ const today = new Date().toISOString().slice(0, 10);
 const emptyLine = (): FormLine => ({ item_id: "", quantity: "1", unit_cost: "0" });
 
 const actionButtonClass = "app-button h-10 min-w-[110px] justify-center";
+const disabledDeleteButtonClass = `${actionButtonClass} cursor-not-allowed opacity-50`;
 
 export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderListRow[]>([]);
@@ -463,22 +464,13 @@ export default function PurchaseOrdersPage() {
                         Resend
                       </button>
                       <button
-                        className={actionButtonClass}
+                        className={canDelete ? actionButtonClass : disabledDeleteButtonClass}
                         onClick={() => removePurchaseOrder(po)}
                         disabled={!canDelete}
                         title={canDelete ? "" : "Cannot delete SENT PO; use Update/Resend."}
                       >
                         Delete
                       </button>
-                      <span title={canDelete ? "" : "Cannot delete SENT PO; use Update/Resend."}>
-                        <button
-                          className={canDelete ? actionButtonClass : disabledDeleteButtonClass}
-                          onClick={() => removePurchaseOrder(po)}
-                          disabled={!canDelete}
-                        >
-                          Delete
-                        </button>
-                      </span>
                     </div>
                   </td>
                 </tr>

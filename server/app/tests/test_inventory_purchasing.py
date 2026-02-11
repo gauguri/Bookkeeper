@@ -142,7 +142,46 @@ def test_send_purchase_order_sets_status_and_logs_send():
     assert send_log is not None
 
 
-def test_update_purchase_order_rejected_when_not_draft():
+def test_send_purchase_order_allows_resend_and_adds_new_log():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("4.00"),
+        freight_cost=Decimal("1.00"),
+        tariff_cost=Decimal("0.50"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    send_purchase_order(db, po)
+    db.commit()
+
+    send_log_count = (
+        db.query(PurchaseOrderSendLog)
+        .filter(PurchaseOrderSendLog.purchase_order_id == po.id)
+        .count()
+    )
+    assert po.status == "SENT"
+    assert send_log_count == 2
+
+
+def test_update_purchase_order_allowed_when_sent():
     db = create_session()
     supplier = create_supplier(db)
     supplier.email = "buyer@supplyco.test"
@@ -171,9 +210,54 @@ def test_update_purchase_order_rejected_when_not_draft():
     send_purchase_order(db, po)
     db.commit()
 
+    updated_po = update_purchase_order(
+        db,
+        po,
+        {
+            "notes": "late update",
+            "lines": [{"item_id": item.id, "quantity": Decimal("7"), "unit_cost": Decimal("3.50")}],
+        },
+    )
+    db.commit()
+
+    assert updated_po.status == "SENT"
+    assert updated_po.notes == "late update"
+    assert updated_po.lines[0].qty_ordered == Decimal("7")
+
+
+def test_update_purchase_order_rejected_when_not_draft_or_sent():
+    db = create_session()
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    link = SupplierItem(
+        supplier_id=supplier.id,
+        item_id=item.id,
+        supplier_cost=Decimal("4.00"),
+        freight_cost=Decimal("1.00"),
+        tariff_cost=Decimal("0.50"),
+        is_preferred=True,
+    )
+    db.add(link)
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "lines": [{"item_id": item.id, "quantity": Decimal("5")}],
+        },
+    )
+    db.commit()
+
+    send_purchase_order(db, po)
+    po.status = "RECEIVED"
+    db.commit()
+
     try:
         update_purchase_order(db, po, {"notes": "late update"})
     except ValueError as exc:
-        assert "DRAFT" in str(exc)
+        assert "DRAFT or SENT" in str(exc)
     else:
-        raise AssertionError("Expected ValueError when editing sent PO")
+        raise AssertionError("Expected ValueError when editing received PO")

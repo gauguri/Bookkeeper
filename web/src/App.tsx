@@ -14,6 +14,7 @@ import {
   Truck,
   Users
 } from "lucide-react";
+import ChartOfAccountsBulkImportPage from "./pages/ChartOfAccountsBulkImportPage";
 import ChartOfAccountsPage from "./pages/ChartOfAccountsPage";
 import CustomersPage from "./pages/CustomersPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
@@ -47,8 +48,12 @@ const navSections = [
     items: [
       { label: "Expenses", to: "/expenses", icon: FileText },
       { label: "Banking", to: "/banking", icon: Banknote },
-      { label: "Chart of Accounts", to: "/accounts", icon: Layers },
-      { label: "Import", to: "/import", icon: ClipboardList }
+      {
+        label: "Chart of Accounts",
+        to: "/accounts",
+        icon: Layers,
+        children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList }]
+      }
     ]
   },
   {
@@ -125,20 +130,41 @@ function Layout({ children }: { children: React.ReactNode }) {
               </p>
               <nav className="flex flex-col gap-1">
                 {section.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      `group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        isActive
-                          ? "bg-primary text-primary-foreground shadow-glow"
-                          : "text-muted hover:bg-secondary hover:text-foreground"
-                      }`
-                    }
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span className={`transition ${navLabelClass}`}>{item.label}</span>
-                  </NavLink>
+                  <div key={item.to} className="space-y-1">
+                    <NavLink
+                      to={item.to}
+                      className={({ isActive }) =>
+                        `group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                          isActive
+                            ? "bg-primary text-primary-foreground shadow-glow"
+                            : "text-muted hover:bg-secondary hover:text-foreground"
+                        }`
+                      }
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span className={`transition ${navLabelClass}`}>{item.label}</span>
+                    </NavLink>
+                    {item.children?.length ? (
+                      <div className={`ml-6 space-y-1 border-l border-border/60 pl-3 transition ${navLabelClass}`}>
+                        {item.children.map((child) => (
+                          <NavLink
+                            key={child.to}
+                            to={child.to}
+                            className={({ isActive }) =>
+                              `group flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+                                isActive
+                                  ? "bg-primary/15 text-primary"
+                                  : "text-muted hover:bg-secondary hover:text-foreground"
+                              }`
+                            }
+                          >
+                            <child.icon className="h-3.5 w-3.5" />
+                            <span>{child.label}</span>
+                          </NavLink>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
               </nav>
             </div>
@@ -229,7 +255,7 @@ export default function App() {
         <Route path="/expenses" element={<PlaceholderPage title="Expenses" />} />
         <Route path="/banking" element={<PlaceholderPage title="Banking" />} />
         <Route path="/accounts" element={<ChartOfAccountsPage />} />
-        <Route path="/import" element={<PlaceholderPage title="Import" />} />
+        <Route path="/accounts/bulk-import" element={<ChartOfAccountsBulkImportPage />} />
         <Route path="/purchasing/suppliers" element={<SuppliersPage />} />
         <Route path="/purchasing/purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="/inventory" element={<InventoryPage />} />

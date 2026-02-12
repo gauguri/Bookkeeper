@@ -1,3 +1,5 @@
+import csv
+from io import StringIO
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -165,3 +167,90 @@ def delete_chart_account(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Cannot delete account that is in use.") from None
 
     return {"status": "ok"}
+
+
+@router.post("/chart-of-accounts/bulk-import", response_model=schemas.ChartAccountBulkImportResponse, status_code=status.HTTP_201_CREATED)
+def bulk_import_chart_of_accounts(payload: schemas.ChartAccountBulkImportRequest, db: Session = Depends(get_db)):
+    rows = list(csv.reader(StringIO(payload.csv_data.strip())))
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV data is empty.")
+
+    default_company_id = _get_default_company_id(db)
+    existing_accounts = db.query(Account).all()
+    code_to_id = {account.code.strip().upper(): account.id for account in existing_accounts if account.code}
+
+    pending_rows: list[tuple[str, str, Optional[str]]] = []
+    for index, row in enumerate(rows, start=1):
+        if len(row) != 3:
+            raise HTTPException(status_code=400, detail=f"Invalid row format at line {index}. Expected: Code, Name, Parent.")
+
+        code = row[0].strip()
+        name = row[1].strip()
+        parent_code_raw = row[2].strip()
+
+        if not code or not name:
+            raise HTTPException(status_code=400, detail=f"Code and Name are required at line {index}.")
+
+        normalized_code = code.upper()
+        if normalized_code in code_to_id or any(existing_code == normalized_code for existing_code, _, _ in pending_rows):
+            raise HTTPException(status_code=409, detail=f"Duplicate account code '{code}' at line {index}.")
+
+        parent_code = None
+        if parent_code_raw and parent_code_raw.lower() != "null":
+            parent_code = parent_code_raw.upper()
+
+        pending_rows.append((normalized_code, name, parent_code))
+
+    created_accounts: list[Account] = []
+    pending_by_code = {code: (name, parent_code) for code, name, parent_code in pending_rows}
+
+    while pending_by_code:
+        created_this_pass = False
+        for code, (name, parent_code) in list(pending_by_code.items()):
+            if parent_code is not None and parent_code not in code_to_id:
+                continue
+
+            account = Account(
+                company_id=default_company_id,
+                code=code,
+                name=name,
+                type="OTHER",
+                subtype=None,
+                description=None,
+                is_active=True,
+                parent_id=code_to_id.get(parent_code),
+                normal_balance="credit",
+            )
+            db.add(account)
+            db.flush()
+
+            code_to_id[code] = account.id
+            created_accounts.append(account)
+            pending_by_code.pop(code)
+            created_this_pass = True
+
+        if not created_this_pass:
+            unresolved = ", ".join(sorted(code for _, (_, code) in pending_by_code.items() if code))
+            db.rollback()
+            raise HTTPException(status_code=400, detail=f"Unable to resolve parent account codes: {unresolved}.")
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="One or more account codes already exist.") from None
+
+    for account in created_accounts:
+        db.refresh(account)
+
+    return schemas.ChartAccountBulkImportResponse(
+        created_count=len(created_accounts),
+        accounts=[
+            schemas.ChartAccountBulkImportResult(
+                code=account.code or "",
+                name=account.name,
+                parent_account_id=account.parent_id,
+            )
+            for account in created_accounts
+        ],
+    )

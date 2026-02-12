@@ -198,7 +198,7 @@ export default function ChartOfAccountsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
               <span className="font-medium text-foreground">Name *</span>
-              <input className="app-input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              <input className="app-input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
             </label>
             <label className="space-y-2 text-sm text-muted">
               <span className="font-medium text-foreground">Code</span>

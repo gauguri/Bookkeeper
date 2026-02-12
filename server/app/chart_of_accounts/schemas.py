@@ -53,3 +53,18 @@ class ChartAccountResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChartAccountBulkImportRequest(BaseModel):
+    csv_data: str = Field(..., min_length=1)
+
+
+class ChartAccountBulkImportResult(BaseModel):
+    code: str
+    name: str
+    parent_account_id: Optional[int] = None
+
+
+class ChartAccountBulkImportResponse(BaseModel):
+    created_count: int
+    accounts: list[ChartAccountBulkImportResult]

@@ -73,8 +73,9 @@ export default function ChartOfAccountsPage() {
     setError("");
     try {
       const params = new URLSearchParams();
+      const selectedType = typeFilter === "ALL" ? null : typeFilter;
       if (search.trim()) params.set("q", search.trim());
-      if (typeFilter !== "ALL") params.set("type", typeFilter);
+      if (selectedType) params.set("type", selectedType);
       if (activeOnly) params.set("active", "true");
       const query = params.toString();
       const data = await apiFetch<ChartAccount[]>(`/chart-of-accounts${query ? `?${query}` : ""}`);

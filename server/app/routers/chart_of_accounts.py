@@ -179,34 +179,50 @@ def bulk_import_chart_of_accounts(payload: schemas.ChartAccountBulkImportRequest
     existing_accounts = db.query(Account).all()
     code_to_id = {account.code.strip().upper(): account.id for account in existing_accounts if account.code}
 
-    pending_rows: list[tuple[str, str, Optional[str]]] = []
+    valid_types = set(schemas.AccountType.__args__)
+    pending_rows: list[tuple[str, str, str, Optional[str], Optional[str]]] = []
     for index, row in enumerate(rows, start=1):
-        if len(row) != 3:
-            raise HTTPException(status_code=400, detail=f"Invalid row format at line {index}. Expected: Code, Name, Parent.")
+        if len(row) != 5:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid row format at line {index}. Expected: Code, Name of the Account, Type, SubType, Parent.",
+            )
 
         code = row[0].strip()
         name = row[1].strip()
-        parent_code_raw = row[2].strip()
+        account_type = _normalize_type(row[2].strip())
+        subtype_raw = row[3].strip()
+        parent_code_raw = row[4].strip()
 
-        if not code or not name:
-            raise HTTPException(status_code=400, detail=f"Code and Name are required at line {index}.")
+        if not code or not name or not account_type:
+            raise HTTPException(status_code=400, detail=f"Code, Name, and Type are required at line {index}.")
+
+        if account_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid account type '{row[2].strip()}' at line {index}.",
+            )
 
         normalized_code = code.upper()
-        if normalized_code in code_to_id or any(existing_code == normalized_code for existing_code, _, _ in pending_rows):
+        if normalized_code in code_to_id or any(existing_code == normalized_code for existing_code, _, _, _, _ in pending_rows):
             raise HTTPException(status_code=409, detail=f"Duplicate account code '{code}' at line {index}.")
 
         parent_code = None
         if parent_code_raw and parent_code_raw.lower() != "null":
             parent_code = parent_code_raw.upper()
 
-        pending_rows.append((normalized_code, name, parent_code))
+        subtype = None
+        if subtype_raw and subtype_raw.lower() != "null":
+            subtype = subtype_raw
+
+        pending_rows.append((normalized_code, name, account_type, subtype, parent_code))
 
     created_accounts: list[Account] = []
-    pending_by_code = {code: (name, parent_code) for code, name, parent_code in pending_rows}
+    pending_by_code = {code: (name, account_type, subtype, parent_code) for code, name, account_type, subtype, parent_code in pending_rows}
 
     while pending_by_code:
         created_this_pass = False
-        for code, (name, parent_code) in list(pending_by_code.items()):
+        for code, (name, account_type, subtype, parent_code) in list(pending_by_code.items()):
             if parent_code is not None and parent_code not in code_to_id:
                 continue
 
@@ -214,12 +230,12 @@ def bulk_import_chart_of_accounts(payload: schemas.ChartAccountBulkImportRequest
                 company_id=default_company_id,
                 code=code,
                 name=name,
-                type="OTHER",
-                subtype=None,
+                type=account_type,
+                subtype=subtype,
                 description=None,
                 is_active=True,
                 parent_id=code_to_id.get(parent_code),
-                normal_balance="credit",
+                normal_balance="debit" if account_type in {"ASSET", "EXPENSE", "COGS"} else "credit",
             )
             db.add(account)
             db.flush()
@@ -230,7 +246,7 @@ def bulk_import_chart_of_accounts(payload: schemas.ChartAccountBulkImportRequest
             created_this_pass = True
 
         if not created_this_pass:
-            unresolved = ", ".join(sorted(code for _, (_, code) in pending_by_code.items() if code))
+            unresolved = ", ".join(sorted(parent_code for _, (_, _, _, parent_code) in pending_by_code.items() if parent_code))
             db.rollback()
             raise HTTPException(status_code=400, detail=f"Unable to resolve parent account codes: {unresolved}.")
 

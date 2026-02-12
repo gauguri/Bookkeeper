@@ -6,8 +6,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.inventory.service import adjust_inventory
-from app.models import Inventory, Item, PurchaseOrderSendLog, Supplier, SupplierItem
-from app.purchasing.service import create_purchase_order, receive_purchase_order, send_purchase_order, update_purchase_order
+from app.models import Account, Company, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.purchasing.service import create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
 def create_session():
@@ -335,3 +335,77 @@ def test_update_purchase_order_rejected_when_not_draft_or_sent():
         assert "DRAFT or SENT" in str(exc)
     else:
         raise AssertionError("Expected ValueError when editing received PO")
+
+
+def _create_company_and_accounts(db):
+    company = Company(name="Demo")
+    db.add(company)
+    db.flush()
+    cash = Account(company_id=company.id, code="10100", name="Cash - Regular Checking", type="ASSET", normal_balance="debit", is_active=True)
+    inventory = Account(company_id=company.id, code="13100", name="Inventory", type="ASSET", normal_balance="debit", is_active=True)
+    db.add_all([cash, inventory])
+    db.flush()
+    return company, cash, inventory
+
+
+def test_post_purchase_order_receipt_creates_balanced_journal_entry():
+    db = create_session()
+    _company, cash, inventory = _create_company_and_accounts(db)
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    db.add(SupplierItem(supplier_id=supplier.id, item_id=item.id, supplier_cost=Decimal("10.00"), is_preferred=True))
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "freight_cost": Decimal("5.00"),
+            "tariff_cost": Decimal("5.00"),
+            "lines": [{"item_id": item.id, "quantity": Decimal("2"), "unit_cost": Decimal("10.00")}],
+        },
+    )
+    db.commit()
+
+    post_purchase_order_receipt(
+        db,
+        po=po,
+        entry_date=date.today(),
+        memo="PO receipt",
+        inventory_account_id=inventory.id,
+        cash_account_id=cash.id,
+    )
+    db.commit()
+
+    entry = db.query(JournalEntry).filter(JournalEntry.id == po.posted_journal_entry_id).first()
+    assert entry is not None
+    assert len(entry.lines) == 2
+    assert sum((Decimal(line.debit or 0) for line in entry.lines), Decimal("0")) == Decimal("30.00")
+    assert sum((Decimal(line.credit or 0) for line in entry.lines), Decimal("0")) == Decimal("30.00")
+
+
+def test_post_purchase_order_receipt_blocks_duplicates():
+    db = create_session()
+    _company, cash, inventory = _create_company_and_accounts(db)
+    supplier = create_supplier(db)
+    supplier.email = "buyer@supplyco.test"
+    item = create_item(db)
+    db.add(SupplierItem(supplier_id=supplier.id, item_id=item.id, supplier_cost=Decimal("1.00"), is_preferred=True))
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {"supplier_id": supplier.id, "order_date": date.today(), "lines": [{"item_id": item.id, "quantity": Decimal("1"), "unit_cost": Decimal("1.00")}]},
+    )
+    db.commit()
+
+    post_purchase_order_receipt(db, po=po, entry_date=date.today(), memo=None, inventory_account_id=inventory.id, cash_account_id=cash.id)
+    db.commit()
+
+    try:
+        post_purchase_order_receipt(db, po=po, entry_date=date.today(), memo=None, inventory_account_id=inventory.id, cash_account_id=cash.id)
+        assert False, "Expected duplicate posting to fail"
+    except ValueError as exc:
+        assert "already posted" in str(exc)

@@ -8,7 +8,9 @@ import {
   PurchaseOrderPayload,
   sendPurchaseOrder,
   updatePurchaseOrder,
-  apiFetch
+  apiFetch,
+  getPurchaseOrderAccountingPreview,
+  postPurchaseOrderReceipt
 } from "../api";
 
 type Supplier = {
@@ -28,6 +30,7 @@ type PurchaseOrderListRow = {
   order_date: string;
   status: string;
   total: number;
+  posted_journal_entry_id?: number | null;
 };
 
 type PurchaseOrderDetailLine = {
@@ -51,6 +54,27 @@ type PurchaseOrderDetail = {
   lines: PurchaseOrderDetailLine[];
 };
 
+
+type PreviewAccount = {
+  id: number;
+  name: string;
+  code?: string | null;
+};
+
+type AccountingPreview = {
+  purchase_order_id: number;
+  po_number: string;
+  supplier: string;
+  items_subtotal: number;
+  freight_cost: number;
+  tariff_cost: number;
+  total: number;
+  inventory_account_id?: number | null;
+  cash_account_id?: number | null;
+  accounts: PreviewAccount[];
+  posted_journal_entry_id?: number | null;
+};
+
 type FormLine = {
   item_id: string;
   quantity: string;
@@ -70,6 +94,9 @@ export default function PurchaseOrdersPage() {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(true);
+  const [preview, setPreview] = useState<AccountingPreview | null>(null);
+  const [creditAccountId, setCreditAccountId] = useState("");
+  const [inventoryAccountId, setInventoryAccountId] = useState("");
   const [form, setForm] = useState({
     supplier_id: "",
     order_date: today,
@@ -236,6 +263,35 @@ export default function PurchaseOrdersPage() {
         return;
       }
       setError("Unable to delete purchase order. Please try again.");
+    }
+  };
+
+
+
+  const openReceivePreview = async (po: PurchaseOrderListRow) => {
+    setError("");
+    try {
+      const previewData = await getPurchaseOrderAccountingPreview<AccountingPreview>(po.id);
+      setPreview(previewData);
+      setCreditAccountId(String(previewData.cash_account_id ?? ""));
+      setInventoryAccountId(String(previewData.inventory_account_id ?? ""));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const confirmReceiptPosting = async () => {
+    if (!preview) return;
+    try {
+      await postPurchaseOrderReceipt(preview.purchase_order_id, {
+        date: new Date().toISOString().slice(0, 10),
+        cash_account_id: creditAccountId ? Number(creditAccountId) : null,
+        inventory_account_id: inventoryAccountId ? Number(inventoryAccountId) : null
+      });
+      setPreview(null);
+      await loadData();
+    } catch (err) {
+      setError((err as Error).message);
     }
   };
 
@@ -439,6 +495,7 @@ export default function PurchaseOrdersPage() {
               const canEdit = po.status === "DRAFT" || po.status === "SENT";
               const canSend = po.status !== "RECEIVED" && po.status !== "PARTIALLY_RECEIVED";
               const canDelete = po.status === "DRAFT";
+              const canReceive = po.status === "SENT" || po.status === "PARTIALLY_RECEIVED" || Boolean(po.posted_journal_entry_id);
 
               return (
                 <tr key={po.id} className="border-t border-muted/20">
@@ -463,6 +520,9 @@ export default function PurchaseOrdersPage() {
                       >
                         Resend
                       </button>
+                      <button className={actionButtonClass} onClick={() => openReceivePreview(po)} disabled={!canReceive}>
+                        {po.posted_journal_entry_id ? "View entry" : "Receive"}
+                      </button>
                       <button
                         className={canDelete ? actionButtonClass : disabledDeleteButtonClass}
                         onClick={() => removePurchaseOrder(po)}
@@ -479,6 +539,47 @@ export default function PurchaseOrdersPage() {
           </tbody>
         </table>
       </section>
+
+
+      {preview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-xl space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-soft">
+            <h3 className="text-xl font-semibold">Accounting entry preview</h3>
+            <div className="text-sm text-muted">
+              <p>PO: {preview.po_number}</p>
+              <p>Supplier: {preview.supplier}</p>
+              <p>Items subtotal: ${Number(preview.items_subtotal).toFixed(2)}</p>
+              <p>Freight: ${Number(preview.freight_cost).toFixed(2)}</p>
+              <p>Tariff: ${Number(preview.tariff_cost).toFixed(2)}</p>
+              <p className="font-semibold text-foreground">Total: ${Number(preview.total).toFixed(2)}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-sm text-muted">Debit account
+                <select className="app-input mt-1" value={inventoryAccountId} onChange={(event) => setInventoryAccountId(event.target.value)}>
+                  <option value="">Select account</option>
+                  {preview.accounts.map((account) => (<option key={account.id} value={account.id}>{account.code ? `${account.code} · ` : ""}{account.name}</option>))}
+                </select>
+              </label>
+              <label className="text-sm text-muted">Credit account
+                <select className="app-input mt-1" value={creditAccountId} onChange={(event) => setCreditAccountId(event.target.value)}>
+                  <option value="">Select account</option>
+                  {preview.accounts.map((account) => (<option key={account.id} value={account.id}>{account.code ? `${account.code} · ` : ""}{account.name}</option>))}
+                </select>
+              </label>
+            </div>
+            <div className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
+              <p>Debit Inventory +${Number(preview.total).toFixed(2)}</p>
+              <p>Credit Cash -${Number(preview.total).toFixed(2)}</p>
+            </div>
+            {preview.posted_journal_entry_id ? <p className="text-sm text-primary">This PO is already posted. Entry #{preview.posted_journal_entry_id}.</p> : null}
+            <div className="flex justify-end gap-2">
+              <button className="app-button-secondary" onClick={() => setPreview(null)}>Cancel</button>
+              <button className="app-button" onClick={confirmReceiptPosting} disabled={Boolean(preview.posted_journal_entry_id)}>Confirm & Post</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   );
 }

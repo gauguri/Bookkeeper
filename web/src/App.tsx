@@ -23,6 +23,7 @@ import InventoryPage from "./pages/InventoryPage";
 import ItemsPage from "./pages/ItemsPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
+import ExpensesPage from "./pages/ExpensesPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
 import SalesLanding from "./pages/SalesLanding";
@@ -252,7 +253,7 @@ export default function App() {
         <Route path="/sales/invoices/:id" element={<InvoiceDetailPage />} />
         <Route path="/sales/payments" element={<PaymentsPage />} />
         <Route path="/sales/reports" element={<ReportsPage />} />
-        <Route path="/expenses" element={<PlaceholderPage title="Expenses" />} />
+        <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/banking" element={<PlaceholderPage title="Banking" />} />
         <Route path="/accounts" element={<ChartOfAccountsPage />} />
         <Route path="/accounts/bulk-import" element={<ChartOfAccountsBulkImportPage />} />

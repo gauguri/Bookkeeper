@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import List
 
@@ -6,13 +7,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import PurchaseOrder, PurchaseOrderLine
+from app.models import Account, PurchaseOrder, PurchaseOrderLine
 from app.purchasing import schemas
 from app.purchasing.service import (
     create_purchase_order,
     po_extra_costs_total,
     po_items_subtotal,
     po_total,
+    find_cash_account,
+    find_inventory_account,
+    post_purchase_order_receipt,
     receive_purchase_order,
     send_purchase_order,
     update_purchase_order,
@@ -45,6 +49,7 @@ def _to_detail_response(po: PurchaseOrder) -> schemas.PurchaseOrderResponse:
         created_at=po.created_at,
         updated_at=po.updated_at,
         sent_at=po.sent_at,
+        posted_journal_entry_id=po.posted_journal_entry_id,
         lines=[
             schemas.PurchaseOrderLineResponse(
                 id=line.id,
@@ -83,6 +88,7 @@ def list_purchase_orders(db: Session = Depends(get_db)):
             freight_cost=po.freight_cost,
             tariff_cost=po.tariff_cost,
             total=po_total(po),
+            posted_journal_entry_id=po.posted_journal_entry_id,
         )
         for po in pos
     ]
@@ -216,3 +222,64 @@ def delete_purchase_order_endpoint(purchase_order_id: int, db: Session = Depends
         raise HTTPException(status_code=409, detail=DELETE_BLOCKED_DETAIL)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{purchase_order_id}/accounting-preview", response_model=schemas.PurchaseOrderAccountingPreview)
+def get_purchase_order_accounting_preview(purchase_order_id: int, db: Session = Depends(get_db)):
+    po = (
+        db.query(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.lines), selectinload(PurchaseOrder.supplier))
+        .filter(PurchaseOrder.id == purchase_order_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found.")
+
+    inventory_account = find_inventory_account(db)
+    cash_account = find_cash_account(db)
+    accounts = db.query(Account).filter(Account.is_active.is_(True)).order_by(Account.name.asc()).all()
+
+    return schemas.PurchaseOrderAccountingPreview(
+        purchase_order_id=po.id,
+        po_number=po.po_number,
+        supplier=po.supplier.name if po.supplier else f"Supplier #{po.supplier_id}",
+        items_subtotal=po_items_subtotal(po),
+        freight_cost=po.freight_cost,
+        tariff_cost=po.tariff_cost,
+        total=po_total(po),
+        inventory_account_id=inventory_account.id if inventory_account else None,
+        cash_account_id=cash_account.id if cash_account else None,
+        accounts=[schemas.PurchaseOrderPreviewAccount(id=account.id, name=account.name, code=account.code) for account in accounts],
+        posted_journal_entry_id=po.posted_journal_entry_id,
+    )
+
+
+@router.post("/{purchase_order_id}/post-receipt", response_model=schemas.PurchaseOrderResponse)
+def post_purchase_order_receipt_endpoint(
+    purchase_order_id: int,
+    payload: schemas.PurchaseOrderPostReceiptPayload,
+    db: Session = Depends(get_db),
+):
+    po = (
+        db.query(PurchaseOrder)
+        .options(selectinload(PurchaseOrder.lines).selectinload(PurchaseOrderLine.item), selectinload(PurchaseOrder.supplier))
+        .filter(PurchaseOrder.id == purchase_order_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found.")
+    try:
+        post_purchase_order_receipt(
+            db,
+            po=po,
+            entry_date=payload.date or date.today(),
+            memo=payload.memo,
+            inventory_account_id=payload.inventory_account_id,
+            cash_account_id=payload.cash_account_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "already posted" in str(exc) else 400, detail=str(exc))
+
+    db.commit()
+    db.refresh(po)
+    return _to_detail_response(po)

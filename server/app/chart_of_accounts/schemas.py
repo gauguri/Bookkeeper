@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from decimal import Decimal
 
 
 AccountType = Literal["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE", "COGS", "OTHER"]
@@ -51,6 +52,7 @@ class ChartAccountResponse(BaseModel):
     parent_account: Optional[AccountParentSummary] = None
     created_at: datetime
     updated_at: datetime
+    balance: Decimal = Decimal("0.00")
 
     model_config = ConfigDict(from_attributes=True)
 

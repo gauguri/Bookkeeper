@@ -70,6 +70,7 @@ class PurchaseOrderListResponse(BaseModel):
     freight_cost: DecimalValue
     tariff_cost: DecimalValue
     total: DecimalValue
+    posted_journal_entry_id: Optional[int] = None
 
 
 class PurchaseOrderSendResponse(BaseModel):
@@ -88,6 +89,7 @@ class PurchaseOrderResponse(PurchaseOrderBase):
     created_at: datetime
     updated_at: datetime
     sent_at: Optional[datetime] = None
+    posted_journal_entry_id: Optional[int] = None
     lines: List[PurchaseOrderLineResponse]
 
     model_config = ConfigDict(from_attributes=True)
@@ -100,3 +102,30 @@ class PurchaseOrderReceiveLine(BaseModel):
 
 class PurchaseOrderReceivePayload(BaseModel):
     lines: List[PurchaseOrderReceiveLine]
+
+
+class PurchaseOrderPreviewAccount(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+
+
+class PurchaseOrderAccountingPreview(BaseModel):
+    purchase_order_id: int
+    po_number: str
+    supplier: str
+    items_subtotal: DecimalValue
+    freight_cost: DecimalValue
+    tariff_cost: DecimalValue
+    total: DecimalValue
+    inventory_account_id: Optional[int] = None
+    cash_account_id: Optional[int] = None
+    accounts: List[PurchaseOrderPreviewAccount]
+    posted_journal_entry_id: Optional[int] = None
+
+
+class PurchaseOrderPostReceiptPayload(BaseModel):
+    date: date
+    memo: Optional[str] = None
+    inventory_account_id: Optional[int] = None
+    cash_account_id: Optional[int] = None

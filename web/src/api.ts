@@ -80,6 +80,36 @@ export function sendPurchaseOrder<T>(id: number) {
   return apiFetch<T>(`/purchase-orders/${id}/send`, { method: "POST" });
 }
 
+export function getPurchaseOrderAccountingPreview<T>(id: number) {
+  return apiFetch<T>(`/purchase-orders/${id}/accounting-preview`);
+}
+
+export function postPurchaseOrderReceipt<T>(
+  id: number,
+  payload: { date: string; memo?: string | null; inventory_account_id?: number | null; cash_account_id?: number | null }
+) {
+  return apiFetch<T>(`/purchase-orders/${id}/post-receipt`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function createJournalEntry<T>(payload: {
+  date: string;
+  memo?: string | null;
+  source_type: "MANUAL" | "PURCHASE_ORDER";
+  source_id?: number | null;
+  lines: { account_id: number; direction: "DEBIT" | "CREDIT"; amount: number }[];
+}) {
+  return apiFetch<T>("/journal-entries", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listJournalEntries<T>(query = "") {
+  return apiFetch<T>(`/journal-entries${query ? `?${query}` : ""}`);
+}
 
 export function deletePurchaseOrder(id: number) {
   return apiFetch<void>(`/purchase-orders/${id}`, { method: "DELETE" });

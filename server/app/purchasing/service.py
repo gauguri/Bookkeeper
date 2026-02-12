@@ -5,8 +5,9 @@ import json
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.accounting.service import create_journal_entry
 from app.inventory.service import land_inventory_from_purchase_order, receive_inventory
-from app.models import Item, PurchaseOrder, PurchaseOrderLine, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.models import Account, Item, PurchaseOrder, PurchaseOrderLine, PurchaseOrderSendLog, Supplier, SupplierItem
 
 
 def _next_po_number(db: Session) -> str:
@@ -152,4 +153,65 @@ def receive_purchase_order(db: Session, po: PurchaseOrder, payload: dict) -> Pur
         po.status = po.status or "DRAFT"
     if not po.order_date:
         po.order_date = date.today()
+    return po
+
+
+def find_inventory_account(db: Session) -> Account | None:
+    return (
+        db.query(Account)
+        .filter((Account.code == "13100") | (func.lower(Account.name) == "inventory"))
+        .order_by(Account.id.asc())
+        .first()
+    )
+
+
+def find_cash_account(db: Session) -> Account | None:
+    return (
+        db.query(Account)
+        .filter((Account.code == "10100") | (func.lower(Account.name).like("%cash%")))
+        .order_by(Account.id.asc())
+        .first()
+    )
+
+
+def post_purchase_order_receipt(
+    db: Session,
+    *,
+    po: PurchaseOrder,
+    entry_date: date,
+    memo: str | None,
+    inventory_account_id: int | None,
+    cash_account_id: int | None,
+) -> PurchaseOrder:
+    if po.posted_journal_entry_id:
+        raise ValueError("This purchase order was already posted. You can view the existing entry.")
+
+    default_inventory = find_inventory_account(db)
+    default_cash = find_cash_account(db)
+    inventory_account_id = inventory_account_id or (default_inventory.id if default_inventory else None)
+    cash_account_id = cash_account_id or (default_cash.id if default_cash else None)
+
+    if not inventory_account_id or not cash_account_id:
+        raise ValueError("Inventory and cash accounts are required to post this entry.")
+
+    total = po_total(po)
+    company_id = (db.query(Account.company_id).filter(Account.id == inventory_account_id).scalar() or 1)
+    entry = create_journal_entry(
+        db,
+        company_id=company_id,
+        entry_date=entry_date,
+        memo=memo or f"PO {po.po_number} landed cost",
+        source_type="PURCHASE_ORDER",
+        source_id=po.id,
+        debit_account_id=inventory_account_id,
+        credit_account_id=cash_account_id,
+        amount=total,
+    )
+
+    po.posted_journal_entry_id = entry.id
+    po.status = "RECEIVED"
+    if not po.inventory_landed:
+        land_inventory_from_purchase_order(db, po)
+        po.inventory_landed = True
+        po.landed_at = datetime.utcnow()
     return po

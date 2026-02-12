@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.chart_of_accounts import schemas
 from app.db import get_db
 from app.models import Account, Company, Item, JournalLine
+from app.accounting.service import compute_account_balance
 
 router = APIRouter(prefix="/api", tags=["chart-of-accounts"])
 
@@ -31,7 +32,27 @@ def _get_default_company_id(db: Session) -> int:
     return company.id
 
 
-def _serialize_account(account: Account) -> schemas.ChartAccountResponse:
+def _balances_by_account_id(db: Session) -> dict[int, float]:
+    rows = (
+        db.query(
+            JournalLine.account_id,
+            func.coalesce(func.sum(JournalLine.debit), 0),
+            func.coalesce(func.sum(JournalLine.credit), 0),
+        )
+        .group_by(JournalLine.account_id)
+        .all()
+    )
+    account_type_lookup = {
+        account_id: account_type
+        for account_id, account_type in db.query(Account.id, Account.type).all()
+    }
+    return {
+        account_id: compute_account_balance(account_type_lookup.get(account_id, "OTHER"), debit_total, credit_total)
+        for account_id, debit_total, credit_total in rows
+    }
+
+
+def _serialize_account(account: Account, balance: float = 0) -> schemas.ChartAccountResponse:
     parent_summary = None
     if account.parent:
         parent_summary = schemas.AccountParentSummary(id=account.parent.id, name=account.parent.name, code=account.parent.code)
@@ -47,6 +68,7 @@ def _serialize_account(account: Account) -> schemas.ChartAccountResponse:
         parent_account=parent_summary,
         created_at=account.created_at,
         updated_at=account.updated_at,
+        balance=balance,
     )
 
 
@@ -67,7 +89,8 @@ def list_chart_of_accounts(
         query = query.filter((Account.name.ilike(like)) | (Account.code.ilike(like)))
 
     accounts = query.order_by(Account.type.asc(), Account.name.asc()).all()
-    return [_serialize_account(account) for account in accounts]
+    balances = _balances_by_account_id(db)
+    return [_serialize_account(account, balances.get(account.id, 0)) for account in accounts]
 
 
 @router.post("/chart-of-accounts", response_model=schemas.ChartAccountResponse, status_code=status.HTTP_201_CREATED)
@@ -98,7 +121,7 @@ def create_chart_account(payload: schemas.ChartAccountCreate, db: Session = Depe
     db.refresh(account)
     if parent:
         account.parent = parent
-    return _serialize_account(account)
+    return _serialize_account(account, _balances_by_account_id(db).get(account.id, 0))
 
 
 @router.get("/chart-of-accounts/{account_id}", response_model=schemas.ChartAccountResponse)
@@ -106,7 +129,7 @@ def get_chart_account(account_id: int, db: Session = Depends(get_db)):
     account = db.query(Account).options(selectinload(Account.parent)).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found.")
-    return _serialize_account(account)
+    return _serialize_account(account, _balances_by_account_id(db).get(account.id, 0))
 
 
 @router.put("/chart-of-accounts/{account_id}", response_model=schemas.ChartAccountResponse)
@@ -142,7 +165,7 @@ def update_chart_account(account_id: int, payload: schemas.ChartAccountUpdate, d
 
     db.refresh(account)
     account = db.query(Account).options(selectinload(Account.parent)).filter(Account.id == account_id).first()
-    return _serialize_account(account)
+    return _serialize_account(account, _balances_by_account_id(db).get(account.id, 0))
 
 
 @router.delete("/chart-of-accounts/{account_id}", response_model=dict)

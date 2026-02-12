@@ -429,9 +429,11 @@ class PurchaseOrder(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     sent_at = Column(DateTime, nullable=True)
+    posted_journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
 
     supplier = relationship("Supplier")
     lines = relationship("PurchaseOrderLine", back_populates="purchase_order", cascade="all, delete-orphan")
+    posted_journal_entry = relationship("JournalEntry")
 
 
 class Inventory(Base):

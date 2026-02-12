@@ -41,7 +41,9 @@ export default function ChartOfAccountsBulkImportPage() {
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Accounting</p>
         <h1 className="text-3xl font-semibold">Chart of Accounts · Bulk Import</h1>
-        <p className="text-muted">Paste CSV rows in this format: Code, Name of the Account, Parent (or null).</p>
+        <p className="text-muted">
+          Paste CSV rows in this format: Code, Name of the Account, Type, SubType, Parent (or null).
+        </p>
       </div>
 
       {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>}
@@ -53,11 +55,16 @@ export default function ChartOfAccountsBulkImportPage() {
             className="app-input min-h-56"
             value={csvData}
             onChange={(event) => setCsvData(event.target.value)}
-            placeholder={"1000,Cash,null\n1100,Operating Cash,1000\n2000,Accounts Payable,null"}
+            placeholder={
+              "1000,Cash,Asset,Cash,null\n1100,Operating Cash,Asset,Bank,1000\n2000,Accounts Payable,Liability,Current Liability,null"
+            }
           />
         </label>
         <div className="flex items-center justify-between gap-4">
-          <span className="text-sm text-muted">Parent values must match an existing or imported account code.</span>
+          <span className="text-sm text-muted">
+            Type must be one of Asset, Liability, Equity, Income, Expense, COGS, or Other. Parent values must match an existing
+            or imported account code.
+          </span>
           <button className="app-button" type="button" onClick={submitBulkImport} disabled={importing}>
             <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Import CSV"}
           </button>

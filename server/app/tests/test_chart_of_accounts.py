@@ -100,7 +100,7 @@ def test_bulk_import_chart_of_accounts(client: TestClient):
     response = client.post(
         "/api/chart-of-accounts/bulk-import",
         json={
-            "csv_data": "2000,Accounts Payable,null\n2100,Trade Payables,2000"
+            "csv_data": "2000,Accounts Payable,Liability,Current Liability,null\n2100,Trade Payables,Liability,null,2000"
         },
     )
     assert response.status_code == 201
@@ -109,15 +109,27 @@ def test_bulk_import_chart_of_accounts(client: TestClient):
 
     accounts_response = client.get("/api/chart-of-accounts")
     assert accounts_response.status_code == 200
-    codes = {account["code"] for account in accounts_response.json()}
-    assert "2000" in codes
-    assert "2100" in codes
+    accounts_by_code = {account["code"]: account for account in accounts_response.json()}
+    assert "2000" in accounts_by_code
+    assert "2100" in accounts_by_code
+    assert accounts_by_code["2000"]["type"] == "LIABILITY"
+    assert accounts_by_code["2000"]["subtype"] == "Current Liability"
+    assert accounts_by_code["2100"]["parent_account"] is not None
 
 
 def test_bulk_import_with_missing_parent_returns_bad_request(client: TestClient):
     response = client.post(
         "/api/chart-of-accounts/bulk-import",
-        json={"csv_data": "2200,Deferred Revenue,9999"},
+        json={"csv_data": "2200,Deferred Revenue,Liability,null,9999"},
     )
     assert response.status_code == 400
     assert "Unable to resolve parent account codes" in response.json()["detail"]
+
+
+def test_bulk_import_with_invalid_type_returns_bad_request(client: TestClient):
+    response = client.post(
+        "/api/chart-of-accounts/bulk-import",
+        json={"csv_data": "2200,Deferred Revenue,Balance,null,null"},
+    )
+    assert response.status_code == 400
+    assert "Invalid account type" in response.json()["detail"]

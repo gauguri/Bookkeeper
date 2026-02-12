@@ -94,3 +94,30 @@ def test_delete_in_use_account_returns_conflict(client: TestClient):
     response = client.delete(f"/api/chart-of-accounts/{account_id}")
     assert response.status_code == 409
     assert response.json()["detail"] == "Cannot delete account that is in use."
+
+
+def test_bulk_import_chart_of_accounts(client: TestClient):
+    response = client.post(
+        "/api/chart-of-accounts/bulk-import",
+        json={
+            "csv_data": "2000,Accounts Payable,null\n2100,Trade Payables,2000"
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["created_count"] == 2
+
+    accounts_response = client.get("/api/chart-of-accounts")
+    assert accounts_response.status_code == 200
+    codes = {account["code"] for account in accounts_response.json()}
+    assert "2000" in codes
+    assert "2100" in codes
+
+
+def test_bulk_import_with_missing_parent_returns_bad_request(client: TestClient):
+    response = client.post(
+        "/api/chart-of-accounts/bulk-import",
+        json={"csv_data": "2200,Deferred Revenue,9999"},
+    )
+    assert response.status_code == 400
+    assert "Unable to resolve parent account codes" in response.json()["detail"]

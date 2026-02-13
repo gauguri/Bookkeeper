@@ -62,5 +62,7 @@ class JournalEntryListRow(BaseModel):
     memo: Optional[str] = None
     amount: Decimal
     source_type: str
+    debit_account_id: int
+    credit_account_id: int
     debit_account: str
     credit_account: str

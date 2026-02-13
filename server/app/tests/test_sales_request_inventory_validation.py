@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Item
+from app.models import Customer, Inventory, Item
 
 
 @pytest.fixture()
@@ -36,8 +36,15 @@ def client():
         db.flush()
         db.add_all(
             [
-                Item(name="Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("12"), reserved_qty=Decimal("2")),
-                Item(name="Bolt", unit_price=Decimal("3.00"), on_hand_qty=Decimal("3"), reserved_qty=Decimal("0")),
+                Item(name="Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0")),
+                Item(name="Bolt", unit_price=Decimal("3.00"), on_hand_qty=Decimal("100"), reserved_qty=Decimal("0")),
+            ]
+        )
+        db.flush()
+        db.add_all(
+            [
+                Inventory(item_id=1, quantity_on_hand=Decimal("10.00"), landed_unit_cost=Decimal("2.00")),
+                Inventory(item_id=2, quantity_on_hand=Decimal("3.00"), landed_unit_cost=Decimal("1.00")),
             ]
         )
         db.commit()

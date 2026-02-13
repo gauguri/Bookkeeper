@@ -4,7 +4,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Customer, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem
+from app.inventory.service import get_available_qty
+from app.models import Company, Customer, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem
 from app.suppliers.service import get_supplier_link
 
 
@@ -26,6 +27,9 @@ def _next_request_number(db: Session) -> str:
         sequence = 1
     return f"{prefix}{sequence:04d}"
 
+
+def _get_default_company_id(db: Session) -> int:
+    return db.query(Company.id).order_by(Company.id.asc()).scalar() or 1
 
 class InventoryQuantityExceededError(ValueError):
     def __init__(self, violations: list[dict]):
@@ -58,19 +62,21 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
     sales_request.lines = []
 
     inventory_violations = []
+    company_id = _get_default_company_id(db)
     for line in lines_payload:
         item = db.query(Item).filter(Item.id == line["item_id"]).first()
         if not item:
             raise ValueError("One or more selected items no longer exist.")
 
         quantity = Decimal(str(line["quantity"]))
-        if quantity > item.available_qty:
+        available_qty = get_available_qty(db, item.id, company_id=company_id)
+        if quantity > available_qty:
             inventory_violations.append(
                 {
                     "item_id": item.id,
                     "item_name": item.name,
                     "requested_qty": str(quantity),
-                    "available_qty": str(item.available_qty),
+                    "available_qty": str(available_qty),
                 }
             )
 
@@ -118,6 +124,7 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
         return None
 
     enriched_lines = []
+    company_id = _get_default_company_id(db)
     for line in sales_request.lines:
         item = line.item
         supplier_options = []
@@ -142,7 +149,7 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
             "line_total": line.line_total,
             "on_hand_qty": item.on_hand_qty if item else Decimal(0),
             "reserved_qty": item.reserved_qty if item else Decimal(0),
-            "available_qty": item.available_qty if item else Decimal(0),
+            "available_qty": get_available_qty(db, item.id, company_id=company_id) if item else Decimal(0),
             "supplier_options": supplier_options,
         })
 

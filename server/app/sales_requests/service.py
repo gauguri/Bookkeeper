@@ -27,6 +27,17 @@ def _next_request_number(db: Session) -> str:
     return f"{prefix}{sequence:04d}"
 
 
+class InventoryQuantityExceededError(ValueError):
+    def __init__(self, violations: list[dict]):
+        self.violations = violations
+        first = violations[0]
+        super().__init__(
+            f"Quantity exceeds available inventory for {first['item_name']} "
+            f"(requested {first['requested_qty']}, available {first['available_qty']})."
+        )
+
+
+
 def create_sales_request(db: Session, payload: dict) -> SalesRequest:
     lines_payload = payload.pop("lines")
     customer_id = payload.get("customer_id")
@@ -46,12 +57,23 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
     sales_request = SalesRequest(**payload)
     sales_request.lines = []
 
+    inventory_violations = []
     for line in lines_payload:
         item = db.query(Item).filter(Item.id == line["item_id"]).first()
         if not item:
             raise ValueError("One or more selected items no longer exist.")
 
         quantity = Decimal(str(line["quantity"]))
+        if quantity > item.available_qty:
+            inventory_violations.append(
+                {
+                    "item_id": item.id,
+                    "item_name": item.name,
+                    "requested_qty": str(quantity),
+                    "available_qty": str(item.available_qty),
+                }
+            )
+
         unit_price = Decimal(str(line["unit_price"]))
         line_total = quantity * unit_price
         sales_request.lines.append(
@@ -63,6 +85,9 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
                 line_total=line_total,
             )
         )
+
+    if inventory_violations:
+        raise InventoryQuantityExceededError(inventory_violations)
 
     db.add(sales_request)
     return sales_request

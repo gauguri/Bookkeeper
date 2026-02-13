@@ -20,6 +20,15 @@ class InventoryItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class InventoryAvailabilityResponse(BaseModel):
+    item_id: int
+    available_qty: DecimalValue
+
+
+class InventoryAvailabilityBulkResponse(BaseModel):
+    items: list[InventoryAvailabilityResponse]
+
+
 class InventoryAdjustmentCreate(BaseModel):
     item_id: int
     qty_delta: DecimalValue = Field(..., description="Positive or negative adjustment quantity.")

@@ -1,7 +1,7 @@
 export const API_BASE = "/api";
 
 export type ApiError = {
-  detail?: string;
+  detail?: string | { message?: string };
 };
 
 export type ApiRequestError = Error & {
@@ -37,7 +37,13 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     try {
       const data = (await response.json()) as ApiError;
       if (data.detail) {
-        message = data.detail;
+        if (typeof data.detail === "string") {
+          message = data.detail;
+        } else if (typeof data.detail === "object" && data.detail.message) {
+          message = data.detail.message;
+        } else {
+          message = JSON.stringify(data.detail);
+        }
       }
     } catch (error) {
       // ignore parse errors

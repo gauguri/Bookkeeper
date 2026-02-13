@@ -3,11 +3,15 @@ import { apiFetch } from "../api";
 
 type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
+type InventoryAvailabilityResponse = { item_id: number; available_qty: number };
 
 type LineItemForm = {
   item_id: number | "";
   quantity: string;
   unit_price: string;
+  available_qty: number | null;
+  quantity_error: string;
+  availability_loading: boolean;
 };
 
 type Props = {
@@ -18,7 +22,25 @@ type Props = {
   onCancel: () => void;
 };
 
-const emptyLine: LineItemForm = { item_id: "", quantity: "1", unit_price: "0" };
+const emptyLine: LineItemForm = {
+  item_id: "",
+  quantity: "1",
+  unit_price: "0",
+  available_qty: null,
+  quantity_error: "",
+  availability_loading: false
+};
+
+const getQuantityValidationError = (quantity: string, availableQty: number | null) => {
+  const quantityValue = Number(quantity);
+  if (Number.isNaN(quantityValue) || quantityValue <= 0) {
+    return "Quantity must be greater than 0.";
+  }
+  if (availableQty !== null && quantityValue > availableQty) {
+    return `Quantity exceeds available inventory (${availableQty}).`;
+  }
+  return "";
+};
 
 export default function SalesRequestForm({ customers, items, createdByUserId, onCreated, onCancel }: Props) {
   const [customerId, setCustomerId] = useState<string>("");
@@ -32,6 +54,8 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
 
   const isWalkIn = customerId === "WALK_IN";
 
+  const hasLineErrors = useMemo(() => lines.some((line) => Boolean(line.quantity_error)), [lines]);
+
   const lineTotal = useMemo(
     () =>
       lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0),
@@ -42,15 +66,32 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
     setLines((prev) => {
       const next = [...prev];
       const merged = { ...next[index], ...patch };
+
       if (typeof patch.item_id === "number") {
         const item = items.find((entry) => entry.id === patch.item_id);
         if (item && (!patch.unit_price || patch.unit_price === "0")) {
           merged.unit_price = String(item.unit_price ?? 0);
         }
       }
+
+      merged.quantity_error = getQuantityValidationError(merged.quantity, merged.available_qty);
       next[index] = merged;
       return next;
     });
+  };
+
+  const fetchAvailabilityForLine = async (index: number, itemId: number) => {
+    updateLine(index, { availability_loading: true, available_qty: null, quantity_error: "" });
+    try {
+      const availability = await apiFetch<InventoryAvailabilityResponse>(`/inventory/available?item_id=${itemId}`);
+      updateLine(index, {
+        available_qty: Number(availability.available_qty),
+        availability_loading: false
+      });
+    } catch {
+      updateLine(index, { availability_loading: false, available_qty: null });
+      setError("Unable to load real-time inventory for the selected item.");
+    }
   };
 
   const addLine = () => setLines((prev) => [...prev, { ...emptyLine }]);
@@ -85,12 +126,17 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
         setError("Please select an item for each line.");
         return;
       }
-      if (Number(line.quantity) <= 0 || Number.isNaN(Number(line.quantity))) {
-        setError("Quantity must be greater than 0.");
+      if (line.quantity_error) {
+        setError(line.quantity_error);
         return;
       }
       if (Number(line.unit_price) < 0 || Number.isNaN(Number(line.unit_price))) {
         setError("Unit price cannot be negative.");
+        return;
+      }
+      if (line.available_qty !== null && Number(line.quantity) > line.available_qty) {
+        const itemName = items.find((entry) => entry.id === line.item_id)?.name ?? "item";
+        setError(`Quantity exceeds available inventory for ${itemName}.`);
         return;
       }
     }
@@ -174,7 +220,11 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
               value={line.item_id}
               onChange={(event) => {
                 const val = event.target.value;
-                updateLine(index, { item_id: val ? Number(val) : "" });
+                const itemId = val ? Number(val) : "";
+                updateLine(index, { item_id: itemId, available_qty: null, quantity_error: "" });
+                if (typeof itemId === "number") {
+                  void fetchAvailabilityForLine(index, itemId);
+                }
               }}
             >
               <option value="">Select item *</option>
@@ -184,15 +234,26 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
                 </option>
               ))}
             </select>
-            <input
-              className="app-input"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={line.quantity}
-              onChange={(event) => updateLine(index, { quantity: event.target.value })}
-              placeholder="Quantity"
-            />
+            <div>
+              <input
+                className="app-input"
+                type="number"
+                min="0.01"
+                max={line.available_qty ?? undefined}
+                step="0.01"
+                value={line.quantity}
+                onChange={(event) => updateLine(index, { quantity: event.target.value })}
+                placeholder="Quantity"
+              />
+              <p className="mt-1 text-xs text-muted">
+                {line.availability_loading
+                  ? "Loading availability..."
+                  : line.available_qty !== null
+                    ? `Available: ${line.available_qty} • Max: ${line.available_qty}`
+                    : "Available: —"}
+              </p>
+              {line.quantity_error ? <p className="mt-1 text-xs text-danger">{line.quantity_error}</p> : null}
+            </div>
             <input
               className="app-input"
               type="number"
@@ -227,7 +288,7 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
           <button className="app-button-secondary" onClick={onCancel} type="button">
             Cancel
           </button>
-          <button className="app-button" onClick={handleSubmit} disabled={saving} type="button">
+          <button className="app-button" onClick={handleSubmit} disabled={saving || hasLineErrors} type="button">
             {saving ? "Saving..." : "Create sales request"}
           </button>
         </div>

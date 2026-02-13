@@ -120,6 +120,49 @@ def list_inventory_items(search: Optional[str] = None, db: Session = Depends(get
     ]
 
 
+@router.get("/available", response_model=schemas.InventoryAvailabilityResponse | schemas.InventoryAvailabilityBulkResponse)
+def get_available_inventory(
+    item_id: Optional[int] = None,
+    item_ids: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if item_id is None and not item_ids:
+        raise HTTPException(status_code=400, detail="Provide item_id or item_ids.")
+
+    if item_id is not None and item_ids:
+        raise HTTPException(status_code=400, detail="Use either item_id or item_ids, not both.")
+
+    if item_id is not None:
+        item = db.query(Item).filter(Item.id == item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found.")
+        return schemas.InventoryAvailabilityResponse(item_id=item.id, available_qty=item.available_qty)
+
+    parsed_ids = []
+    for raw_value in item_ids.split(","):
+        raw_value = raw_value.strip()
+        if not raw_value:
+            continue
+        try:
+            parsed_ids.append(int(raw_value))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid item id: {raw_value}")
+
+    if not parsed_ids:
+        raise HTTPException(status_code=400, detail="No valid item ids supplied.")
+
+    items = db.query(Item).filter(Item.id.in_(parsed_ids)).all()
+    available_by_id = {item.id: item.available_qty for item in items}
+
+    missing = [requested_id for requested_id in parsed_ids if requested_id not in available_by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Items not found: {', '.join(str(v) for v in missing)}")
+
+    return schemas.InventoryAvailabilityBulkResponse(
+        items=[schemas.InventoryAvailabilityResponse(item_id=entry_id, available_qty=available_by_id[entry_id]) for entry_id in parsed_ids]
+    )
+
+
 @router.post("/adjustments", response_model=schemas.InventoryAdjustmentResponse, status_code=status.HTTP_201_CREATED)
 def create_inventory_adjustment(payload: schemas.InventoryAdjustmentCreate, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == payload.item_id).first()

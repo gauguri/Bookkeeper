@@ -17,7 +17,7 @@ def create_session():
 def test_rep_can_create_sales_request_and_see_it_in_list():
     db = create_session()
     customer = Customer(name="Acme Stores", is_active=True)
-    item = Item(name="Widget", unit_price=Decimal("12.50"), is_active=True, on_hand_qty=0, reserved_qty=0)
+    item = Item(name="Widget", unit_price=Decimal("12.50"), is_active=True, on_hand_qty=Decimal("10"), reserved_qty=0)
     db.add_all([customer, item])
     db.commit()
 

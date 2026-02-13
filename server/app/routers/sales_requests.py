@@ -9,6 +9,7 @@ from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
     calculate_sales_request_total,
+    InventoryQuantityExceededError,
     create_sales_request,
     generate_invoice_from_sales_request,
     get_sales_request_detail,
@@ -55,6 +56,15 @@ def list_sales_requests(
 def create_sales_request_endpoint(payload: schemas.SalesRequestCreate, db: Session = Depends(get_db)):
     try:
         sales_request = create_sales_request(db, payload.model_dump())
+    except InventoryQuantityExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INSUFFICIENT_INVENTORY",
+                "message": str(exc),
+                "violations": exc.violations,
+            },
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     db.commit()

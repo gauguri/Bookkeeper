@@ -159,7 +159,7 @@ def receive_purchase_order(db: Session, po: PurchaseOrder, payload: dict) -> Pur
 def find_inventory_account(db: Session) -> Account | None:
     return (
         db.query(Account)
-        .filter((Account.code == "13100") | (func.lower(Account.name) == "inventory"))
+        .filter((Account.code == "13100") | (func.lower(Account.name).like("%inventory%")))
         .order_by(Account.id.asc())
         .first()
     )

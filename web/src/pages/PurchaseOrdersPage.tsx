@@ -92,6 +92,7 @@ export default function PurchaseOrdersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(true);
   const [preview, setPreview] = useState<AccountingPreview | null>(null);
@@ -117,6 +118,7 @@ export default function PurchaseOrdersPage() {
       setPurchaseOrders(poData);
       setSuppliers(supplierData);
       setItems(itemData);
+      setNotice("");
     } catch (err) {
       setError((err as Error).message);
     }
@@ -283,13 +285,14 @@ export default function PurchaseOrdersPage() {
   const confirmReceiptPosting = async () => {
     if (!preview) return;
     try {
-      await postPurchaseOrderReceipt(preview.purchase_order_id, {
+      const updated = await postPurchaseOrderReceipt<PurchaseOrderListRow>(preview.purchase_order_id, {
         date: new Date().toISOString().slice(0, 10),
         cash_account_id: creditAccountId ? Number(creditAccountId) : null,
         inventory_account_id: inventoryAccountId ? Number(inventoryAccountId) : null
       });
       setPreview(null);
-      await loadData();
+      setPurchaseOrders((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
+      setNotice("Received and posted entry.");
     } catch (err) {
       setError((err as Error).message);
     }
@@ -318,6 +321,7 @@ export default function PurchaseOrdersPage() {
       </header>
 
       {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+      {notice ? <p className="text-sm text-success">{notice}</p> : null}
 
       {formOpen ? (
         <section className="app-card space-y-6 p-6">
@@ -495,7 +499,7 @@ export default function PurchaseOrdersPage() {
               const canEdit = po.status === "DRAFT" || po.status === "SENT";
               const canSend = po.status !== "RECEIVED" && po.status !== "PARTIALLY_RECEIVED";
               const canDelete = po.status === "DRAFT";
-              const canReceive = po.status === "SENT" || po.status === "PARTIALLY_RECEIVED" || Boolean(po.posted_journal_entry_id);
+              const canReceive = (po.status === "DRAFT" || po.status === "SENT" || po.status === "PARTIALLY_RECEIVED") && !po.posted_journal_entry_id;
 
               return (
                 <tr key={po.id} className="border-t border-muted/20">
@@ -521,7 +525,7 @@ export default function PurchaseOrdersPage() {
                         Resend
                       </button>
                       <button className={actionButtonClass} onClick={() => openReceivePreview(po)} disabled={!canReceive}>
-                        {po.posted_journal_entry_id ? "View entry" : "Receive"}
+                        {po.posted_journal_entry_id ? "Received" : "Receive"}
                       </button>
                       <button
                         className={canDelete ? actionButtonClass : disabledDeleteButtonClass}

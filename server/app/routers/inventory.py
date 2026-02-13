@@ -8,11 +8,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.inventory import schemas
-from app.inventory.service import adjust_inventory
-from app.models import Inventory, Item
+from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map
+from app.models import Company, Inventory, Item
 
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+
+
+def _get_default_company_id(db: Session) -> int:
+    return db.query(Company.id).order_by(Company.id.asc()).scalar() or 1
 
 
 @router.get("", response_model=List[schemas.InventoryRecordResponse])
@@ -136,7 +140,11 @@ def get_available_inventory(
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
             raise HTTPException(status_code=404, detail="Item not found.")
-        return schemas.InventoryAvailabilityResponse(item_id=item.id, available_qty=item.available_qty)
+        company_id = _get_default_company_id(db)
+        return schemas.InventoryAvailabilityResponse(
+            item_id=item.id,
+            available_qty=get_available_qty(db, item.id, company_id=company_id),
+        )
 
     parsed_ids = []
     for raw_value in item_ids.split(","):
@@ -151,10 +159,12 @@ def get_available_inventory(
     if not parsed_ids:
         raise HTTPException(status_code=400, detail="No valid item ids supplied.")
 
-    items = db.query(Item).filter(Item.id.in_(parsed_ids)).all()
-    available_by_id = {item.id: item.available_qty for item in items}
+    items = db.query(Item.id).filter(Item.id.in_(parsed_ids)).all()
+    found_item_ids = {item_id for (item_id,) in items}
+    company_id = _get_default_company_id(db)
+    available_by_id = get_available_qty_map(db, parsed_ids, company_id=company_id)
 
-    missing = [requested_id for requested_id in parsed_ids if requested_id not in available_by_id]
+    missing = [requested_id for requested_id in parsed_ids if requested_id not in found_item_ids]
     if missing:
         raise HTTPException(status_code=404, detail=f"Items not found: {', '.join(str(v) for v in missing)}")
 

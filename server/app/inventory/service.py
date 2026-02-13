@@ -1,9 +1,43 @@
 from datetime import datetime
 from decimal import Decimal
+import logging
 
 from sqlalchemy.orm import Session
 
 from app.models import Inventory, InventoryTransaction, Item, PurchaseOrder
+
+
+logger = logging.getLogger(__name__)
+
+
+def get_available_qty(db: Session, item_id: int, company_id: int | None = None) -> Decimal:
+    """Single source of truth for available inventory used by sales requests."""
+    scoped_company_id = company_id  # inventory records are currently global in this app.
+
+    inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
+    available_qty = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal("0")
+    logger.debug(
+        "Inventory availability lookup: item_id=%s company_id=%s available_qty=%s",
+        item_id,
+        scoped_company_id,
+        available_qty,
+    )
+    return available_qty
+
+
+def get_available_qty_map(db: Session, item_ids: list[int], company_id: int | None = None) -> dict[int, Decimal]:
+    scoped_company_id = company_id  # inventory records are currently global in this app.
+    rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+    available_by_id = {row.item_id: Decimal(row.quantity_on_hand or 0) for row in rows}
+    for item_id in item_ids:
+        available_by_id.setdefault(item_id, Decimal("0"))
+    logger.debug(
+        "Bulk inventory availability lookup: item_ids=%s company_id=%s available_by_id=%s",
+        item_ids,
+        scoped_company_id,
+        available_by_id,
+    )
+    return available_by_id
 
 
 def create_inventory_transaction(

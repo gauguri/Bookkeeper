@@ -79,6 +79,7 @@ def list_journal_entries(
     entries = query.limit(limit * 3).all()
     account_records = db.query(Account).all()
     account_lookup = {account.id: account.name for account in account_records}
+    account_code_lookup = {account.id: account.code for account in account_records}
     account_type_lookup = {account.id: account.type for account in account_records}
     rows: list[schemas.JournalEntryListRow] = []
 
@@ -103,6 +104,10 @@ def list_journal_entries(
                 credit_account_id=credit_line.account_id,
                 debit_account=account_lookup.get(debit_line.account_id, f"Account #{debit_line.account_id}"),
                 credit_account=account_lookup.get(credit_line.account_id, f"Account #{credit_line.account_id}"),
+                debit_account_code=account_code_lookup.get(debit_line.account_id),
+                credit_account_code=account_code_lookup.get(credit_line.account_id),
+                debit_account_type=account_type_lookup.get(debit_line.account_id),
+                credit_account_type=account_type_lookup.get(credit_line.account_id),
             )
         )
         if len(rows) >= limit:

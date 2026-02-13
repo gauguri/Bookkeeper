@@ -66,3 +66,7 @@ class JournalEntryListRow(BaseModel):
     credit_account_id: int
     debit_account: str
     credit_account: str
+    debit_account_code: Optional[str] = None
+    credit_account_code: Optional[str] = None
+    debit_account_type: Optional[str] = None
+    credit_account_type: Optional[str] = None

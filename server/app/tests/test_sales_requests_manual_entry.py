@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import Customer, Item, SalesRequest
+from app.models import Customer, Inventory, Item, SalesRequest
 from app.sales_requests.service import create_sales_request
 
 
@@ -19,6 +19,8 @@ def test_rep_can_create_sales_request_and_see_it_in_list():
     customer = Customer(name="Acme Stores", is_active=True)
     item = Item(name="Widget", unit_price=Decimal("12.50"), is_active=True, on_hand_qty=Decimal("10"), reserved_qty=0)
     db.add_all([customer, item])
+    db.flush()
+    db.add(Inventory(item_id=item.id, quantity_on_hand=Decimal("10"), landed_unit_cost=Decimal("1.00")))
     db.commit()
 
     sales_request = create_sales_request(

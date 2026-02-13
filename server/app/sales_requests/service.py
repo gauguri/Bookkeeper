@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import get_available_qty
-from app.models import Company, Customer, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem
+from app.models import Company, Customer, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
 from app.suppliers.service import get_supplier_link
 
 
@@ -30,6 +30,17 @@ def _next_request_number(db: Session) -> str:
 
 def _get_default_company_id(db: Session) -> int:
     return db.query(Company.id).order_by(Company.id.asc()).scalar() or 1
+
+
+def _resolve_created_by_user_id(db: Session, created_by_user_id: Optional[int]) -> Optional[int]:
+    if created_by_user_id is None:
+        return None
+    exists = (
+        db.query(User.id)
+        .filter(User.id == created_by_user_id)
+        .scalar()
+    )
+    return created_by_user_id if exists is not None else None
 
 class InventoryQuantityExceededError(ValueError):
     def __init__(self, violations: list[dict]):
@@ -57,6 +68,7 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
 
     payload["request_number"] = _next_request_number(db)
     payload.setdefault("status", "OPEN")
+    payload["created_by_user_id"] = _resolve_created_by_user_id(db, payload.get("created_by_user_id"))
 
     sales_request = SalesRequest(**payload)
     sales_request.lines = []

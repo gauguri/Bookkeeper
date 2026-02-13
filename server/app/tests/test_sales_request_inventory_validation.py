@@ -97,3 +97,23 @@ def test_create_sales_request_rejects_quantity_above_available(client: TestClien
             "available_qty": "3.00",
         }
     ]
+
+
+def test_create_sales_request_ignores_nonexistent_created_by_user(client: TestClient):
+    response = client.post(
+        "/api/sales-requests",
+        json={
+            "customer_id": 1,
+            "status": "OPEN",
+            "created_by_user_id": 1,
+            "lines": [{"item_id": 1, "quantity": 2, "unit_price": 10}],
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["created_by_user_id"] is None
+
+    detail = client.get(f"/api/sales-requests/{body['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["created_by_user_id"] is None

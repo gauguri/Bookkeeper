@@ -68,6 +68,7 @@ def list_journal_entries(
     limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
     account_id: Optional[int] = Query(None),
+    type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     query = db.query(JournalEntry).options(selectinload(JournalEntry.lines)).order_by(JournalEntry.txn_date.desc(), JournalEntry.id.desc())
@@ -76,7 +77,9 @@ def list_journal_entries(
         query = query.filter(JournalEntry.description.ilike(like))
 
     entries = query.limit(limit * 3).all()
-    account_lookup = {account.id: account.name for account in db.query(Account).all()}
+    account_records = db.query(Account).all()
+    account_lookup = {account.id: account.name for account in account_records}
+    account_type_lookup = {account.id: account.type for account in account_records}
     rows: list[schemas.JournalEntryListRow] = []
 
     for entry in entries:
@@ -86,6 +89,8 @@ def list_journal_entries(
             continue
         if account_id and account_id not in {debit_line.account_id, credit_line.account_id}:
             continue
+        if type and type not in {account_type_lookup.get(debit_line.account_id), account_type_lookup.get(credit_line.account_id)}:
+            continue
 
         rows.append(
             schemas.JournalEntryListRow(
@@ -94,6 +99,8 @@ def list_journal_entries(
                 memo=entry.description,
                 amount=Decimal(debit_line.debit or 0),
                 source_type=entry.source_type,
+                debit_account_id=debit_line.account_id,
+                credit_account_id=credit_line.account_id,
                 debit_account=account_lookup.get(debit_line.account_id, f"Account #{debit_line.account_id}"),
                 credit_account=account_lookup.get(credit_line.account_id, f"Account #{credit_line.account_id}"),
             )

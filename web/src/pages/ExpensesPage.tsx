@@ -21,12 +21,18 @@ type Entry = {
   credit_account_id: number;
   debit_account: string;
   credit_account: string;
+  debit_account_code?: string | null;
+  credit_account_code?: string | null;
+  debit_account_type?: AccountType | null;
+  credit_account_type?: AccountType | null;
 };
 
 export default function ExpensesPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<"all" | "expense">("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [memo, setMemo] = useState("");
@@ -36,10 +42,7 @@ export default function ExpensesPage() {
 
   const load = async () => {
     try {
-      const [accountData, entryData] = await Promise.all([
-        apiFetch<Account[]>("/chart-of-accounts"),
-        listJournalEntries<Entry[]>("limit=50&type=EXPENSE")
-      ]);
+      const [accountData, entryData] = await Promise.all([apiFetch<Account[]>("/chart-of-accounts"), listJournalEntries<Entry[]>("limit=100")]);
       setAccounts(accountData);
       setEntries(entryData);
       setError("");
@@ -68,8 +71,6 @@ export default function ExpensesPage() {
       setFundingAccountId(String((cashAccount ?? fundingAccounts[0]).id));
     }
   }, [isModalOpen, expenseAccountId, fundingAccountId, expenseAccounts, fundingAccounts]);
-
-  const accountById = useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
 
   const resetModal = () => {
     setDate(new Date().toISOString().slice(0, 10));
@@ -104,12 +105,37 @@ export default function ExpensesPage() {
     }
   };
 
+  const filteredEntries = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return entries.filter((entry) => {
+      const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
+      if (view === "expense" && !isExpenseEntry) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+      const haystack = [
+        entry.memo ?? "",
+        entry.debit_account,
+        entry.credit_account,
+        entry.debit_account_code ?? "",
+        entry.credit_account_code ?? ""
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [entries, search, view]);
+
+  const formatAccountLabel = (name: string, code?: string | null) => (code ? `${name} (${code})` : name);
+
   return (
     <section className="space-y-6">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Expenses</h1>
-          <p className="text-muted">Record and review expense transactions.</p>
+          <p className="text-muted">Record and review accounting entries.</p>
         </div>
         <button className="app-button" onClick={() => setIsModalOpen(true)}>New expense</button>
       </header>
@@ -117,15 +143,32 @@ export default function ExpensesPage() {
       {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
 
       <div className="app-card space-y-4 p-6">
+        <div className="grid gap-3 md:grid-cols-[1fr,220px]">
+          <input
+            className="app-input"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search memo, payee, or account"
+          />
+          <label className="text-sm text-muted">
+            View
+            <select className="app-input mt-1" value={view} onChange={(event) => setView(event.target.value as "all" | "expense")}>
+              <option value="all">All entries</option>
+              <option value="expense">Expense entries only</option>
+            </select>
+          </label>
+        </div>
+
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="min-w-full text-sm">
             <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Payee / Memo</th>
-                <th className="px-3 py-2 text-left">Expense Account</th>
-                <th className="px-3 py-2 text-left">Funding Account</th>
+                <th className="px-3 py-2 text-left">Memo/Payee</th>
+                <th className="px-3 py-2 text-left">Debit account</th>
+                <th className="px-3 py-2 text-left">Credit account</th>
                 <th className="px-3 py-2 text-right">Amount</th>
+                <th className="px-3 py-2 text-left">Tags</th>
                 <th className="px-3 py-2 text-left">Source</th>
                 <th className="px-3 py-2 text-left">Actions</th>
               </tr>
@@ -133,22 +176,28 @@ export default function ExpensesPage() {
             <tbody>
               {entries.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-8 text-center text-muted" colSpan={7}>No expenses yet. Create your first expense.</td>
+                  <td className="px-3 py-8 text-center text-muted" colSpan={8}>No entries yet. Create your first expense.</td>
+                </tr>
+              ) : filteredEntries.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-muted" colSpan={8}>
+                    No expense entries yet. Switch to All entries or create an expense.
+                  </td>
                 </tr>
               ) : (
-                entries.map((entry) => {
-                  const debitAccount = accountById.get(entry.debit_account_id);
-                  const creditAccount = accountById.get(entry.credit_account_id);
-                  const expenseSide = debitAccount?.type === "EXPENSE" ? entry.debit_account : creditAccount?.type === "EXPENSE" ? entry.credit_account : "—";
-                  const fundingSide = debitAccount?.type === "EXPENSE" ? entry.credit_account : entry.debit_account;
+                filteredEntries.map((entry) => {
+                  const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
                   return (
                     <tr key={entry.id} className="border-t border-border/70">
                       <td className="px-3 py-2">{entry.date}</td>
                       <td className="px-3 py-2">{entry.memo || "—"}</td>
-                      <td className="px-3 py-2">{expenseSide}</td>
-                      <td className="px-3 py-2">{fundingSide}</td>
+                      <td className="px-3 py-2">{formatAccountLabel(entry.debit_account, entry.debit_account_code)}</td>
+                      <td className="px-3 py-2">{formatAccountLabel(entry.credit_account, entry.credit_account_code)}</td>
                       <td className="px-3 py-2 text-right">${Number(entry.amount).toFixed(2)}</td>
-                      <td className="px-3 py-2">{entry.source_type === "PURCHASE_ORDER" ? "PO" : "Manual"}</td>
+                      <td className="px-3 py-2">
+                        {isExpenseEntry ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">Expense</span> : "—"}
+                      </td>
+                      <td className="px-3 py-2">{entry.source_type === "PURCHASE_ORDER" ? "Purchase Order" : "Manual"}</td>
                       <td className="px-3 py-2">View</td>
                     </tr>
                   );

@@ -53,6 +53,8 @@ type SalesRequestDetail = {
   lines: SalesRequestLineDetail[];
   linked_invoice_id: number | null;
   linked_invoice_number: string | null;
+  invoice_id: number | null;
+  invoice_number: string | null;
 };
 
 type LineSelection = {
@@ -313,6 +315,13 @@ export default function SalesRequestDetailPage() {
     }
   };
 
+  const handleViewInvoice = () => {
+    if (!detail) return;
+    const invoiceIdentifier = detail.invoice_id ?? detail.invoice_number;
+    if (!invoiceIdentifier) return;
+    navigate(`/invoices/${invoiceIdentifier}`);
+  };
+
   /* --- render states --- */
 
   if (loading) {
@@ -459,12 +468,14 @@ export default function SalesRequestDetailPage() {
                 </p>
               </div>
             </div>
-            <Link
+            <button
               className="app-button"
-              to={`/sales/invoices/${detail.linked_invoice_id}`}
+              type="button"
+              onClick={handleViewInvoice}
+              disabled={!detail.invoice_id && !detail.invoice_number}
             >
               <FileText className="h-4 w-4" /> View Invoice
-            </Link>
+            </button>
           </div>
         </div>
       )}
@@ -484,7 +495,7 @@ export default function SalesRequestDetailPage() {
             </div>
             <Link
               className="app-button"
-              to={`/sales/invoices/${generateResult.invoice_id}`}
+              to={`/invoices/${generateResult.invoice_id}`}
             >
               <FileText className="h-4 w-4" /> View Invoice
             </Link>
@@ -697,12 +708,14 @@ export default function SalesRequestDetailPage() {
                   </p>
                 </div>
               </div>
-              <Link
+              <button
                 className="app-button w-full justify-center"
-                to={`/sales/invoices/${detail.linked_invoice_id}`}
+                type="button"
+                onClick={handleViewInvoice}
+                disabled={!detail.invoice_id && !detail.invoice_number}
               >
                 <FileText className="h-4 w-4" /> View Invoice
-              </Link>
+              </button>
             </>
           ) : (
             <>

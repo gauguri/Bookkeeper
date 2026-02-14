@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Inventory, Invoice, Item
+from app.models import Customer, Inventory, Invoice, InvoiceLine, Item
 
 
 @pytest.fixture()
@@ -276,3 +276,43 @@ def test_update_sales_request_rejects_quantity_above_available_inventory(client:
             "available_qty": "3.00",
         }
     ]
+
+
+def test_sales_request_detail_includes_invoice_identifiers(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=2)
+
+    with app.state.testing_session_local() as db:
+        invoice = Invoice(
+            customer_id=1,
+            invoice_number="INV-000009",
+            status="DRAFT",
+            issue_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 31),
+            subtotal=Decimal("20.00"),
+            tax_total=Decimal("0.00"),
+            total=Decimal("20.00"),
+            amount_due=Decimal("20.00"),
+            sales_request_id=sales_request_id,
+        )
+        db.add(invoice)
+        db.flush()
+        db.add(
+            InvoiceLine(
+                invoice_id=invoice.id,
+                item_id=1,
+                quantity=Decimal("2.00"),
+                unit_price=Decimal("10.00"),
+                discount=Decimal("0.00"),
+                tax_rate=Decimal("0.00"),
+                line_total=Decimal("20.00"),
+            )
+        )
+        db.commit()
+        invoice_id = invoice.id
+
+    response = client.get(f"/api/sales-requests/{sales_request_id}/detail")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["invoice_id"] == invoice_id
+    assert payload["invoice_number"] == "INV-000009"

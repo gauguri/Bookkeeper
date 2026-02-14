@@ -16,6 +16,8 @@ from app.sales_requests.service import (
     create_sales_request,
     generate_invoice_from_sales_request,
     get_sales_request_detail,
+    SalesRequestImmutableError,
+    update_open_sales_request,
     update_sales_request_status,
 )
 
@@ -111,6 +113,32 @@ def get_sales_request_detail_endpoint(sales_request_id: int, db: Session = Depen
         linked_invoice_number=result["linked_invoice_number"],
     )
 
+
+
+
+@router.put("/{sales_request_id}", response_model=schemas.SalesRequestResponse)
+def update_sales_request_endpoint(sales_request_id: int, payload: schemas.SalesRequestEdit, db: Session = Depends(get_db)):
+    sales_request = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).filter(SalesRequest.id == sales_request_id).first()
+    if not sales_request:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    try:
+        update_open_sales_request(db, sales_request, payload.model_dump())
+    except SalesRequestImmutableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except InventoryQuantityExceededError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INSUFFICIENT_INVENTORY",
+                "message": str(exc),
+                "violations": exc.violations,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    db.refresh(sales_request)
+    return _to_response(sales_request)
 
 @router.post(
     "/{sales_request_id}/generate-invoice",

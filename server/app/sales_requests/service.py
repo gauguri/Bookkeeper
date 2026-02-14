@@ -60,6 +60,10 @@ class InsufficientInventoryError(ValueError):
     pass
 
 
+class SalesRequestImmutableError(ValueError):
+    pass
+
+
 
 def create_sales_request(db: Session, payload: dict) -> SalesRequest:
     lines_payload = payload.pop("lines")
@@ -116,6 +120,69 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
         raise InventoryQuantityExceededError(inventory_violations)
 
     db.add(sales_request)
+    return sales_request
+
+
+def update_open_sales_request(db: Session, sales_request: SalesRequest, payload: dict) -> SalesRequest:
+    if sales_request.status != "OPEN":
+        raise SalesRequestImmutableError("Only OPEN sales requests can be edited.")
+
+    existing_invoice = db.query(Invoice.id).filter(Invoice.sales_request_id == sales_request.id).scalar()
+    if existing_invoice is not None:
+        raise SalesRequestImmutableError("Sales request cannot be edited after an invoice is generated.")
+
+    customer_id = payload.get("customer_id")
+    customer_name = (payload.get("customer_name") or "").strip() or None
+    if customer_id:
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("Customer not found.")
+        sales_request.customer_id = customer.id
+        sales_request.customer_name = customer.name
+    else:
+        sales_request.customer_id = None
+        sales_request.customer_name = customer_name
+
+    sales_request.notes = payload.get("notes")
+    sales_request.requested_fulfillment_date = payload.get("requested_fulfillment_date")
+
+    line_items = payload["line_items"]
+    inventory_violations = []
+    company_id = _get_default_company_id(db)
+    new_lines: list[SalesRequestLine] = []
+    for line in line_items:
+        item = db.query(Item).filter(Item.id == line["item_id"]).first()
+        if not item:
+            raise ValueError("One or more selected items no longer exist.")
+
+        quantity = Decimal(str(line["quantity"]))
+        available_qty = get_available_qty(db, item.id, company_id=company_id)
+        if quantity > available_qty:
+            inventory_violations.append(
+                {
+                    "item_id": item.id,
+                    "item_name": item.name,
+                    "requested_qty": str(quantity),
+                    "available_qty": str(available_qty),
+                }
+            )
+
+        unit_price = Decimal(str(line["requested_price"]))
+        new_lines.append(
+            SalesRequestLine(
+                item_id=item.id,
+                item_name=item.name,
+                quantity=quantity,
+                unit_price=unit_price,
+                line_total=quantity * unit_price,
+            )
+        )
+
+    if inventory_violations:
+        raise InventoryQuantityExceededError(inventory_violations)
+
+    sales_request.lines.clear()
+    sales_request.lines.extend(new_lines)
     return sales_request
 
 

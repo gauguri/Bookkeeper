@@ -28,6 +28,7 @@ import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
 import SalesLanding from "./pages/SalesLanding";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
+import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 
@@ -248,6 +249,7 @@ export default function App() {
         <Route path="/sales/items" element={<ItemsPage />} />
         <Route path="/sales-requests" element={<SalesRequestsPage />} />
         <Route path="/sales-requests/:id" element={<SalesRequestDetailPage />} />
+        <Route path="/sales-requests/:id/edit" element={<SalesRequestEditPage />} />
         <Route path="/sales/requests" element={<SalesRequestsPage />} />
         <Route path="/sales/invoices" element={<InvoicesPage />} />
         <Route path="/sales/invoices/:id" element={<InvoiceDetailPage />} />

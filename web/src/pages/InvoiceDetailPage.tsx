@@ -144,7 +144,6 @@ const ConfirmDialog = ({
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
-  const invoiceIdentifier = id ?? "";
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [actionError, setActionError] = useState("");
@@ -153,14 +152,58 @@ export default function InvoiceDetailPage() {
   const [voiding, setVoiding] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
 
+  const invoiceKey = useMemo(() => {
+    const value = id?.trim() ?? "";
+    return {
+      value,
+      isNumericId: /^\d+$/.test(value)
+    };
+  }, [id]);
+
+  const computedTotals = useMemo(() => {
+    if (!invoice) {
+      return { subtotal: 0, tax: 0, total: 0 };
+    }
+
+    return invoice.line_items.reduce(
+      (acc, line) => {
+        const quantity = Number(line.quantity) || 0;
+        const unitPrice = Number(line.unit_price) || 0;
+        const discount = Number(line.discount) || 0;
+        const taxRate = Number(line.tax_rate) || 0;
+        const lineSubtotal = Math.max(quantity * unitPrice - discount, 0);
+        const lineTax = lineSubtotal * (taxRate / 100);
+
+        return {
+          subtotal: acc.subtotal + lineSubtotal,
+          tax: acc.tax + lineTax,
+          total: acc.total + lineSubtotal + lineTax
+        };
+      },
+      { subtotal: 0, tax: 0, total: 0 }
+    );
+  }, [invoice]);
+
+  const metadataRows = useMemo(
+    () => [
+      { label: "Created", value: formatDate(invoice?.created_at) },
+      { label: "Updated", value: formatDate(invoice?.updated_at) },
+      { label: "Internal ID", value: invoice?.id?.toString() ?? "—" }
+    ],
+    [invoice?.created_at, invoice?.updated_at, invoice?.id]
+  );
+
   const loadInvoice = async () => {
-    if (!invoiceIdentifier) {
+    if (!invoiceKey.value) {
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<InvoiceDetailPayload>(`/invoices/${invoiceIdentifier}`);
+      const endpoint = invoiceKey.isNumericId
+        ? `/invoices/${invoiceKey.value}`
+        : `/invoices/by-number/${invoiceKey.value}`;
+      const data = await apiFetch<InvoiceDetailPayload>(endpoint);
       const normalized: InvoiceDetail = {
         ...data,
         line_items: data.line_items ?? data.lines ?? []
@@ -182,7 +225,7 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     loadInvoice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceIdentifier]);
+  }, [invoiceKey.value, invoiceKey.isNumericId]);
 
   const markSent = async () => {
     if (!invoice) {
@@ -295,14 +338,6 @@ export default function InvoiceDetailPage() {
     ? `${invoice.customer.name} · ${invoice.customer.email}`
     : invoice.customer.name;
   const breadcrumbInvoice = invoice.invoice_number || `Invoice ${invoice.id}`;
-  const metadataRows = useMemo(
-    () => [
-      { label: "Created", value: formatDate(invoice.created_at) },
-      { label: "Updated", value: formatDate(invoice.updated_at) },
-      { label: "Internal ID", value: invoice.id.toString() }
-    ],
-    [invoice.created_at, invoice.updated_at, invoice.id]
-  );
 
   return (
     <section className="space-y-8">
@@ -462,9 +497,11 @@ export default function InvoiceDetailPage() {
                 )}
               </div>
               <div className="space-y-1 text-right">
-                <div>Subtotal: {currency(invoice.subtotal)}</div>
-                <div>Tax: {currency(invoice.tax_total)}</div>
-                <div className="text-base font-semibold text-foreground">Total: {currency(invoice.total)}</div>
+                <div>Subtotal: {currency(computedTotals.subtotal || invoice.subtotal)}</div>
+                <div>Tax: {currency(computedTotals.tax || invoice.tax_total)}</div>
+                <div className="text-base font-semibold text-foreground">
+                  Total: {currency(computedTotals.total || invoice.total)}
+                </div>
                 <div className="text-base font-semibold text-foreground">
                   Amount due: {currency(invoice.amount_due)}
                 </div>

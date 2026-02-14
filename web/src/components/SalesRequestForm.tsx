@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { apiFetch } from "../api";
+import { apiFetch, type ApiRequestError } from "../api";
 
 type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
@@ -14,12 +14,24 @@ type LineItemForm = {
   availability_loading: boolean;
 };
 
+type InitialValues = {
+  customer_id: number | null;
+  customer_name: string | null;
+  notes: string | null;
+  requested_fulfillment_date: string | null;
+  lines: Array<{ item_id: number; quantity: number; unit_price: number; available_qty?: number | null }>;
+};
+
 type Props = {
   customers: Customer[];
   items: Item[];
   createdByUserId?: number;
-  onCreated: () => void;
+  onCreated?: () => void;
+  onSaved?: () => void;
   onCancel: () => void;
+  mode?: "create" | "edit";
+  salesRequestId?: number;
+  initialValues?: InitialValues;
 };
 
 const emptyLine: LineItemForm = {
@@ -42,17 +54,43 @@ const getQuantityValidationError = (quantity: string, availableQty: number | nul
   return "";
 };
 
-export default function SalesRequestForm({ customers, items, createdByUserId, onCreated, onCancel }: Props) {
-  const [customerId, setCustomerId] = useState<string>("");
-  const [walkInName, setWalkInName] = useState("");
-  const [notes, setNotes] = useState("");
-  const [requestedFulfillmentDate, setRequestedFulfillmentDate] = useState("");
-  const [status, setStatus] = useState("OPEN");
-  const [lines, setLines] = useState<LineItemForm[]>([{ ...emptyLine }]);
+const mapInitialLine = (line: InitialValues["lines"][number]): LineItemForm => ({
+  item_id: line.item_id,
+  quantity: String(line.quantity),
+  unit_price: String(line.unit_price),
+  available_qty: line.available_qty ?? null,
+  quantity_error: getQuantityValidationError(String(line.quantity), line.available_qty ?? null),
+  availability_loading: false
+});
+
+export default function SalesRequestForm({
+  customers,
+  items,
+  createdByUserId,
+  onCreated,
+  onSaved,
+  onCancel,
+  mode = "create",
+  salesRequestId,
+  initialValues
+}: Props) {
+  const [customerId, setCustomerId] = useState<string>(() => {
+    if (!initialValues) return "";
+    if (initialValues.customer_id) return String(initialValues.customer_id);
+    if (initialValues.customer_name) return "WALK_IN";
+    return "";
+  });
+  const [walkInName, setWalkInName] = useState(initialValues?.customer_name ?? "");
+  const [notes, setNotes] = useState(initialValues?.notes ?? "");
+  const [requestedFulfillmentDate, setRequestedFulfillmentDate] = useState(initialValues?.requested_fulfillment_date ?? "");
+  const [lines, setLines] = useState<LineItemForm[]>(() =>
+    initialValues?.lines?.length ? initialValues.lines.map(mapInitialLine) : [{ ...emptyLine }]
+  );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const isWalkIn = customerId === "WALK_IN";
+  const isEdit = mode === "edit";
 
   const hasLineErrors = useMemo(() => lines.some((line) => Boolean(line.quantity_error)), [lines]);
 
@@ -102,7 +140,6 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
     setWalkInName("");
     setNotes("");
     setRequestedFulfillmentDate("");
-    setStatus("OPEN");
     setLines([{ ...emptyLine }]);
     setError("");
   };
@@ -143,26 +180,49 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
 
     setSaving(true);
     try {
-      await apiFetch("/sales-requests", {
-        method: "POST",
-        body: JSON.stringify({
-          customer_id: isWalkIn ? null : Number(customerId),
-          customer_name: isWalkIn ? walkInName.trim() : null,
-          notes: notes.trim() || null,
-          requested_fulfillment_date: requestedFulfillmentDate || null,
-          status,
-          created_by_user_id: createdByUserId ?? null,
-          lines: lines.map((line) => ({
-            item_id: Number(line.item_id),
-            quantity: Number(line.quantity),
-            unit_price: Number(line.unit_price)
-          }))
-        })
-      });
-      resetForm();
-      onCreated();
+      if (isEdit && salesRequestId) {
+        await apiFetch(`/sales-requests/${salesRequestId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            customer_id: isWalkIn ? null : Number(customerId),
+            customer_name: isWalkIn ? walkInName.trim() : null,
+            notes: notes.trim() || null,
+            requested_fulfillment_date: requestedFulfillmentDate || null,
+            line_items: lines.map((line) => ({
+              item_id: Number(line.item_id),
+              quantity: Number(line.quantity),
+              requested_price: Number(line.unit_price)
+            }))
+          })
+        });
+        onSaved?.();
+      } else {
+        await apiFetch("/sales-requests", {
+          method: "POST",
+          body: JSON.stringify({
+            customer_id: isWalkIn ? null : Number(customerId),
+            customer_name: isWalkIn ? walkInName.trim() : null,
+            notes: notes.trim() || null,
+            requested_fulfillment_date: requestedFulfillmentDate || null,
+            status: "OPEN",
+            created_by_user_id: createdByUserId ?? null,
+            lines: lines.map((line) => ({
+              item_id: Number(line.item_id),
+              quantity: Number(line.quantity),
+              unit_price: Number(line.unit_price)
+            }))
+          })
+        });
+        resetForm();
+        onCreated?.();
+      }
     } catch (err) {
-      setError((err as Error).message || "Unable to create sales request.");
+      const requestError = err as ApiRequestError;
+      if (requestError.status === 409) {
+        setError(requestError.message);
+      } else {
+        setError(requestError.message || (isEdit ? "Unable to update sales request." : "Unable to create sales request."));
+      }
     } finally {
       setSaving(false);
     }
@@ -171,7 +231,7 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
   return (
     <section className="app-card space-y-4 p-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">New Sales Request</h3>
+        <h3 className="text-lg font-semibold">{isEdit ? "Update Sales Request" : "New Sales Request"}</h3>
         <span className="app-badge border-primary/30 bg-primary/10 text-primary">Internal entry</span>
       </div>
       {error ? <p className="text-sm text-danger">{error}</p> : null}
@@ -199,11 +259,6 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
           value={requestedFulfillmentDate}
           onChange={(event) => setRequestedFulfillmentDate(event.target.value)}
         />
-        <select className="app-input" value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="OPEN">Open</option>
-          <option value="IN_PROGRESS">In Progress</option>
-          <option value="CLOSED">Closed</option>
-        </select>
       </div>
 
       <div className="space-y-3">
@@ -289,7 +344,7 @@ export default function SalesRequestForm({ customers, items, createdByUserId, on
             Cancel
           </button>
           <button className="app-button" onClick={handleSubmit} disabled={saving || hasLineErrors} type="button">
-            {saving ? "Saving..." : "Create sales request"}
+            {saving ? "Saving..." : isEdit ? "Save changes" : "Create sales request"}
           </button>
         </div>
       </div>

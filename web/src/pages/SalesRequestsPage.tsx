@@ -169,6 +169,7 @@ export default function SalesRequestsPage() {
                   <th className="px-4 py-3">Amount</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Created</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,6 +188,20 @@ export default function SalesRequestsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">{formatDate(request.created_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {request.status === "OPEN" ? (
+                        <button
+                          className="app-button-secondary"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(`/sales-requests/${request.id}/edit`);
+                          }}
+                        >
+                          Update
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

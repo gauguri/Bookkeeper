@@ -48,6 +48,28 @@ class SalesRequestUpdate(BaseModel):
     status: SalesRequestStatus
 
 
+class SalesRequestLineEdit(BaseModel):
+    item_id: int
+    quantity: DecimalValue = Field(..., gt=0)
+    requested_price: DecimalValue = Field(..., ge=0)
+
+
+class SalesRequestEdit(BaseModel):
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    notes: Optional[str] = None
+    requested_fulfillment_date: Optional[date] = None
+    line_items: List[SalesRequestLineEdit]
+
+    @model_validator(mode="after")
+    def validate_customer_and_lines(self):
+        if not self.customer_id and not (self.customer_name and self.customer_name.strip()):
+            raise ValueError("Select a customer or provide a walk-in customer name.")
+        if not self.line_items:
+            raise ValueError("Add at least one line item.")
+        return self
+
+
 class SalesRequestResponse(BaseModel):
     id: int
     request_number: str

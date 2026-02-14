@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -8,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Inventory, Item
+from app.models import Customer, Inventory, Invoice, Item
 
 
 @pytest.fixture()
@@ -49,8 +50,10 @@ def client():
         )
         db.commit()
 
+    app.state.testing_session_local = TestingSessionLocal
     with TestClient(app) as test_client:
         yield test_client
+    app.state.testing_session_local = None
 
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)
@@ -191,3 +194,85 @@ def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: Tes
     item_2_inventory = client.get("/api/inventory/available?item_id=2")
     assert item_1_inventory.json()["available_qty"] == "10.00"
     assert item_2_inventory.json()["available_qty"] == "1.00"
+
+
+def _default_update_payload(**overrides):
+    payload = {
+        "customer_id": 1,
+        "customer_name": None,
+        "notes": "Updated notes",
+        "requested_fulfillment_date": "2025-01-15",
+        "line_items": [{"item_id": 1, "quantity": 2, "requested_price": 11}],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_update_open_sales_request_fields_and_lines(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=1)
+
+    response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["notes"] == "Updated notes"
+    assert body["requested_fulfillment_date"] == "2025-01-15"
+    assert len(body["lines"]) == 1
+    assert body["lines"][0]["item_id"] == 1
+    assert body["lines"][0]["quantity"] == "2.00"
+    assert body["lines"][0]["unit_price"] == "11.00"
+
+
+def test_update_closed_sales_request_returns_conflict(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=1)
+    close_response = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
+    assert close_response.status_code == 200
+
+    update_response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload())
+
+    assert update_response.status_code == 409
+    assert "Only OPEN sales requests can be edited" in update_response.json()["detail"]
+
+
+def test_update_sales_request_with_invoice_returns_conflict(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=1)
+    with app.state.testing_session_local() as db:
+        invoice = Invoice(
+            customer_id=1,
+            invoice_number="INV-TEST-0001",
+            issue_date=date(2025, 1, 1),
+            due_date=date(2025, 1, 31),
+            subtotal=Decimal("10.00"),
+            tax_total=Decimal("0.00"),
+            total=Decimal("10.00"),
+            amount_due=Decimal("10.00"),
+            sales_request_id=sales_request_id,
+        )
+        db.add(invoice)
+        db.commit()
+
+    response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload())
+
+    assert response.status_code == 409
+    assert "cannot be edited after an invoice is generated" in response.json()["detail"]
+
+
+def test_update_sales_request_rejects_quantity_above_available_inventory(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=1)
+
+    response = client.put(
+        f"/api/sales-requests/{sales_request_id}",
+        json=_default_update_payload(line_items=[{"item_id": 2, "quantity": 4, "requested_price": 9}]),
+    )
+
+    assert response.status_code == 400
+    payload = response.json()["detail"]
+    assert payload["code"] == "INSUFFICIENT_INVENTORY"
+    assert payload["violations"] == [
+        {
+            "item_id": 2,
+            "item_name": "Bolt",
+            "requested_qty": "4",
+            "available_qty": "3.00",
+        }
+    ]

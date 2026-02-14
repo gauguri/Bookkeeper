@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   CheckCircle,
@@ -128,6 +128,7 @@ const AvailabilityBadge = ({
 export default function SalesRequestDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [detail, setDetail] = useState<SalesRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,6 +150,7 @@ export default function SalesRequestDetailPage() {
   const [generateResult, setGenerateResult] = useState<GenerateResult | null>(
     null
   );
+  const notice = (location.state as { notice?: string } | null)?.notice || "";
 
   /* --- data loading --- */
 
@@ -173,6 +175,12 @@ export default function SalesRequestDetailPage() {
     loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+
+  useEffect(() => {
+    if (!location.state?.notice) return;
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
 
   // Initialize line selections once detail loads
   useEffect(() => {
@@ -382,10 +390,19 @@ export default function SalesRequestDetailPage() {
               : ""}
           </p>
         </div>
-        <Link className="app-button-ghost" to="/sales-requests">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Link>
+        <div className="flex gap-2">
+          {!isClosed && !hasLinkedInvoice ? (
+            <button className="app-button-secondary" type="button" onClick={() => navigate(`/sales-requests/${detail.id}/edit`)}>
+              Update
+            </button>
+          ) : null}
+          <Link className="app-button-ghost" to="/sales-requests">
+            <ArrowLeft className="h-4 w-4" /> Back
+          </Link>
+        </div>
       </div>
+
+      {notice ? <section className="app-card p-4 text-sm text-success">{notice}</section> : null}
 
       {/* Stat cards */}
       <div className="grid gap-4 lg:grid-cols-4">

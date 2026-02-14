@@ -379,6 +379,7 @@ class SalesRequest(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     requested_fulfillment_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
+    inventory_deducted_at = Column(DateTime, nullable=True)
 
     customer = relationship("Customer")
     created_by = relationship("User")

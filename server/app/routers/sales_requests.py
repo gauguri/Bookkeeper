@@ -9,7 +9,10 @@ from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
     calculate_sales_request_total,
+    deduct_inventory_for_sales_request,
+    InsufficientInventoryError,
     InventoryQuantityExceededError,
+    MissingInventoryRecordError,
     create_sales_request,
     generate_invoice_from_sales_request,
     get_sales_request_detail,
@@ -128,6 +131,10 @@ def generate_invoice_endpoint(
         raise HTTPException(status_code=404, detail="Sales request not found.")
     try:
         invoice = generate_invoice_from_sales_request(db, sales_request, payload.model_dump())
+    except MissingInventoryRecordError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except InsufficientInventoryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
@@ -145,7 +152,14 @@ def patch_sales_request(sales_request_id: int, payload: schemas.SalesRequestUpda
     sales_request = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).filter(SalesRequest.id == sales_request_id).first()
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
-    update_sales_request_status(sales_request, payload.status)
+    should_deduct_inventory = update_sales_request_status(sales_request, payload.status)
+    if should_deduct_inventory:
+        try:
+            deduct_inventory_for_sales_request(db, sales_request)
+        except MissingInventoryRecordError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except InsufficientInventoryError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
     db.commit()
     db.refresh(sales_request)
     return _to_response(sales_request)

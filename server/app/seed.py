@@ -3,6 +3,7 @@ import os
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
+from .auth import seed_modules
 from .db import SessionLocal
 from .models import Company, User, Account
 
@@ -127,22 +128,26 @@ def _get_or_create_company(db: Session) -> Company:
 
 
 def _get_or_create_user(db: Session, company_id: int) -> User:
-    user = db.query(User).filter(User.email == "demo@bookkeeper.local").first()
+    user = db.query(User).filter(User.email == "admin@bookkeeper.local").first()
     if user:
         if user.company_id != company_id:
             user.company_id = company_id
+        user.full_name = user.full_name or "System Admin"
         if not user.is_active:
             user.is_active = True
+        user.is_admin = True
         return user
 
     seed_password = _truncate_to_bcrypt_limit("password123")
 
     user = User(
         company_id=company_id,
-        email="demo@bookkeeper.local",
+        email="admin@bookkeeper.local",
+        full_name="System Admin",
         # passlib+bcrypt enforces bcrypt's 72-byte input limit.
-        hashed_password=pwd_context.hash(seed_password),
+        password_hash=pwd_context.hash(seed_password),
         role="admin",
+        is_admin=True,
     )
     db.add(user)
     db.flush()
@@ -312,6 +317,7 @@ def run_seed():
                 print(f"Skipping auth seed user creation due to error: {exc}")
 
         _seed_chart_of_accounts(db, company.id)
+        seed_modules(db)
         db.commit()
     finally:
         db.close()

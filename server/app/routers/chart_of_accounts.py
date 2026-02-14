@@ -7,12 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_module
 from app.chart_of_accounts import schemas
 from app.db import get_db
 from app.models import Account, Company, Item, JournalLine
 from app.accounting.service import compute_account_balance
 
-router = APIRouter(prefix="/api", tags=["chart-of-accounts"])
+router = APIRouter(prefix="/api", tags=["chart-of-accounts"], dependencies=[Depends(require_module("CHART_OF_ACCOUNTS"))])
 
 
 def _normalize_type(account_type: Optional[str]) -> Optional[str]:

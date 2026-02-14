@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_module
 from app.db import get_db
 from app.inventory import schemas
 from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map
 from app.models import Company, Inventory, Item
 
 
-router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_module("INVENTORY"))])
 
 
 def _get_default_company_id(db: Session) -> int:

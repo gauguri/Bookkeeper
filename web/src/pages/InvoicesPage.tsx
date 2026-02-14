@@ -454,7 +454,11 @@ export default function InvoicesPage() {
             <tbody>
               {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="app-table-row border-t">
-                  <td className="py-3 font-medium">{invoice.invoice_number}</td>
+                  <td className="py-3 font-medium">
+                    <Link className="hover:underline" to={`/invoices/${invoice.invoice_number}`}>
+                      {invoice.invoice_number}
+                    </Link>
+                  </td>
                   <td className="text-muted">{invoice.customer_name}</td>
                   <td>
                     <span className={`app-badge ${statusStyles[invoice.status] ?? "border-border bg-secondary"}`}>
@@ -465,7 +469,7 @@ export default function InvoicesPage() {
                   <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                   <td className="text-right">
                     <div className="inline-flex items-center gap-2">
-                      <Link className="app-button-ghost" to={`/sales/invoices/${invoice.id}`}>
+                      <Link className="app-button-ghost" to={`/invoices/${invoice.invoice_number}`}>
                         View
                       </Link>
                       <button className="app-button-ghost" aria-label="More actions">

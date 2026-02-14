@@ -135,6 +135,8 @@ class SalesRequestDetailResponse(BaseModel):
     lines: List[SalesRequestLineDetailResponse]
     linked_invoice_id: Optional[int] = None
     linked_invoice_number: Optional[str] = None
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

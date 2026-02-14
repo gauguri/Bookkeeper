@@ -455,7 +455,7 @@ export default function InvoicesPage() {
               {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="app-table-row border-t">
                   <td className="py-3 font-medium">
-                    <Link className="hover:underline" to={`/invoices/${invoice.invoice_number}`}>
+                    <Link className="hover:underline" to={`/invoices/${invoice.id}`}>
                       {invoice.invoice_number}
                     </Link>
                   </td>
@@ -469,7 +469,7 @@ export default function InvoicesPage() {
                   <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                   <td className="text-right">
                     <div className="inline-flex items-center gap-2">
-                      <Link className="app-button-ghost" to={`/invoices/${invoice.invoice_number}`}>
+                      <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>
                         View
                       </Link>
                       <button className="app-button-ghost" aria-label="More actions">

@@ -117,3 +117,77 @@ def test_create_sales_request_ignores_nonexistent_created_by_user(client: TestCl
     detail = client.get(f"/api/sales-requests/{body['id']}")
     assert detail.status_code == 200
     assert detail.json()["created_by_user_id"] is None
+
+
+def _create_sales_request(client: TestClient, *, item_id: int, quantity: int):
+    response = client.post(
+        "/api/sales-requests",
+        json={
+            "customer_id": 1,
+            "status": "OPEN",
+            "lines": [{"item_id": item_id, "quantity": quantity, "unit_price": 10}],
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def test_closing_sales_request_reduces_inventory(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=5)
+
+    close_response = client.patch(
+        f"/api/sales-requests/{sales_request_id}",
+        json={"status": "CLOSED"},
+    )
+
+    assert close_response.status_code == 200
+    availability = client.get("/api/inventory/available?item_id=1")
+    assert availability.status_code == 200
+    assert availability.json() == {"item_id": 1, "available_qty": "5.00"}
+
+
+def test_closing_sales_request_twice_does_not_double_deduct(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=4)
+
+    first_close = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
+    second_close = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
+
+    assert first_close.status_code == 200
+    assert second_close.status_code == 200
+
+    availability = client.get("/api/inventory/available?item_id=1")
+    assert availability.status_code == 200
+    assert availability.json() == {"item_id": 1, "available_qty": "6.00"}
+
+
+def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: TestClient):
+    response = client.post(
+        "/api/sales-requests",
+        json={
+            "customer_id": 1,
+            "status": "OPEN",
+            "lines": [
+                {"item_id": 1, "quantity": 2, "unit_price": 10},
+                {"item_id": 2, "quantity": 3, "unit_price": 3},
+            ],
+        },
+    )
+    assert response.status_code == 201
+    sales_request_id = response.json()["id"]
+
+    inventory_rows = client.get("/api/inventory").json()
+    item_2_inventory_id = next(row["id"] for row in inventory_rows if row["item_id"] == 2)
+    update_response = client.put(
+        f"/api/inventory/{item_2_inventory_id}",
+        json={"quantity_on_hand": 1, "landed_unit_cost": 1},
+    )
+    assert update_response.status_code == 200
+
+    close_response = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
+    assert close_response.status_code == 409
+    assert "Insufficient inventory" in close_response.json()["detail"]
+
+    item_1_inventory = client.get("/api/inventory/available?item_id=1")
+    item_2_inventory = client.get("/api/inventory/available?item_id=2")
+    assert item_1_inventory.json()["available_qty"] == "10.00"
+    assert item_2_inventory.json()["available_qty"] == "1.00"

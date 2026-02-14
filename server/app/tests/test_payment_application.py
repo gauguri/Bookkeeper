@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import Customer, Invoice
+from app.models import Customer, Inventory, Invoice, Item
 from app.sales.schemas import PaymentApplicationCreate
 from app.sales.service import apply_payment
 
@@ -175,3 +175,27 @@ def test_apply_payment_rejects_customer_mismatch():
             {"customer_id": customer.id, "amount": Decimal("40.00"), "payment_date": date(2024, 2, 9)},
             [{"invoice_id": invoice.id, "applied_amount": Decimal("40.00")}],
         )
+
+
+def test_apply_payment_does_not_change_inventory_quantities():
+    db = create_session()
+    customer = create_customer(db, name="Inventory Safe")
+    item = Item(name="Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    db.add(item)
+    db.flush()
+    inventory = Inventory(item_id=item.id, quantity_on_hand=Decimal("10.00"), landed_unit_cost=Decimal("2.00"))
+    db.add(inventory)
+    invoice = create_invoice(db, customer.id, "SENT", Decimal("100.00"), Decimal("100.00"))
+    db.commit()
+
+    apply_payment(
+        db,
+        {"customer_id": customer.id, "amount": Decimal("100.00"), "payment_date": date(2024, 2, 10)},
+        [{"invoice_id": invoice.id, "applied_amount": Decimal("100.00")}],
+    )
+    db.commit()
+    db.refresh(invoice)
+    db.refresh(inventory)
+
+    assert invoice.status == "PAID"
+    assert inventory.quantity_on_hand == Decimal("10.00")

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
@@ -35,6 +36,9 @@ type Application = {
 };
 
 export default function PaymentsPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const invoiceIdParam = searchParams.get("invoiceId");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<InvoiceList[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -48,6 +52,23 @@ export default function PaymentsPage() {
     memo: ""
   });
   const [applications, setApplications] = useState<Application[]>([]);
+  const [deepLinkedInvoiceId, setDeepLinkedInvoiceId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!invoiceIdParam) {
+      setDeepLinkedInvoiceId(null);
+      return;
+    }
+
+    const parsedInvoiceId = Number(invoiceIdParam);
+    if (!Number.isInteger(parsedInvoiceId) || parsedInvoiceId <= 0) {
+      setError("Invalid invoice link. Please choose an invoice manually.");
+      setDeepLinkedInvoiceId(null);
+      return;
+    }
+
+    setDeepLinkedInvoiceId(parsedInvoiceId);
+  }, [invoiceIdParam]);
 
   const loadData = async () => {
     try {
@@ -67,6 +88,45 @@ export default function PaymentsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!deepLinkedInvoiceId || invoices.length === 0) {
+      return;
+    }
+
+    const targetInvoice = invoices.find((invoice) => invoice.id === deepLinkedInvoiceId);
+    if (!targetInvoice) {
+      setError("Invoice from link was not found. Please choose an invoice manually.");
+      return;
+    }
+
+    const amountDue = Math.max(Number(targetInvoice.amount_due) || 0, 0);
+    setForm((prev) => ({
+      ...prev,
+      customer_id: String(targetInvoice.customer_id),
+      amount: amountDue.toFixed(2)
+    }));
+    setApplications([{ invoice_id: targetInvoice.id, applied_amount: amountDue.toFixed(2) }]);
+
+    setTimeout(() => {
+      document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+
+    navigate("/payments", { replace: true });
+    setDeepLinkedInvoiceId(null);
+    setError("");
+  }, [deepLinkedInvoiceId, invoices, navigate]);
+
+  const selectedInvoice = useMemo(() => {
+    const selectedInvoiceId = applications.find((application) => Number(application.applied_amount) > 0)?.invoice_id;
+    if (!selectedInvoiceId) {
+      return null;
+    }
+    return invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
+  }, [applications, invoices]);
+
+  const selectedCustomerName =
+    customers.find((customer) => customer.id === selectedInvoice?.customer_id)?.name ?? "—";
 
   const { openInvoices, draftInvoices, visibleInvoices } = useMemo(() => {
     if (!form.customer_id) {
@@ -162,6 +222,15 @@ export default function PaymentsPage() {
           <h2 className="text-xl font-semibold">Record payment</h2>
           <span className="app-badge border-primary/30 bg-primary/10 text-primary">New receipt</span>
         </div>
+        {selectedInvoice && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+            <p className="font-semibold text-primary">Invoice ready for payment</p>
+            <p className="text-muted">
+              {selectedInvoice.invoice_number} · {selectedCustomerName} · Balance due{" "}
+              {currency(selectedInvoice.amount_due)}
+            </p>
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-3">
           <select
             className="app-select"

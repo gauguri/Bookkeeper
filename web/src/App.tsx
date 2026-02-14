@@ -256,6 +256,7 @@ export default function App() {
         <Route path="/invoices" element={<InvoicesPage />} />
         <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/sales/payments" element={<PaymentsPage />} />
+        <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/sales/reports" element={<ReportsPage />} />
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/banking" element={<PlaceholderPage title="Banking" />} />

@@ -380,7 +380,7 @@ export default function InvoiceDetailPage() {
                 <XCircle className="h-4 w-4" /> {voiding ? "Voiding..." : "Void"}
               </button>
             )}
-            <Link className="app-button-ghost" to="/sales/payments">
+            <Link className="app-button-ghost" to={`/payments?invoiceId=${invoice.id}`}>
               Record payment
             </Link>
           </div>

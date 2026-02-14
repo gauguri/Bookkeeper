@@ -143,7 +143,7 @@ const ConfirmDialog = ({
 };
 
 export default function InvoiceDetailPage() {
-  const { id } = useParams();
+  const { invoiceId } = useParams();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [actionError, setActionError] = useState("");
@@ -153,12 +153,12 @@ export default function InvoiceDetailPage() {
   const [confirmVoid, setConfirmVoid] = useState(false);
 
   const invoiceKey = useMemo(() => {
-    const value = id?.trim() ?? "";
+    const value = invoiceId?.trim() ?? "";
     return {
       value,
       isNumericId: /^\d+$/.test(value)
     };
-  }, [id]);
+  }, [invoiceId]);
 
   const computedTotals = useMemo(() => {
     if (!invoice) {
@@ -200,10 +200,10 @@ export default function InvoiceDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const endpoint = invoiceKey.isNumericId
-        ? `/invoices/${invoiceKey.value}`
-        : `/invoices/by-number/${invoiceKey.value}`;
-      const data = await apiFetch<InvoiceDetailPayload>(endpoint);
+      if (!invoiceKey.isNumericId) {
+        throw new Error("Invalid invoice id.");
+      }
+      const data = await apiFetch<InvoiceDetailPayload>(`/invoices/${invoiceKey.value}`);
       const normalized: InvoiceDetail = {
         ...data,
         line_items: data.line_items ?? data.lines ?? []

@@ -252,9 +252,9 @@ export default function App() {
         <Route path="/sales-requests/:id/edit" element={<SalesRequestEditPage />} />
         <Route path="/sales/requests" element={<SalesRequestsPage />} />
         <Route path="/sales/invoices" element={<InvoicesPage />} />
-        <Route path="/sales/invoices/:id" element={<InvoiceDetailPage />} />
+        <Route path="/sales/invoices/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
-        <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+        <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/sales/payments" element={<PaymentsPage />} />
         <Route path="/sales/reports" element={<ReportsPage />} />
         <Route path="/expenses" element={<ExpensesPage />} />

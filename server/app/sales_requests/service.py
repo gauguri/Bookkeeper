@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import get_available_qty
-from app.models import Company, Customer, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
+from app.models import Company, Customer, Inventory, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
 from app.suppliers.service import get_supplier_link
 
 
@@ -50,6 +50,14 @@ class InventoryQuantityExceededError(ValueError):
             f"Quantity exceeds available inventory for {first['item_name']} "
             f"(requested {first['requested_qty']}, available {first['available_qty']})."
         )
+
+
+class MissingInventoryRecordError(ValueError):
+    pass
+
+
+class InsufficientInventoryError(ValueError):
+    pass
 
 
 
@@ -116,7 +124,38 @@ def calculate_sales_request_total(sales_request: SalesRequest) -> Decimal:
 
 
 def update_sales_request_status(sales_request: SalesRequest, status: str):
+    was_closed = sales_request.status == "CLOSED"
     sales_request.status = status
+    return not was_closed and status == "CLOSED"
+
+
+def deduct_inventory_for_sales_request(db: Session, sales_request: SalesRequest) -> None:
+    if sales_request.inventory_deducted_at is not None:
+        return
+
+    deductions: list[tuple[Inventory, Decimal]] = []
+    for line in sales_request.lines:
+        inventory = (
+            db.query(Inventory)
+            .filter(Inventory.item_id == line.item_id)
+            .with_for_update()
+            .first()
+        )
+        if inventory is None:
+            raise MissingInventoryRecordError(f"No inventory record for item: {line.item_name}")
+
+        line_qty = Decimal(line.quantity or 0)
+        on_hand_qty = Decimal(inventory.quantity_on_hand or 0)
+        if on_hand_qty < line_qty:
+            raise InsufficientInventoryError(
+                f"Insufficient inventory for {line.item_name} (requested {line_qty}, available {on_hand_qty})."
+            )
+        deductions.append((inventory, line_qty))
+
+    for inventory, line_qty in deductions:
+        inventory.quantity_on_hand = Decimal(inventory.quantity_on_hand or 0) - line_qty
+
+    sales_request.inventory_deducted_at = datetime.utcnow()
 
 
 def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dict]:
@@ -257,7 +296,8 @@ def generate_invoice_from_sales_request(
     invoice = create_invoice(db, invoice_payload)
     invoice.sales_request_id = sales_request.id
 
-    # Mark the sales request as closed
-    sales_request.status = "CLOSED"
+    should_deduct_inventory = update_sales_request_status(sales_request, "CLOSED")
+    if should_deduct_inventory:
+        deduct_inventory_for_sales_request(db, sales_request)
 
     return invoice

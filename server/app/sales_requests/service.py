@@ -174,10 +174,27 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
     if not sales_request:
         return None
 
+    linked_invoice = (
+        db.query(Invoice)
+        .options(selectinload(Invoice.lines))
+        .filter(Invoice.sales_request_id == sales_request.id)
+        .first()
+    )
+
+    invoice_lines_by_item: dict[int, list] = {}
+    if linked_invoice:
+        for invoice_line in linked_invoice.lines:
+            if invoice_line.item_id is None:
+                continue
+            invoice_lines_by_item.setdefault(invoice_line.item_id, []).append(invoice_line)
+
     enriched_lines = []
     company_id = _get_default_company_id(db)
     for line in sales_request.lines:
         item = line.item
+        matched_invoice_line = None
+        if line.item_id in invoice_lines_by_item and invoice_lines_by_item[line.item_id]:
+            matched_invoice_line = invoice_lines_by_item[line.item_id].pop(0)
         supplier_options = []
         if item:
             for si in item.supplier_items:
@@ -198,23 +215,24 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
             "quantity": line.quantity,
             "unit_price": line.unit_price,
             "line_total": line.line_total,
+            "invoice_unit_price": matched_invoice_line.unit_price if matched_invoice_line else None,
+            "invoice_line_total": matched_invoice_line.line_total if matched_invoice_line else None,
             "on_hand_qty": item.on_hand_qty if item else Decimal(0),
             "reserved_qty": item.reserved_qty if item else Decimal(0),
             "available_qty": get_available_qty(db, item.id, company_id=company_id) if item else Decimal(0),
             "supplier_options": supplier_options,
         })
 
-    linked_invoice = (
-        db.query(Invoice)
-        .filter(Invoice.sales_request_id == sales_request.id)
-        .first()
-    )
+    display_total_amount = calculate_sales_request_total(sales_request)
+    if sales_request.status == "CLOSED" and linked_invoice:
+        display_total_amount = Decimal(linked_invoice.total or 0)
 
     return {
         "sales_request": sales_request,
         "enriched_lines": enriched_lines,
         "linked_invoice_id": linked_invoice.id if linked_invoice else None,
         "linked_invoice_number": linked_invoice.invoice_number if linked_invoice else None,
+        "display_total_amount": display_total_amount,
     }
 
 

@@ -88,6 +88,8 @@ class SalesRequestLineDetailResponse(BaseModel):
     quantity: DecimalValue
     unit_price: DecimalValue
     line_total: DecimalValue
+    invoice_unit_price: Optional[DecimalValue] = None
+    invoice_line_total: Optional[DecimalValue] = None
     on_hand_qty: DecimalValue
     reserved_qty: DecimalValue
     available_qty: DecimalValue

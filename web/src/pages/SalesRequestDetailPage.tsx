@@ -31,6 +31,8 @@ type SalesRequestLineDetail = {
   quantity: number;
   unit_price: number;
   line_total: number;
+  invoice_unit_price: number | null;
+  invoice_line_total: number | null;
   on_hand_qty: number;
   reserved_qty: number;
   available_qty: number;
@@ -215,6 +217,7 @@ export default function SalesRequestDetailPage() {
 
   const totals = useMemo(() => {
     if (!detail) return { totalCost: 0, totalSales: 0, profit: 0 };
+    const useInvoiceTotals = detail.status === "CLOSED" && !!detail.linked_invoice_id;
     const markup = num(markupPercent);
     let totalCost = 0;
     let totalSales = 0;
@@ -226,7 +229,9 @@ export default function SalesRequestDetailPage() {
       totalCost += lineCost;
 
       let lineSalePrice: number;
-      if (sel?.unitPriceOverride && num(sel.unitPriceOverride) > 0) {
+      if (useInvoiceTotals && line.invoice_line_total != null) {
+        lineSalePrice = line.invoice_line_total;
+      } else if (sel?.unitPriceOverride && num(sel.unitPriceOverride) > 0) {
         lineSalePrice = num(sel.unitPriceOverride) * line.quantity;
       } else if (unitCost > 0) {
         lineSalePrice = unitCost * (1 + markup / 100) * line.quantity;
@@ -240,10 +245,12 @@ export default function SalesRequestDetailPage() {
       totalSales += afterTax;
     }
 
+    const finalTotalSales = useInvoiceTotals ? detail.total_amount : totalSales;
+
     return {
       totalCost,
-      totalSales,
-      profit: totalSales - totalCost,
+      totalSales: finalTotalSales,
+      profit: finalTotalSales - totalCost,
     };
   }, [detail, lineSelections, markupPercent]);
 
@@ -501,7 +508,9 @@ export default function SalesRequestDetailPage() {
                 const markup = num(markupPercent);
                 const unitCost = sel ? num(sel.unitCost) : 0;
                 let computedSalePrice: number;
-                if (
+                if (isClosed && hasLinkedInvoice && line.invoice_unit_price != null) {
+                  computedSalePrice = line.invoice_unit_price;
+                } else if (
                   sel?.unitPriceOverride &&
                   num(sel.unitPriceOverride) > 0
                 ) {

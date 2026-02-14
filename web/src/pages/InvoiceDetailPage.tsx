@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   CircleCheck,
@@ -144,6 +144,7 @@ const ConfirmDialog = ({
 
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams();
+  const navigate = useNavigate();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [actionError, setActionError] = useState("");
@@ -380,9 +381,12 @@ export default function InvoiceDetailPage() {
                 <XCircle className="h-4 w-4" /> {voiding ? "Voiding..." : "Void"}
               </button>
             )}
-            <Link className="app-button-ghost" to={`/payments?invoiceId=${invoice.id}`}>
+            <button
+              className="app-button"
+              onClick={() => navigate(`/sales/payments?invoiceId=${invoice.id}`)}
+            >
               Record payment
-            </Link>
+            </button>
           </div>
           <p className="text-xs text-muted">Apply payments from the Payments page to update this invoice.</p>
         </div>

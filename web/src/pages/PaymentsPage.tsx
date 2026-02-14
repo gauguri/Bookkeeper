@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
@@ -18,6 +18,7 @@ type InvoiceList = {
   issue_date: string;
   due_date: string;
   customer_id: number;
+  customer_name?: string;
 };
 
 type Payment = {
@@ -36,7 +37,6 @@ type Application = {
 };
 
 export default function PaymentsPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const invoiceIdParam = searchParams.get("invoiceId");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -53,6 +53,7 @@ export default function PaymentsPage() {
   });
   const [applications, setApplications] = useState<Application[]>([]);
   const [deepLinkedInvoiceId, setDeepLinkedInvoiceId] = useState<number | null>(null);
+  const [prefilledInvoice, setPrefilledInvoice] = useState<InvoiceList | null>(null);
 
   useEffect(() => {
     if (!invoiceIdParam) {
@@ -69,6 +70,41 @@ export default function PaymentsPage() {
 
     setDeepLinkedInvoiceId(parsedInvoiceId);
   }, [invoiceIdParam]);
+
+  useEffect(() => {
+    const hydrateDeepLink = async () => {
+      if (!deepLinkedInvoiceId) {
+        setPrefilledInvoice(null);
+        return;
+      }
+
+      try {
+        const invoice = await apiFetch<InvoiceList>(`/invoices/${deepLinkedInvoiceId}`);
+        const today = new Date().toISOString().slice(0, 10);
+        const amountDue = Math.max(Number(invoice.amount_due) || 0, 0);
+
+        setPrefilledInvoice(invoice);
+        setForm((prev) => ({
+          ...prev,
+          customer_id: String(invoice.customer_id),
+          amount: amountDue.toFixed(2),
+          payment_date: prev.payment_date || today
+        }));
+        setApplications([{ invoice_id: invoice.id, applied_amount: amountDue.toFixed(2) }]);
+
+        setTimeout(() => {
+          document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
+
+        setError("");
+      } catch (err) {
+        setPrefilledInvoice(null);
+        setError("Invoice from link was not found. Please choose an invoice manually.");
+      }
+    };
+
+    hydrateDeepLink();
+  }, [deepLinkedInvoiceId]);
 
   const loadData = async () => {
     try {
@@ -89,34 +125,6 @@ export default function PaymentsPage() {
     loadData();
   }, []);
 
-  useEffect(() => {
-    if (!deepLinkedInvoiceId || invoices.length === 0) {
-      return;
-    }
-
-    const targetInvoice = invoices.find((invoice) => invoice.id === deepLinkedInvoiceId);
-    if (!targetInvoice) {
-      setError("Invoice from link was not found. Please choose an invoice manually.");
-      return;
-    }
-
-    const amountDue = Math.max(Number(targetInvoice.amount_due) || 0, 0);
-    setForm((prev) => ({
-      ...prev,
-      customer_id: String(targetInvoice.customer_id),
-      amount: amountDue.toFixed(2)
-    }));
-    setApplications([{ invoice_id: targetInvoice.id, applied_amount: amountDue.toFixed(2) }]);
-
-    setTimeout(() => {
-      document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-
-    navigate("/payments", { replace: true });
-    setDeepLinkedInvoiceId(null);
-    setError("");
-  }, [deepLinkedInvoiceId, invoices, navigate]);
-
   const selectedInvoice = useMemo(() => {
     const selectedInvoiceId = applications.find((application) => Number(application.applied_amount) > 0)?.invoice_id;
     if (!selectedInvoiceId) {
@@ -125,8 +133,10 @@ export default function PaymentsPage() {
     return invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
   }, [applications, invoices]);
 
+  const invoiceInFocus = prefilledInvoice ?? selectedInvoice;
+
   const selectedCustomerName =
-    customers.find((customer) => customer.id === selectedInvoice?.customer_id)?.name ?? "—";
+    customers.find((customer) => customer.id === invoiceInFocus?.customer_id)?.name ?? "—";
 
   const { openInvoices, draftInvoices, visibleInvoices } = useMemo(() => {
     if (!form.customer_id) {
@@ -222,13 +232,25 @@ export default function PaymentsPage() {
           <h2 className="text-xl font-semibold">Record payment</h2>
           <span className="app-badge border-primary/30 bg-primary/10 text-primary">New receipt</span>
         </div>
-        {selectedInvoice && (
+        {invoiceInFocus && (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
             <p className="font-semibold text-primary">Invoice ready for payment</p>
             <p className="text-muted">
-              {selectedInvoice.invoice_number} · {selectedCustomerName} · Balance due{" "}
-              {currency(selectedInvoice.amount_due)}
+              {invoiceInFocus.invoice_number} · {selectedCustomerName} · Balance due{" "}
+              {currency(invoiceInFocus.amount_due)}
             </p>
+          </div>
+        )}
+        {invoiceInFocus && (
+          <div className="grid gap-3 md:grid-cols-3">
+            <input className="app-input" value={invoiceInFocus.invoice_number} readOnly aria-label="Invoice" />
+            <input className="app-input" value={selectedCustomerName} readOnly aria-label="Customer" />
+            <input
+              className="app-input"
+              value={currency(invoiceInFocus.amount_due)}
+              readOnly
+              aria-label="Balance due"
+            />
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-3">
@@ -262,12 +284,17 @@ export default function PaymentsPage() {
             value={form.payment_date}
             onChange={(event) => setForm({ ...form, payment_date: event.target.value })}
           />
-          <input
-            className="app-input"
-            placeholder="Method"
+          <select
+            className="app-select"
             value={form.method}
             onChange={(event) => setForm({ ...form, method: event.target.value })}
-          />
+          >
+            <option value="">Method (optional)</option>
+            <option value="Cash">Cash</option>
+            <option value="Check">Check</option>
+            <option value="ACH">ACH</option>
+            <option value="Card">Card</option>
+          </select>
           <input
             className="app-input"
             placeholder="Reference"

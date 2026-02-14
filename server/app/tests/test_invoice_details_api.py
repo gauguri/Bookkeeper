@@ -65,6 +65,14 @@ def client():
     Base.metadata.drop_all(engine)
 
 
+def test_invoice_list_returns_numeric_id(client: TestClient):
+    response = client.get("/api/invoices")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert isinstance(data[0]["id"], int)
+
+
 def test_get_invoice_detail_by_numeric_id(client: TestClient):
     list_response = client.get("/api/invoices")
     invoice_id = list_response.json()[0]["id"]

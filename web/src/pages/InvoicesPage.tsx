@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
@@ -103,6 +103,7 @@ const addDaysToDateString = (dateString: string, days: number) => {
 };
 
 export default function InvoicesPage() {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [invoices, setInvoices] = useState<InvoiceList[]>([]);
@@ -453,11 +454,22 @@ export default function InvoicesPage() {
             </thead>
             <tbody>
               {filteredInvoices.map((invoice) => (
-                <tr key={invoice.id} className="app-table-row border-t">
+                <tr
+                  key={invoice.id}
+                  className="app-table-row border-t cursor-pointer hover:bg-secondary/40"
+                  onClick={() => navigate(`/invoices/${invoice.id}`)}
+                >
                   <td className="py-3 font-medium">
-                    <Link className="hover:underline" to={`/invoices/${invoice.id}`}>
+                    <button
+                      type="button"
+                      className="hover:underline"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        navigate(`/invoices/${invoice.id}`);
+                      }}
+                    >
                       {invoice.invoice_number}
-                    </Link>
+                    </button>
                   </td>
                   <td className="text-muted">{invoice.customer_name}</td>
                   <td>
@@ -469,10 +481,24 @@ export default function InvoicesPage() {
                   <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
                   <td className="text-right">
                     <div className="inline-flex items-center gap-2">
-                      <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>
+                      <button
+                        type="button"
+                        className="app-button-ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate(`/invoices/${invoice.id}`);
+                        }}
+                      >
                         View
-                      </Link>
-                      <button className="app-button-ghost" aria-label="More actions">
+                      </button>
+                      <button
+                        type="button"
+                        className="app-button-ghost"
+                        aria-label="More actions"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
                     </div>

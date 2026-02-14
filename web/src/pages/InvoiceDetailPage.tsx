@@ -144,6 +144,7 @@ const ConfirmDialog = ({
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
+  const invoiceIdentifier = id ?? "";
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [actionError, setActionError] = useState("");
@@ -153,13 +154,13 @@ export default function InvoiceDetailPage() {
   const [confirmVoid, setConfirmVoid] = useState(false);
 
   const loadInvoice = async () => {
-    if (!id) {
+    if (!invoiceIdentifier) {
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<InvoiceDetailPayload>(`/invoices/${id}`);
+      const data = await apiFetch<InvoiceDetailPayload>(`/invoices/${invoiceIdentifier}`);
       const normalized: InvoiceDetail = {
         ...data,
         line_items: data.line_items ?? data.lines ?? []
@@ -181,16 +182,16 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     loadInvoice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [invoiceIdentifier]);
 
   const markSent = async () => {
-    if (!id) {
+    if (!invoice) {
       return;
     }
     try {
       setSending(true);
       setActionError("");
-      await apiFetch(`/invoices/${id}/send`, { method: "POST" });
+      await apiFetch(`/invoices/${invoice.id}/send`, { method: "POST" });
       await loadInvoice();
     } catch (err) {
       setActionError((err as Error).message);
@@ -200,13 +201,13 @@ export default function InvoiceDetailPage() {
   };
 
   const voidInvoice = async () => {
-    if (!id) {
+    if (!invoice) {
       return;
     }
     try {
       setVoiding(true);
       setActionError("");
-      await apiFetch(`/invoices/${id}/void`, { method: "POST" });
+      await apiFetch(`/invoices/${invoice.id}/void`, { method: "POST" });
       setConfirmVoid(false);
       await loadInvoice();
     } catch (err) {
@@ -277,7 +278,7 @@ export default function InvoiceDetailPage() {
             <button className="app-button" onClick={loadInvoice}>
               Retry
             </button>
-            <Link className="app-button-ghost" to="/sales/invoices">
+            <Link className="app-button-ghost" to="/invoices">
               Back to invoices
             </Link>
           </div>
@@ -312,7 +313,7 @@ export default function InvoiceDetailPage() {
               Sales
             </Link>{" "}
             /{" "}
-            <Link to="/sales/invoices" className="hover:text-foreground">
+            <Link to="/invoices" className="hover:text-foreground">
               Invoices
             </Link>{" "}
             / <span className="text-foreground">{breadcrumbInvoice}</span>
@@ -327,7 +328,7 @@ export default function InvoiceDetailPage() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Link className="app-button-ghost" to="/sales/invoices">
+            <Link className="app-button-ghost" to="/invoices">
               <ArrowLeft className="h-4 w-4" /> Back
             </Link>
             {canMarkSent && (
@@ -496,7 +497,7 @@ export default function InvoiceDetailPage() {
           <div className="app-card p-6">
             <p className="text-sm font-semibold">Payment history</p>
             {invoice.payments.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No payments applied yet.</p>
+              <p className="mt-4 text-sm text-muted">No payments recorded.</p>
             ) : (
               <div className="mt-4 space-y-4">
                 {invoice.payments.map((payment) => (

@@ -159,8 +159,13 @@ def create_invoice_endpoint(payload: schemas.InvoiceCreate, db: Session = Depend
 
 
 @router.get("/invoices/{invoice_id}", response_model=schemas.InvoiceDetailResponse)
-def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+def get_invoice(invoice_id: str, db: Session = Depends(get_db)):
+    invoice_query = db.query(Invoice)
+    invoice = None
+    if invoice_id.isdigit():
+        invoice = invoice_query.filter(Invoice.id == int(invoice_id)).first()
+    if not invoice:
+        invoice = invoice_query.filter(Invoice.invoice_number == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     recalculate_invoice_balance(db, invoice)

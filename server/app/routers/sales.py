@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.auth import require_module
 from app.db import get_db
 from app.models import Customer, Invoice, Item, Payment
 from app.sales import schemas
@@ -27,12 +28,16 @@ router = APIRouter(prefix="/api", tags=["sales"])
 
 
 @router.get("/customers", response_model=List[schemas.CustomerResponse])
-def get_customers(search: Optional[str] = None, db: Session = Depends(get_db)):
+def get_customers(
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_module("CUSTOMERS")),
+):
     return list_customers(db, search)
 
 
 @router.post("/customers", response_model=schemas.CustomerResponse, status_code=status.HTTP_201_CREATED)
-def create_customer(payload: schemas.CustomerCreate, db: Session = Depends(get_db)):
+def create_customer(payload: schemas.CustomerCreate, db: Session = Depends(get_db), _=Depends(require_module("CUSTOMERS"))):
     customer = Customer(**payload.model_dump())
     db.add(customer)
     db.commit()
@@ -41,7 +46,7 @@ def create_customer(payload: schemas.CustomerCreate, db: Session = Depends(get_d
 
 
 @router.get("/customers/{customer_id}", response_model=schemas.CustomerResponse)
-def get_customer(customer_id: int, db: Session = Depends(get_db)):
+def get_customer(customer_id: int, db: Session = Depends(get_db), _=Depends(require_module("CUSTOMERS"))):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found.")
@@ -49,7 +54,7 @@ def get_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/customers/{customer_id}", response_model=schemas.CustomerResponse)
-def update_customer(customer_id: int, payload: schemas.CustomerUpdate, db: Session = Depends(get_db)):
+def update_customer(customer_id: int, payload: schemas.CustomerUpdate, db: Session = Depends(get_db), _=Depends(require_module("CUSTOMERS"))):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found.")
@@ -61,7 +66,7 @@ def update_customer(customer_id: int, payload: schemas.CustomerUpdate, db: Sessi
 
 
 @router.delete("/customers/{customer_id}", response_model=schemas.CustomerResponse)
-def archive_customer(customer_id: int, db: Session = Depends(get_db)):
+def archive_customer(customer_id: int, db: Session = Depends(get_db), _=Depends(require_module("CUSTOMERS"))):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found.")
@@ -72,12 +77,12 @@ def archive_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/items", response_model=List[schemas.ItemResponse])
-def get_items(search: Optional[str] = None, db: Session = Depends(get_db)):
+def get_items(search: Optional[str] = None, db: Session = Depends(get_db), _=Depends(require_module("ITEMS"))):
     return list_items(db, search)
 
 
 @router.post("/items", response_model=schemas.ItemResponse, status_code=status.HTTP_201_CREATED)
-def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
+def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db), _=Depends(require_module("ITEMS"))):
     item = Item(**payload.model_dump())
     db.add(item)
     db.commit()
@@ -86,7 +91,7 @@ def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/items/{item_id}", response_model=schemas.ItemResponse)
-def get_item(item_id: int, db: Session = Depends(get_db)):
+def get_item(item_id: int, db: Session = Depends(get_db), _=Depends(require_module("ITEMS"))):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
@@ -94,7 +99,7 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/items/{item_id}", response_model=schemas.ItemResponse)
-def update_item(item_id: int, payload: schemas.ItemUpdate, db: Session = Depends(get_db)):
+def update_item(item_id: int, payload: schemas.ItemUpdate, db: Session = Depends(get_db), _=Depends(require_module("ITEMS"))):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
@@ -106,7 +111,7 @@ def update_item(item_id: int, payload: schemas.ItemUpdate, db: Session = Depends
 
 
 @router.delete("/items/{item_id}", response_model=schemas.ItemResponse)
-def archive_item(item_id: int, db: Session = Depends(get_db)):
+def archive_item(item_id: int, db: Session = Depends(get_db), _=Depends(require_module("ITEMS"))):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
@@ -125,6 +130,7 @@ def get_invoices(
     min_total: Optional[Decimal] = Query(None, ge=0),
     max_total: Optional[Decimal] = Query(None, ge=0),
     db: Session = Depends(get_db),
+    _=Depends(require_module("INVOICES")),
 ):
     invoices = list_invoices(db, status, customer_id, start_date, end_date, min_total, max_total)
     return [
@@ -145,7 +151,7 @@ def get_invoices(
 
 
 @router.post("/invoices", response_model=schemas.InvoiceResponse, status_code=status.HTTP_201_CREATED)
-def create_invoice_endpoint(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)):
+def create_invoice_endpoint(payload: schemas.InvoiceCreate, db: Session = Depends(get_db), _=Depends(require_module("INVOICES"))):
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found.")
@@ -159,7 +165,7 @@ def create_invoice_endpoint(payload: schemas.InvoiceCreate, db: Session = Depend
 
 
 @router.get("/invoices/{invoice_id}", response_model=schemas.InvoiceDetailResponse)
-def get_invoice(invoice_id: str, db: Session = Depends(get_db)):
+def get_invoice(invoice_id: str, db: Session = Depends(get_db), _=Depends(require_module("INVOICES"))):
     invoice_query = db.query(Invoice)
     invoice = None
     if invoice_id.isdigit():
@@ -194,7 +200,7 @@ def get_invoice(invoice_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/invoices/{invoice_id}", response_model=schemas.InvoiceResponse)
-def update_invoice_endpoint(invoice_id: int, payload: schemas.InvoiceUpdate, db: Session = Depends(get_db)):
+def update_invoice_endpoint(invoice_id: int, payload: schemas.InvoiceUpdate, db: Session = Depends(get_db), _=Depends(require_module("INVOICES"))):
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -208,7 +214,7 @@ def update_invoice_endpoint(invoice_id: int, payload: schemas.InvoiceUpdate, db:
 
 
 @router.post("/invoices/{invoice_id}/send", response_model=schemas.InvoiceResponse)
-def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(require_module("INVOICES"))):
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -221,7 +227,7 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/invoices/{invoice_id}/void", response_model=schemas.InvoiceResponse)
-def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(require_module("INVOICES"))):
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
@@ -235,13 +241,13 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/payments", response_model=List[schemas.PaymentResponse])
-def get_payments(db: Session = Depends(get_db)):
+def get_payments(db: Session = Depends(get_db), _=Depends(require_module("PAYMENTS"))):
     payments = db.query(Payment).order_by(Payment.payment_date.desc(), Payment.id.desc()).all()
     return payments
 
 
 @router.post("/payments", response_model=schemas.PaymentResponse, status_code=status.HTTP_201_CREATED)
-def create_payment(payload: schemas.PaymentCreate, db: Session = Depends(get_db)):
+def create_payment(payload: schemas.PaymentCreate, db: Session = Depends(get_db), _=Depends(require_module("PAYMENTS"))):
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found.")
@@ -259,12 +265,13 @@ def get_sales_summary(
     start_date: date = Query(...),
     end_date: date = Query(...),
     db: Session = Depends(get_db),
+    _=Depends(require_module("REPORTS")),
 ):
     return sales_summary(db, start_date, end_date)
 
 
 @router.get("/reports/ar-aging", response_model=List[schemas.ARAgingBucket])
-def get_ar_aging(as_of: date = Query(...), db: Session = Depends(get_db)):
+def get_ar_aging(as_of: date = Query(...), db: Session = Depends(get_db), _=Depends(require_module("REPORTS"))):
     return ar_aging(db, as_of)
 
 
@@ -273,5 +280,6 @@ def get_customer_revenue(
     start_date: date = Query(...),
     end_date: date = Query(...),
     db: Session = Depends(get_db),
+    _=Depends(require_module("REPORTS")),
 ):
     return customer_revenue(db, start_date, end_date)

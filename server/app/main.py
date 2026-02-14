@@ -1,7 +1,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import chart_of_accounts, dashboard, health, inventory, journal_entries, purchase_orders, sales, sales_requests, suppliers
+from .routers import (
+    auth,
+    chart_of_accounts,
+    control,
+    dashboard,
+    health,
+    inventory,
+    journal_entries,
+    purchase_orders,
+    sales,
+    sales_requests,
+    suppliers,
+)
 
 app = FastAPI(title="Bookkeeper API")
 
@@ -14,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(sales.router)
 app.include_router(dashboard.router)
 app.include_router(suppliers.router)
@@ -22,6 +35,7 @@ app.include_router(sales_requests.router)
 app.include_router(purchase_orders.router)
 app.include_router(chart_of_accounts.router)
 app.include_router(journal_entries.router)
+app.include_router(control.router)
 
 
 @app.get("/")

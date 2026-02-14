@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_module
 from app.db import get_db
 from app.models import InvoiceLine, Item, PurchaseOrder, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.suppliers import schemas
 from app.suppliers.service import get_supplier_link, set_preferred_supplier
 
 
-router = APIRouter(prefix="/api", tags=["suppliers"])
+router = APIRouter(prefix="/api", tags=["suppliers"], dependencies=[Depends(require_module("SUPPLIERS"))])
 
 
 @router.get("/suppliers", response_model=List[schemas.SupplierResponse])

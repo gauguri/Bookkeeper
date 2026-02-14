@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
+from app.auth import get_current_user, require_module
 from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
@@ -22,7 +23,11 @@ from app.sales_requests.service import (
 )
 
 
-router = APIRouter(prefix="/api/sales-requests", tags=["sales-requests"])
+router = APIRouter(
+    prefix="/api/sales-requests",
+    tags=["sales-requests"],
+    dependencies=[Depends(require_module("SALES_REQUESTS"))],
+)
 
 
 def _to_response(sales_request: SalesRequest) -> schemas.SalesRequestResponse:
@@ -58,9 +63,15 @@ def list_sales_requests(
 
 
 @router.post("", response_model=schemas.SalesRequestResponse, status_code=status.HTTP_201_CREATED)
-def create_sales_request_endpoint(payload: schemas.SalesRequestCreate, db: Session = Depends(get_db)):
+def create_sales_request_endpoint(
+    payload: schemas.SalesRequestCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
     try:
-        sales_request = create_sales_request(db, payload.model_dump())
+        request_payload = payload.model_dump()
+        request_payload["created_by_user_id"] = current_user.id
+        sales_request = create_sales_request(db, request_payload)
     except InventoryQuantityExceededError as exc:
         raise HTTPException(
             status_code=400,

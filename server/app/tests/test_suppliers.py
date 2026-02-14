@@ -227,7 +227,7 @@ def test_api_create_supplier_item_link(client):
     payload = response.json()
     assert payload["supplier_id"] == supplier["id"]
     assert payload["item_id"] == item["id"]
-    assert payload["landed_cost"] == 5.5
+    assert payload["landed_cost"] == "5.50"
 
 
 def test_api_prevent_duplicate_supplier_item_link(client):
@@ -283,7 +283,7 @@ def test_api_update_costs_recomputes_landed_cost(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["landed_cost"] == 9.0
+    assert response.json()["landed_cost"] == "9.00"
 
 
 def test_api_delete_supplier_success_without_dependencies(client):

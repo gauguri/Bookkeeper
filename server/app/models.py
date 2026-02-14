@@ -38,12 +38,36 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     email = Column(String(255), unique=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False, default="admin")
     is_active = Column(Boolean, default=True, nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     company = relationship("Company", back_populates="users")
+    module_access = relationship("UserModuleAccess", back_populates="user", cascade="all, delete-orphan")
+
+
+class Module(Base):
+    __tablename__ = "modules"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
+
+    user_access = relationship("UserModuleAccess", back_populates="module", cascade="all, delete-orphan")
+
+
+class UserModuleAccess(Base):
+    __tablename__ = "user_module_access"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    module_id = Column(Integer, ForeignKey("modules.id", ondelete="CASCADE"), primary_key=True)
+
+    user = relationship("User", back_populates="module_access")
+    module = relationship("Module", back_populates="user_access")
 
 
 class Account(Base):

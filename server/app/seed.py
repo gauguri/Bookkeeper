@@ -310,7 +310,7 @@ def run_seed():
     try:
         company = _get_or_create_company(db)
 
-        if os.getenv("SEED_SKIP_AUTH", "0") not in {"1", "true", "TRUE", "yes", "YES"}:
+        if os.getenv("SEED_SKIP_AUTH", "1") not in {"1", "true", "TRUE", "yes", "YES"}:
             try:
                 _get_or_create_user(db, company.id)
             except Exception as exc:

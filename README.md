@@ -18,13 +18,17 @@ A monorepo MVP for a QuickBooks-style bookkeeping system focused on correct doub
 docker compose up --build
 ```
 
-### Migrate & seed
+### Migrate
 In a separate terminal:
 ```bash
 docker compose exec server alembic upgrade head
 ```
 
-Seed demo data:
+### First-run bootstrap
+After migrations, open the web app and complete `/setup` to create the first admin account.
+The setup wizard appears only when there are zero users.
+
+Optional seed data (chart of accounts + demo records):
 ```bash
 docker compose exec server python -m app.seed
 ```
@@ -34,8 +38,18 @@ docker compose exec server python -m app.seed
 - Web: http://localhost:5173
 
 ### Sample credentials
-- Email: `demo@bookkeeper.local`
-- Password: `password123`
+Use the admin credentials you create in the setup wizard.
+
+For local recovery, you can reset/create `admin@bookkeeper.local` when explicitly enabled:
+```bash
+ALLOW_DEV_RESET=true ENV=development curl -X POST http://localhost:8000/api/auth/dev/reset-admin
+```
+Custom password:
+```bash
+ALLOW_DEV_RESET=true ENV=development curl -X POST http://localhost:8000/api/auth/dev/reset-admin \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"your-new-password123!"}'
+```
 
 ## QuickBooks Import (MVP)
 - **QuickBooks Online (QBO):** OAuth + API import planned (Phase 2).

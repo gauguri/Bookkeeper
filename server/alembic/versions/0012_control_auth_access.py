@@ -1,7 +1,7 @@
 """control auth access
 
 Revision ID: 0012_control_auth_access
-Revises: 0011_sales_request_inventory_deducted
+Revises: 0011_sr_inventory_deducted
 Create Date: 2026-02-14
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision = "0012_control_auth_access"
-down_revision = "0011_sales_request_inventory_deducted"
+down_revision = "0011_sr_inventory_deducted"
 branch_labels = None
 depends_on = None
 

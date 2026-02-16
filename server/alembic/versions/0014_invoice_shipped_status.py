@@ -1,7 +1,7 @@
 """add shipped invoice status and shipped timestamp
 
 Revision ID: 0014_invoice_shipped_status
-Revises: 0013_remove_seeded_admin_for_bootstrap
+Revises: 0013_bootstrap_cleanup
 Create Date: 2026-02-16 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0014_invoice_shipped_status"
-down_revision = "0013_remove_seeded_admin_for_bootstrap"
+down_revision = "0013_bootstrap_cleanup"
 branch_labels = None
 depends_on = None
 

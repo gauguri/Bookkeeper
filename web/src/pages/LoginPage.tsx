@@ -1,22 +1,25 @@
 import { FormEvent, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
+import { getDefaultRoute } from "../auth-routing";
 
 export default function LoginPage() {
-  const { login, token, loading } = useAuth();
+  const { login, token, loading, isAdmin, allowedModules } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("admin@bookkeeper.local");
   const [password, setPassword] = useState("password123");
   const [error, setError] = useState<string | null>(null);
 
-  if (token && !loading) return <Navigate to="/" replace />;
+  if (token && !loading) {
+    return <Navigate to={getDefaultRoute({ isAdmin, allowedModules })} replace />;
+  }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     try {
       await login(email, password);
-      navigate("/");
+      navigate("/", { replace: true });
     } catch (err) {
       setError((err as Error).message);
     }

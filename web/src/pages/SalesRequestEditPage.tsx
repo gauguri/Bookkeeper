@@ -17,7 +17,7 @@ type SalesRequestDetail = {
   id: number;
   customer_id: number | null;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "CLOSED";
+  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
   notes: string | null;
   requested_fulfillment_date: string | null;
   linked_invoice_id: number | null;

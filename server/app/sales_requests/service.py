@@ -291,7 +291,7 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
         })
 
     display_total_amount = calculate_sales_request_total(sales_request)
-    if sales_request.status == "CLOSED" and linked_invoice:
+    if sales_request.status in {"SHIPPED", "CLOSED"} and linked_invoice:
         display_total_amount = Decimal(linked_invoice.total or 0)
 
     return {
@@ -299,6 +299,8 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
         "enriched_lines": enriched_lines,
         "linked_invoice_id": linked_invoice.id if linked_invoice else None,
         "linked_invoice_number": linked_invoice.invoice_number if linked_invoice else None,
+        "linked_invoice_status": linked_invoice.status if linked_invoice else None,
+        "linked_invoice_shipped_at": linked_invoice.shipped_at if linked_invoice else None,
         "display_total_amount": display_total_amount,
     }
 
@@ -381,8 +383,6 @@ def generate_invoice_from_sales_request(
     invoice = create_invoice(db, invoice_payload)
     invoice.sales_request_id = sales_request.id
 
-    should_deduct_inventory = update_sales_request_status(sales_request, "CLOSED")
-    if should_deduct_inventory:
-        deduct_inventory_for_sales_request(db, sales_request)
+    update_sales_request_status(sales_request, "INVOICED")
 
     return invoice

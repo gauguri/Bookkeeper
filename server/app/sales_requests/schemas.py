@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, condecimal, model_validator
 
 
 DecimalValue = condecimal(max_digits=14, decimal_places=2)
-SalesRequestStatus = Literal["OPEN", "IN_PROGRESS", "CLOSED"]
+SalesRequestStatus = Literal["OPEN", "IN_PROGRESS", "INVOICED", "SHIPPED", "CLOSED"]
 
 
 class SalesRequestLineCreate(BaseModel):
@@ -137,6 +137,8 @@ class SalesRequestDetailResponse(BaseModel):
     linked_invoice_number: Optional[str] = None
     invoice_id: Optional[int] = None
     invoice_number: Optional[str] = None
+    linked_invoice_status: Optional[str] = None
+    linked_invoice_shipped_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

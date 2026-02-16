@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
@@ -9,6 +9,12 @@ from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.models import Customer, Invoice, Item, Payment
+from app.sales_requests.service import (
+    deduct_inventory_for_sales_request,
+    update_sales_request_status,
+    InsufficientInventoryError,
+    MissingInventoryRecordError,
+)
 from app.sales import schemas
 from app.sales.service import (
     apply_payment,
@@ -192,6 +198,7 @@ def get_invoice(invoice_id: str, db: Session = Depends(get_db), _=Depends(requir
         tax_total=invoice.tax_total,
         total=invoice.total,
         amount_due=invoice.amount_due,
+        shipped_at=invoice.shipped_at,
         created_at=invoice.created_at,
         updated_at=invoice.updated_at,
         customer=invoice.customer,
@@ -227,13 +234,43 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     return invoice
 
 
+
+
+@router.post("/invoices/{invoice_id}/ship", response_model=schemas.InvoiceResponse)
+def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.INVOICES.value))):
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+
+    if invoice.status in {"VOID", "PAID"}:
+        raise HTTPException(status_code=400, detail="Only active invoices can be marked as shipped.")
+    if invoice.status not in {"SENT", "PARTIALLY_PAID"}:
+        raise HTTPException(status_code=400, detail="Only sent invoices can be marked as shipped.")
+
+    invoice.status = "SHIPPED"
+    invoice.shipped_at = datetime.utcnow()
+
+    if invoice.sales_request:
+        update_sales_request_status(invoice.sales_request, "SHIPPED")
+        try:
+            deduct_inventory_for_sales_request(db, invoice.sales_request)
+        except MissingInventoryRecordError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except InsufficientInventoryError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
 @router.post("/invoices/{invoice_id}/void", response_model=schemas.InvoiceResponse)
 def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.INVOICES.value))):
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
-    if invoice.status in {"PAID", "PARTIALLY_PAID"}:
-        raise HTTPException(status_code=400, detail="Paid invoices cannot be voided.")
+    if invoice.status in {"PAID", "PARTIALLY_PAID", "SHIPPED"}:
+        raise HTTPException(status_code=400, detail="Paid or shipped invoices cannot be voided.")
     invoice.status = "VOID"
     invoice.amount_due = Decimal("0.00")
     db.commit()

@@ -66,6 +66,7 @@ const statusStyles: Record<string, string> = {
   DRAFT: "border-border bg-secondary text-muted",
   SENT: "border-primary/30 bg-primary/10 text-primary",
   PARTIALLY_PAID: "border-warning/30 bg-warning/10 text-warning",
+  SHIPPED: "border-info/30 bg-info/10 text-info",
   PAID: "border-success/30 bg-success/10 text-success",
   VOID: "border-danger/30 bg-danger/10 text-danger"
 };
@@ -391,6 +392,7 @@ export default function InvoicesPage() {
             <option value="DRAFT">Draft</option>
             <option value="SENT">Sent</option>
             <option value="PARTIALLY_PAID">Partially paid</option>
+            <option value="SHIPPED">Shipped</option>
             <option value="PAID">Paid</option>
             <option value="VOID">Void</option>
           </select>

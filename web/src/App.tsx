@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion";
 import { Banknote, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sun, Truck, Users } from "lucide-react";
 import { useAuth } from "./auth";
+import { apiFetch } from "./api";
 import ChartOfAccountsBulkImportPage from "./pages/ChartOfAccountsBulkImportPage";
 import ChartOfAccountsPage from "./pages/ChartOfAccountsPage";
 import ControlPage from "./pages/ControlPage";
@@ -21,8 +22,10 @@ import SalesLanding from "./pages/SalesLanding";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
 import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
+import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
 
+type BootstrapStatus = { needs_bootstrap: boolean };
 type NavItem = { label: string; to: string; icon: any; moduleKey?: string; children?: NavItem[] };
 const navSections: { title: string; items: NavItem[] }[] = [
   { title: "Sales", items: [
@@ -84,33 +87,57 @@ function ProtectedRoute({ moduleKey, children }: { moduleKey?: string; children:
 }
 
 export default function App() {
+  const [bootstrapLoading, setBootstrapLoading] = useState(true);
+  const [needsBootstrap, setNeedsBootstrap] = useState(false);
+
+  useEffect(() => {
+    apiFetch<BootstrapStatus>("/auth/bootstrap/status")
+      .then((status) => setNeedsBootstrap(status.needs_bootstrap))
+      .catch(() => setNeedsBootstrap(false))
+      .finally(() => setBootstrapLoading(false));
+  }, []);
+
+  if (bootstrapLoading) {
+    return <div className="p-8">Loading setup...</div>;
+  }
+
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="*" element={<Layout><Routes>
-        <Route path="/" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
-        <Route path="/sales" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
-        <Route path="/sales/customers" element={<ProtectedRoute moduleKey="CUSTOMERS"><CustomersPage /></ProtectedRoute>} />
-        <Route path="/sales/items" element={<ProtectedRoute moduleKey="ITEMS"><ItemsPage /></ProtectedRoute>} />
-        <Route path="/sales-requests" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestsPage /></ProtectedRoute>} />
-        <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestDetailPage /></ProtectedRoute>} />
-        <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestEditPage /></ProtectedRoute>} />
-        <Route path="/sales/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
-        <Route path="/sales/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
-        <Route path="/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
-        <Route path="/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
-        <Route path="/sales/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
-        <Route path="/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
-        <Route path="/sales/reports" element={<ProtectedRoute moduleKey="REPORTS"><ReportsPage /></ProtectedRoute>} />
-        <Route path="/expenses" element={<ProtectedRoute moduleKey="EXPENSES"><ExpensesPage /></ProtectedRoute>} />
-        <Route path="/banking" element={<ProtectedRoute moduleKey="BANKING"><PlaceholderPage title="Banking" /></ProtectedRoute>} />
-        <Route path="/accounts" element={<ProtectedRoute moduleKey="CHART_OF_ACCOUNTS"><ChartOfAccountsPage /></ProtectedRoute>} />
-        <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey="IMPORT"><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
-        <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey="SUPPLIERS"><SuppliersPage /></ProtectedRoute>} />
-        <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey="PURCHASE_ORDERS"><PurchaseOrdersPage /></ProtectedRoute>} />
-        <Route path="/inventory" element={<ProtectedRoute moduleKey="INVENTORY"><InventoryPage /></ProtectedRoute>} />
-        <Route path="/control" element={<ProtectedRoute moduleKey="CONTROL"><ControlPage /></ProtectedRoute>} />
-      </Routes></Layout>} />
+      {needsBootstrap ? (
+        <>
+          <Route path="/setup" element={<SetupWizardPage />} />
+          <Route path="*" element={<Navigate to="/setup" replace />} />
+        </>
+      ) : (
+        <>
+          <Route path="/setup" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Layout><Routes>
+            <Route path="/" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
+            <Route path="/sales" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
+            <Route path="/sales/customers" element={<ProtectedRoute moduleKey="CUSTOMERS"><CustomersPage /></ProtectedRoute>} />
+            <Route path="/sales/items" element={<ProtectedRoute moduleKey="ITEMS"><ItemsPage /></ProtectedRoute>} />
+            <Route path="/sales-requests" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestsPage /></ProtectedRoute>} />
+            <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestDetailPage /></ProtectedRoute>} />
+            <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestEditPage /></ProtectedRoute>} />
+            <Route path="/sales/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/sales/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
+            <Route path="/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
+            <Route path="/sales/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
+            <Route path="/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
+            <Route path="/sales/reports" element={<ProtectedRoute moduleKey="REPORTS"><ReportsPage /></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute moduleKey="EXPENSES"><ExpensesPage /></ProtectedRoute>} />
+            <Route path="/banking" element={<ProtectedRoute moduleKey="BANKING"><PlaceholderPage title="Banking" /></ProtectedRoute>} />
+            <Route path="/accounts" element={<ProtectedRoute moduleKey="CHART_OF_ACCOUNTS"><ChartOfAccountsPage /></ProtectedRoute>} />
+            <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey="IMPORT"><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
+            <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey="SUPPLIERS"><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey="PURCHASE_ORDERS"><PurchaseOrdersPage /></ProtectedRoute>} />
+            <Route path="/inventory" element={<ProtectedRoute moduleKey="INVENTORY"><InventoryPage /></ProtectedRoute>} />
+            <Route path="/control" element={<ProtectedRoute moduleKey="CONTROL"><ControlPage /></ProtectedRoute>} />
+          </Routes></Layout>} />
+        </>
+      )}
     </Routes>
   );
 }

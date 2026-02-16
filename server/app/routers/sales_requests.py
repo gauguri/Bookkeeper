@@ -125,6 +125,8 @@ def get_sales_request_detail_endpoint(sales_request_id: int, db: Session = Depen
         linked_invoice_number=result["linked_invoice_number"],
         invoice_id=result["linked_invoice_id"],
         invoice_number=result["linked_invoice_number"],
+        linked_invoice_status=result["linked_invoice_status"],
+        linked_invoice_shipped_at=result["linked_invoice_shipped_at"],
     )
 
 

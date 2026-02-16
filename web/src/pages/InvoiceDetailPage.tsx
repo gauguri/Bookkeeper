@@ -6,6 +6,7 @@ import {
   Clock,
   FileText,
   Send,
+  Truck,
   XCircle
 } from "lucide-react";
 import { apiFetch } from "../api";
@@ -40,6 +41,7 @@ type InvoiceDetail = {
   tax_total: number;
   total: number;
   amount_due: number;
+  shipped_at?: string | null;
   created_at: string;
   updated_at: string;
   notes?: string;
@@ -68,7 +70,8 @@ const statusStyles: Record<string, string> = {
   SENT: "border-primary/30 bg-primary/10 text-primary",
   PARTIALLY_PAID: "border-warning/30 bg-warning/10 text-warning",
   PAID: "border-success/30 bg-success/10 text-success",
-  VOID: "border-danger/30 bg-danger/10 text-danger"
+  VOID: "border-danger/30 bg-danger/10 text-danger",
+  SHIPPED: "border-info/30 bg-info/10 text-info"
 };
 
 const formatDate = (value?: string) => {
@@ -151,6 +154,7 @@ export default function InvoiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [voiding, setVoiding] = useState(false);
+  const [shipping, setShipping] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
 
   const invoiceKey = useMemo(() => {
@@ -244,6 +248,23 @@ export default function InvoiceDetailPage() {
     }
   };
 
+
+  const markShipped = async () => {
+    if (!invoice) {
+      return;
+    }
+    try {
+      setShipping(true);
+      setActionError("");
+      await apiFetch(`/invoices/${invoice.id}/ship`, { method: "POST" });
+      await loadInvoice();
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setShipping(false);
+    }
+  };
+
   const voidInvoice = async () => {
     if (!invoice) {
       return;
@@ -333,7 +354,8 @@ export default function InvoiceDetailPage() {
   }
 
   const canMarkSent = invoice.status === "DRAFT";
-  const canVoid = !["PAID", "VOID", "PARTIALLY_PAID"].includes(invoice.status);
+  const canMarkShipped = ["SENT", "PARTIALLY_PAID"].includes(invoice.status);
+  const canVoid = !["PAID", "VOID", "PARTIALLY_PAID", "SHIPPED"].includes(invoice.status);
   const headerTitle = `Invoice ${invoice.invoice_number}`;
   const customerLabel = invoice.customer.email
     ? `${invoice.customer.name} · ${invoice.customer.email}`
@@ -370,6 +392,11 @@ export default function InvoiceDetailPage() {
             {canMarkSent && (
               <button className="app-button" onClick={markSent} disabled={sending}>
                 <Send className="h-4 w-4" /> {sending ? "Sending..." : "Mark as sent"}
+              </button>
+            )}
+            {canMarkShipped && (
+              <button className="app-button" onClick={markShipped} disabled={shipping}>
+                <Truck className="h-4 w-4" /> {shipping ? "Shipping..." : "Mark shipped"}
               </button>
             )}
             {canVoid && (
@@ -530,6 +557,13 @@ export default function InvoiceDetailPage() {
                 <div>
                   <p className="text-sm font-semibold">Due date</p>
                   <p className="text-xs text-muted">{invoice.due_date}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Truck className="h-5 w-5 text-info" />
+                <div>
+                  <p className="text-sm font-semibold">Shipped</p>
+                  <p className="text-xs text-muted">{formatDate(invoice.shipped_at ?? undefined)}</p>
                 </div>
               </div>
             </div>

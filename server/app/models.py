@@ -302,7 +302,7 @@ class Invoice(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
     invoice_number = Column(String(20), nullable=False, unique=True)
     status = Column(
-        Enum("DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "VOID", name="invoice_status"),
+        Enum("DRAFT", "SENT", "SHIPPED", "PARTIALLY_PAID", "PAID", "VOID", name="invoice_status"),
         nullable=False,
         default="DRAFT",
     )
@@ -315,6 +315,7 @@ class Invoice(Base):
     total = Column(Numeric(14, 2), nullable=False, default=0)
     amount_due = Column(Numeric(14, 2), nullable=False, default=0)
     sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=True)
+    shipped_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

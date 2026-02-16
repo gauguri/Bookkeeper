@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Banknote, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sun, Truck, Users } from "lucide-react";
 import { useAuth } from "./auth";
+import { getDefaultRoute, getModuleForPath, isPathAllowed, MODULE_ROUTE_MAP } from "./auth-routing";
 import { canAccess } from "./authz";
 import { MODULES, ModuleKey } from "./constants/modules";
 import { apiFetch } from "./api";
@@ -17,6 +18,7 @@ import InvoicesPage from "./pages/InvoicesPage";
 import ItemsPage from "./pages/ItemsPage";
 import LoginPage from "./pages/LoginPage";
 import PaymentsPage from "./pages/PaymentsPage";
+import NoAccessPage from "./pages/NoAccessPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -31,12 +33,12 @@ type BootstrapStatus = { needs_bootstrap: boolean };
 type NavItem = { label: string; to: string; icon: any; moduleKey?: ModuleKey; children?: NavItem[] };
 const navSections: { title: string; items: NavItem[] }[] = [
   { title: "Sales", items: [
-    { label: "Overview", to: "/sales", icon: LayoutGrid, moduleKey: MODULES.DASHBOARD },
-    { label: "Customers", to: "/sales/customers", icon: Users, moduleKey: MODULES.CUSTOMERS },
-    { label: "Items", to: "/sales/items", icon: ClipboardList, moduleKey: MODULES.ITEMS },
-    { label: "Sales Requests", to: "/sales-requests", icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
-    { label: "Invoices", to: "/sales/invoices", icon: FileText, moduleKey: MODULES.INVOICES },
-    { label: "Payments", to: "/sales/payments", icon: Banknote, moduleKey: MODULES.PAYMENTS },
+    { label: "Overview", to: MODULE_ROUTE_MAP[MODULES.DASHBOARD], icon: LayoutGrid, moduleKey: MODULES.DASHBOARD },
+    { label: "Customers", to: MODULE_ROUTE_MAP[MODULES.CUSTOMERS], icon: Users, moduleKey: MODULES.CUSTOMERS },
+    { label: "Items", to: MODULE_ROUTE_MAP[MODULES.ITEMS], icon: ClipboardList, moduleKey: MODULES.ITEMS },
+    { label: "Sales Requests", to: MODULE_ROUTE_MAP[MODULES.SALES_REQUESTS], icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
+    { label: "Invoices", to: MODULE_ROUTE_MAP[MODULES.INVOICES], icon: FileText, moduleKey: MODULES.INVOICES },
+    { label: "Payments", to: MODULE_ROUTE_MAP[MODULES.PAYMENTS], icon: Banknote, moduleKey: MODULES.PAYMENTS },
     { label: "Reports", to: "/sales/reports", icon: Layers, moduleKey: MODULES.REPORTS }
   ]},
   { title: "Accounting", items: [
@@ -54,7 +56,8 @@ const navSections: { title: string; items: NavItem[] }[] = [
 
 function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { allowedModules, isAdmin, user, logout } = useAuth();
+  const navigate = useNavigate();
+  const { token, loading, allowedModules, isAdmin, user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => window.localStorage.getItem("bookkeeper-theme") === "dark");
   const hasModule = (moduleKey?: ModuleKey) => {
@@ -62,6 +65,23 @@ function Layout({ children }: { children: React.ReactNode }) {
     return canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules });
   };
   const filteredSections = navSections.map((section) => ({ ...section, items: section.items.filter((item) => hasModule(item.moduleKey)) })).filter((s) => s.items.length > 0);
+  const defaultRoute = getDefaultRoute({ isAdmin, allowedModules });
+  const activeModule = getModuleForPath(location.pathname);
+
+  useEffect(() => {
+    if (loading || !token) {
+      return;
+    }
+    if (location.pathname === "/no-access") {
+      if (defaultRoute !== "/no-access") {
+        navigate(defaultRoute, { replace: true });
+      }
+      return;
+    }
+    if (!isPathAllowed(location.pathname, { isAdmin, allowedModules })) {
+      navigate(defaultRoute, { replace: true });
+    }
+  }, [allowedModules, defaultRoute, isAdmin, loading, location.pathname, navigate, token]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -76,7 +96,11 @@ function Layout({ children }: { children: React.ReactNode }) {
   return <div className="min-h-screen bg-background text-foreground">{/* unchanged layout */}
     <aside className={`fixed inset-y-0 left-0 z-40 hidden md:flex ${navWidth} flex-col border-r bg-surface/95 px-4 pb-6 pt-6 shadow-soft backdrop-blur transition-all`}>
       <div className="flex items-center justify-between px-2"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-glow">BK</div><div className={`transition ${navLabelClass}`}><p className="text-sm font-semibold text-muted">Bookkeeper</p><p className="text-lg font-semibold">Pulse Finance</p></div></div><button className="app-button-ghost h-9 w-9 rounded-full" onClick={() => setCollapsed((p) => !p)}><span className="text-lg">{collapsed ? ">" : "<"}</span></button></div>
-      <div className="mt-6 flex flex-col gap-6 overflow-hidden">{filteredSections.map((section) => <div key={section.title} className="space-y-3"><p className={`px-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted transition ${navLabelClass}`}>{section.title}</p><nav className="flex flex-col gap-1">{section.items.map((item) => <div key={item.to}><NavLink to={item.to} className={({ isActive }) => `group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${isActive ? "bg-primary text-primary-foreground shadow-glow" : "text-muted hover:bg-secondary hover:text-foreground"}`}><item.icon className="h-4 w-4" /><span className={`transition ${navLabelClass}`}>{item.label}</span></NavLink></div>)}</nav></div>)}</div>
+      <div className="mt-6 flex flex-col gap-6 overflow-hidden">{filteredSections.map((section) => <div key={section.title} className="space-y-3"><p className={`px-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted transition ${navLabelClass}`}>{section.title}</p><nav className="flex flex-col gap-1">{section.items.map((item) => <div key={item.to}><NavLink to={item.to} className={({ isActive }) => {
+        const moduleMatchesCurrentPath = Boolean(item.moduleKey && activeModule && item.moduleKey === activeModule);
+        const active = isActive || moduleMatchesCurrentPath;
+        return `group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${active ? "bg-primary text-primary-foreground shadow-glow" : "text-muted hover:bg-secondary hover:text-foreground"}`;
+      }}><item.icon className="h-4 w-4" /><span className={`transition ${navLabelClass}`}>{item.label}</span></NavLink></div>)}</nav></div>)}</div>
     </aside>
     <header className={`sticky top-0 z-30 flex items-center justify-between border-b bg-surface/80 px-6 py-4 shadow-soft backdrop-blur ${collapsed ? "md:ml-20" : "md:ml-72"}`}><div><p className="text-xs uppercase tracking-[0.3em] text-muted">Bookkeeper</p><h1 className="text-lg font-semibold">Sales Command Center</h1></div><div className="flex items-center gap-3"><button className="app-button-ghost" onClick={() => setDarkMode((p) => !p)}>{darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button><span>{user?.full_name || user?.email}</span><button className="app-button-ghost" onClick={logout}>Logout</button><span className={badgeClasses}>DEV</span></div></header>
     <main className={`relative px-6 pb-16 pt-8 ${collapsed ? "md:ml-20" : "md:ml-72"}`}><div className="mx-auto flex w-full max-w-6xl flex-col gap-8"><AnimatePresence mode="wait"><motion.div key={location.pathname} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }} className="space-y-8">{children}</motion.div></AnimatePresence></div></main>
@@ -140,6 +164,7 @@ export default function App() {
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><InventoryPage /></ProtectedRoute>} />
             <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
+            <Route path="/no-access" element={<ProtectedRoute><NoAccessPage /></ProtectedRoute>} />
           </Routes></Layout>} />
         </>
       )}

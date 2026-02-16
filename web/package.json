@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 5173"
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "test:authz": "node scripts/authz-sanity.mjs",
+    "test:default-route": "node scripts/default-route-sanity.mjs"
   },
   "dependencies": {
     "framer-motion": "11.3.1",

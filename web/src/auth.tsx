@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
+    setLoading(true);
     apiFetch<MeResponse>("/auth/me")
       .then((me) => {
         setUser(me);

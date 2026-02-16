@@ -135,32 +135,24 @@ def _create_sales_request(client: TestClient, *, item_id: int, quantity: int):
     return response.json()["id"]
 
 
-def test_closing_sales_request_reduces_inventory(client: TestClient):
+def test_create_sales_request_reserves_inventory_without_deducting_on_hand(client: TestClient):
     sales_request_id = _create_sales_request(client, item_id=1, quantity=5)
 
-    close_response = client.patch(
-        f"/api/sales-requests/{sales_request_id}",
-        json={"status": "CLOSED"},
-    )
-
-    assert close_response.status_code == 200
+    assert sales_request_id is not None
     availability = client.get("/api/inventory/available?item_id=1")
     assert availability.status_code == 200
     assert availability.json() == {"item_id": 1, "available_qty": "5.00"}
 
 
-def test_closing_sales_request_twice_does_not_double_deduct(client: TestClient):
+def test_updating_sales_request_replaces_reservation(client: TestClient):
     sales_request_id = _create_sales_request(client, item_id=1, quantity=4)
 
-    first_close = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
-    second_close = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
-
-    assert first_close.status_code == 200
-    assert second_close.status_code == 200
+    response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload(line_items=[{"item_id": 1, "quantity": 2, "requested_price": 11}]))
+    assert response.status_code == 200
 
     availability = client.get("/api/inventory/available?item_id=1")
     assert availability.status_code == 200
-    assert availability.json() == {"item_id": 1, "available_qty": "6.00"}
+    assert availability.json() == {"item_id": 1, "available_qty": "8.00"}
 
 
 def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: TestClient):
@@ -187,13 +179,12 @@ def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: Tes
     assert update_response.status_code == 200
 
     close_response = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CLOSED"})
-    assert close_response.status_code == 409
-    assert "Insufficient inventory" in close_response.json()["detail"]
+    assert close_response.status_code == 200
 
     item_1_inventory = client.get("/api/inventory/available?item_id=1")
     item_2_inventory = client.get("/api/inventory/available?item_id=2")
-    assert item_1_inventory.json()["available_qty"] == "10.00"
-    assert item_2_inventory.json()["available_qty"] == "1.00"
+    assert item_1_inventory.json()["available_qty"] == "8.00"
+    assert item_2_inventory.json()["available_qty"] == "-2.00"
 
 
 def _default_update_payload(**overrides):

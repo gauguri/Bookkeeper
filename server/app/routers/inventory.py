@@ -10,7 +10,7 @@ from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory import schemas
-from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map
+from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map, get_reserved_qty_map
 from app.models import Company, Inventory, Item
 
 
@@ -112,14 +112,20 @@ def list_inventory_items(search: Optional[str] = None, db: Session = Depends(get
         like = f"%{search.lower()}%"
         query = query.filter(Item.name.ilike(like))
     items = query.order_by(Item.name).all()
+    item_ids = [item.id for item in items]
+    on_hand_by_id = {
+        row.item_id: Decimal(row.quantity_on_hand or 0)
+        for row in db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+    }
+    reserved_by_id = get_reserved_qty_map(db, item_ids)
     return [
         schemas.InventoryItemResponse(
             id=item.id,
             sku=item.sku,
             name=item.name,
-            on_hand_qty=item.on_hand_qty,
-            reserved_qty=item.reserved_qty,
-            available_qty=item.available_qty,
+            on_hand_qty=on_hand_by_id.get(item.id, Decimal("0")),
+            reserved_qty=reserved_by_id.get(item.id, Decimal("0")),
+            available_qty=on_hand_by_id.get(item.id, Decimal("0")) - reserved_by_id.get(item.id, Decimal("0")),
             reorder_point=item.reorder_point,
         )
         for item in items

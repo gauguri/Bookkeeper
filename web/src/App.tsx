@@ -3,7 +3,7 @@ import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "reac
 import { AnimatePresence, motion } from "framer-motion";
 import { Banknote, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sun, Truck, Users } from "lucide-react";
 import { useAuth } from "./auth";
-import { getDefaultRoute, getModuleForPath, isPathAllowed, MODULE_ROUTE_MAP } from "./auth-routing";
+import { getModuleForPath, isPathAllowed, MODULE_ROUTE_MAP } from "./auth-routing";
 import { canAccess } from "./authz";
 import { MODULES, ModuleKey } from "./constants/modules";
 import { apiFetch } from "./api";
@@ -65,7 +65,6 @@ function Layout({ children }: { children: React.ReactNode }) {
     return canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules });
   };
   const filteredSections = navSections.map((section) => ({ ...section, items: section.items.filter((item) => hasModule(item.moduleKey)) })).filter((s) => s.items.length > 0);
-  const defaultRoute = getDefaultRoute({ isAdmin, allowedModules });
   const activeModule = getModuleForPath(location.pathname);
 
   useEffect(() => {
@@ -73,15 +72,13 @@ function Layout({ children }: { children: React.ReactNode }) {
       return;
     }
     if (location.pathname === "/no-access") {
-      if (defaultRoute !== "/no-access") {
-        navigate(defaultRoute, { replace: true });
-      }
       return;
     }
     if (!isPathAllowed(location.pathname, { isAdmin, allowedModules })) {
-      navigate(defaultRoute, { replace: true });
+      const from = encodeURIComponent(`${location.pathname}${location.search}`);
+      navigate(`/no-access?from=${from}`, { replace: true });
     }
-  }, [allowedModules, defaultRoute, isAdmin, loading, location.pathname, navigate, token]);
+  }, [allowedModules, isAdmin, loading, location.pathname, location.search, navigate, token]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -108,10 +105,14 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedRoute({ moduleKey, children }: { moduleKey?: ModuleKey; children: JSX.Element }) {
+  const location = useLocation();
   const { token, loading, isAdmin, allowedModules } = useAuth();
   if (loading) return <div className="p-8">Loading...</div>;
   if (!token) return <Navigate to="/login" replace />;
-  if (moduleKey && !canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules })) return <PlaceholderPage title="Not authorized for this module" />;
+  if (moduleKey && !canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules })) {
+    const from = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/no-access?from=${from}`} replace />;
+  }
   return children;
 }
 

@@ -9,7 +9,9 @@ type AuthUser = {
   is_admin: boolean;
 };
 
-type MeResponse = AuthUser & { allowed_modules: string[] };
+type AuthUserWithModules = AuthUser & { allowed_modules: string[] };
+
+type MeResponse = AuthUserWithModules;
 
 type AuthContextValue = {
   token: string | null;
@@ -18,6 +20,7 @@ type AuthContextValue = {
   isAdmin: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
   logout: () => void;
 };
 
@@ -29,6 +32,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [allowedModules, setAllowedModules] = useState<ModuleKey[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const refreshProfile = async () => {
+    const me = await apiFetch<MeResponse>("/auth/me");
+    setUser(me);
+    setAllowedModules(normalizeModuleKeys(me.allowed_modules ?? []));
+  };
+
   useEffect(() => {
     setAuthToken(token);
     if (!token) {
@@ -38,11 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setLoading(true);
-    apiFetch<MeResponse>("/auth/me")
-      .then((me) => {
-        setUser(me);
-        setAllowedModules(normalizeModuleKeys(me.allowed_modules ?? []));
-      })
+    refreshProfile()
       .catch(() => {
         window.localStorage.removeItem("bookkeeper-token");
         setToken(null);
@@ -58,13 +63,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin: Boolean(user?.is_admin),
       loading,
       login: async (email, password) => {
-        const response = await apiFetch<{ access_token: string }>("/auth/login", {
+        const response = await apiFetch<{ access_token: string; user: AuthUserWithModules }>("/auth/login", {
           method: "POST",
           body: JSON.stringify({ email, password })
         });
         window.localStorage.setItem("bookkeeper-token", response.access_token);
+        setAuthToken(response.access_token);
+        setUser(response.user);
+        setAllowedModules(normalizeModuleKeys(response.user.allowed_modules ?? []));
         setToken(response.access_token);
       },
+      refreshProfile,
       logout: () => {
         window.localStorage.removeItem("bookkeeper-token");
         setToken(null);

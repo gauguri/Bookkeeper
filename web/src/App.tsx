@@ -55,7 +55,11 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { allowedModules, isAdmin, user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => window.localStorage.getItem("bookkeeper-theme") === "dark");
-  const hasModule = (key?: string) => !key || isAdmin || allowedModules.includes(key);
+  const hasModule = (key?: string) => {
+    if (!key) return true;
+    if (key === "CONTROL") return isAdmin;
+    return isAdmin || allowedModules.includes(key);
+  };
   const filteredSections = navSections.map((section) => ({ ...section, items: section.items.filter((item) => hasModule(item.moduleKey)) })).filter((s) => s.items.length > 0);
 
   useEffect(() => {
@@ -82,6 +86,7 @@ function ProtectedRoute({ moduleKey, children }: { moduleKey?: string; children:
   const { token, loading, isAdmin, allowedModules } = useAuth();
   if (loading) return <div className="p-8">Loading...</div>;
   if (!token) return <Navigate to="/login" replace />;
+  if (moduleKey === "CONTROL" && !isAdmin) return <PlaceholderPage title="Not authorized" />;
   if (moduleKey && !isAdmin && !allowedModules.includes(moduleKey)) return <PlaceholderPage title="Not authorized" />;
   return children;
 }

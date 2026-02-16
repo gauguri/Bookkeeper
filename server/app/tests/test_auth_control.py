@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.auth import hash_password, seed_modules
+from app.auth import hash_password, seed_modules, verify_password
 from app.db import Base, get_db
 from app.main import app
 from app.models import Company, Customer, Inventory, Item, Module, User, UserModuleAccess
@@ -74,6 +74,26 @@ def test_non_admin_cannot_call_control(client):
     response = test_client.get("/api/control/users", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
 
+    create_response = test_client.post(
+        "/api/control/users",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "new@bookkeeper.local",
+            "full_name": "New User",
+            "password": "password123",
+            "role": "EMPLOYEE",
+            "permissions": ["INVOICES"],
+        },
+    )
+    assert create_response.status_code == 403
+
+    update_response = test_client.put(
+        "/api/control/users/1",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"full_name": "Nope", "role": "EMPLOYEE", "is_active": True, "permissions": ["INVOICES"]},
+    )
+    assert update_response.status_code == 403
+
 
 @pytest.mark.real_auth
 def test_module_permission_denies_for_missing_access(client):
@@ -81,6 +101,76 @@ def test_module_permission_denies_for_missing_access(client):
     token = _login(test_client, "staff@bookkeeper.local")
     response = test_client.get("/api/sales-requests", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
+
+
+@pytest.mark.real_auth
+def test_admin_can_manage_user_permissions_and_deactivate(client):
+    test_client, _ = client
+    token = _login(test_client, "admin@bookkeeper.local")
+
+    create_response = test_client.post(
+        "/api/control/users",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "operator@bookkeeper.local",
+            "full_name": "Operator",
+            "password": "password123",
+            "role": "EMPLOYEE",
+            "permissions": ["INVOICES", "PAYMENTS"],
+        },
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["permissions"] == ["INVOICES", "PAYMENTS"]
+
+    update_response = test_client.put(
+        f"/api/control/users/{created['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"full_name": "Operator Updated", "role": "EMPLOYEE", "is_active": False, "permissions": ["PAYMENTS"]},
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["full_name"] == "Operator Updated"
+    assert updated["is_active"] is False
+    assert updated["permissions"] == ["PAYMENTS"]
+
+
+@pytest.mark.real_auth
+def test_control_rejects_invalid_permission(client):
+    test_client, _ = client
+    token = _login(test_client, "admin@bookkeeper.local")
+
+    response = test_client.post(
+        "/api/control/users",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "badperm@bookkeeper.local",
+            "full_name": "Bad Permission",
+            "password": "password123",
+            "role": "EMPLOYEE",
+            "permissions": ["NOT_A_REAL_MODULE"],
+        },
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.real_auth
+def test_control_reset_password_updates_hash(client):
+    test_client, session_local = client
+    token = _login(test_client, "admin@bookkeeper.local")
+    with session_local() as db:
+        staff_id = db.query(User.id).filter(User.email == "staff@bookkeeper.local").scalar()
+
+    response = test_client.post(
+        f"/api/control/users/{staff_id}/reset-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"new_password": "new-password-123"},
+    )
+    assert response.status_code == 204
+
+    with session_local() as db:
+        refreshed_staff = db.query(User).filter(User.id == staff_id).first()
+        assert verify_password("new-password-123", refreshed_staff.password_hash)
 
 
 @pytest.mark.real_auth

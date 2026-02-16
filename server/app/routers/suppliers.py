@@ -5,13 +5,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_module
+from app.module_keys import ModuleKey
 from app.db import get_db
 from app.models import InvoiceLine, Item, PurchaseOrder, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.suppliers import schemas
 from app.suppliers.service import get_supplier_link, set_preferred_supplier
 
 
-router = APIRouter(prefix="/api", tags=["suppliers"], dependencies=[Depends(require_module("SUPPLIERS"))])
+router = APIRouter(prefix="/api", tags=["suppliers"], dependencies=[Depends(require_module(ModuleKey.SUPPLIERS.value))])
 
 
 @router.get("/suppliers", response_model=List[schemas.SupplierResponse])

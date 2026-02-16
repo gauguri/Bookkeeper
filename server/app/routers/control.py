@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import MODULE_DEFINITIONS, hash_password, replace_user_module_access, require_admin, seed_modules
+from app.auth import hash_password, replace_user_module_access, require_admin, seed_modules
 from app.db import get_db
 from app.models import Module, User, UserModuleAccess
+from app.module_keys import MODULE_KEYS
 
 router = APIRouter(prefix="/api/control", tags=["control"], dependencies=[Depends(require_admin)])
 
-MODULE_KEYS = [key for key, _ in MODULE_DEFINITIONS]
 
 
 class ControlModulesResponse(BaseModel):

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Module, User, UserModuleAccess
+from app.module_keys import MODULE_DEFINITIONS, MODULE_KEY_SET
 
 SECRET_KEY = "bookkeeper-dev-secret"
 ALGORITHM = "HS256"
@@ -16,25 +17,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-MODULE_DEFINITIONS: list[tuple[str, str]] = [
-    ("DASHBOARD", "Dashboard"),
-    ("CUSTOMERS", "Customers"),
-    ("ITEMS", "Items"),
-    ("SALES_REQUESTS", "Sales Requests"),
-    ("INVOICES", "Invoices"),
-    ("PAYMENTS", "Payments"),
-    ("SUPPLIERS", "Suppliers"),
-    ("PURCHASE_ORDERS", "Purchase Orders"),
-    ("INVENTORY", "Inventory"),
-    ("CHART_OF_ACCOUNTS", "Chart of Accounts"),
-    ("EXPENSES", "Expenses"),
-    ("REPORTS", "Reports"),
-    ("IMPORT", "Import"),
-    ("BANKING", "Banking"),
-    ("CONTROL", "Control"),
-]
-
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -53,7 +35,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 def _get_allowed_modules(db: Session, user: User) -> list[str]:
     if user.is_admin:
-        return [key for key, _ in MODULE_DEFINITIONS]
+        return [key.value for key, _ in MODULE_DEFINITIONS]
 
     rows = (
         db.query(Module.key)
@@ -108,13 +90,16 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 def seed_modules(db: Session) -> None:
     existing = {row[0] for row in db.query(Module.key).all()}
-    for key, name in MODULE_DEFINITIONS:
-        if key not in existing:
-            db.add(Module(key=key, name=name))
+    for module_key, name in MODULE_DEFINITIONS:
+        if module_key.value not in existing:
+            db.add(Module(key=module_key.value, name=name))
 
 
 def replace_user_module_access(db: Session, user_id: int, module_keys: Iterable[str]) -> list[str]:
     module_keys = list(dict.fromkeys(module_keys))
+    invalid = [key for key in module_keys if key not in MODULE_KEY_SET]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unknown module keys: {', '.join(invalid)}")
     modules = db.query(Module).filter(Module.key.in_(module_keys)).all() if module_keys else []
     found_keys = {module.key for module in modules}
     invalid = [key for key in module_keys if key not in found_keys]

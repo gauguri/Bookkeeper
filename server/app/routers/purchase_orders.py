@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_module
+from app.module_keys import ModuleKey
 from app.db import get_db
 from app.models import Account, PurchaseOrder, PurchaseOrderLine
 from app.purchasing import schemas
@@ -27,7 +28,7 @@ from app.purchasing.service import (
 router = APIRouter(
     prefix="/api/purchase-orders",
     tags=["purchase-orders"],
-    dependencies=[Depends(require_module("PURCHASE_ORDERS"))],
+    dependencies=[Depends(require_module(ModuleKey.PURCHASE_ORDERS.value))],
 )
 
 

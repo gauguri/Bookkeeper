@@ -34,10 +34,13 @@ def client():
         seed_modules(db)
         admin = User(company_id=company.id, email="admin@bookkeeper.local", full_name="Admin", password_hash=hash_password("password123"), is_admin=True, is_active=True, role="admin")
         staff = User(company_id=company.id, email="staff@bookkeeper.local", full_name="Staff", password_hash=hash_password("password123"), is_admin=False, is_active=True, role="user")
-        db.add_all([admin, staff])
+        limited_staff = User(company_id=company.id, email="limited@bookkeeper.local", full_name="Limited", password_hash=hash_password("password123"), is_admin=False, is_active=True, role="user")
+        db.add_all([admin, staff, limited_staff])
         db.flush()
         invoices_module = db.query(Module).filter(Module.key == "INVOICES").first()
+        sales_requests_module = db.query(Module).filter(Module.key == "SALES_REQUESTS").first()
         db.add(UserModuleAccess(user_id=staff.id, module_id=invoices_module.id))
+        db.add(UserModuleAccess(user_id=limited_staff.id, module_id=sales_requests_module.id))
         customer = Customer(name="Acme")
         item = Item(name="Widget", unit_price=10, on_hand_qty=20, reserved_qty=0)
         db.add_all([customer, item])
@@ -102,6 +105,21 @@ def test_module_permission_denies_for_missing_access(client):
     response = test_client.get("/api/sales-requests", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
 
+
+
+
+@pytest.mark.real_auth
+def test_invoice_api_requires_invoices_module(client):
+    test_client, _ = client
+
+    invoices_token = _login(test_client, "staff@bookkeeper.local")
+    invoices_response = test_client.get("/api/invoices", headers={"Authorization": f"Bearer {invoices_token}"})
+    assert invoices_response.status_code == 200
+
+    no_invoices_token = _login(test_client, "limited@bookkeeper.local")
+    no_invoices_response = test_client.get("/api/invoices", headers={"Authorization": f"Bearer {no_invoices_token}"})
+    assert no_invoices_response.status_code == 403
+    assert no_invoices_response.json()["detail"] == "Not authorized for this module"
 
 @pytest.mark.real_auth
 def test_admin_can_manage_user_permissions_and_deactivate(client):

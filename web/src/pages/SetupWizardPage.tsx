@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiRequestError, apiFetch } from "../api";
+import { MODULES } from "../constants/modules";
 
 type BootstrapStatus = { needs_bootstrap: boolean };
 type ModuleOption = { key: string; name: string };
@@ -22,15 +23,15 @@ type BootstrapUserCreate = {
 };
 
 const MODULE_OPTIONS: ModuleOption[] = [
-  { key: "INVOICES", name: "Invoices" },
-  { key: "SALES_REQUESTS", name: "Sales Requests" },
-  { key: "PURCHASE_ORDERS", name: "Purchase Orders" },
-  { key: "INVENTORY", name: "Inventory" },
-  { key: "SUPPLIERS", name: "Suppliers" },
-  { key: "CHART_OF_ACCOUNTS", name: "Chart of Accounts" },
-  { key: "PAYMENTS", name: "Payments" },
-  { key: "EXPENSES", name: "Expenses" },
-  { key: "REPORTS", name: "Reports" }
+  { key: MODULES.INVOICES, name: "Invoices" },
+  { key: MODULES.SALES_REQUESTS, name: "Sales Requests" },
+  { key: MODULES.PURCHASE_ORDERS, name: "Purchase Orders" },
+  { key: MODULES.INVENTORY, name: "Inventory" },
+  { key: MODULES.SUPPLIERS, name: "Suppliers" },
+  { key: MODULES.CHART_OF_ACCOUNTS, name: "Chart of Accounts" },
+  { key: MODULES.PAYMENTS, name: "Payments" },
+  { key: MODULES.EXPENSES, name: "Expenses" },
+  { key: MODULES.REPORTS, name: "Reports" }
 ];
 
 const EMPTY_USER: AdditionalUser = {

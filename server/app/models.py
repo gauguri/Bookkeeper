@@ -474,6 +474,34 @@ class Inventory(Base):
     item = relationship("Item")
 
 
+class InventoryReservation(Base):
+    __tablename__ = "inventory_reservations"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    qty_reserved = Column(Numeric(14, 2), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    released_at = Column(DateTime, nullable=True)
+
+    item = relationship("Item")
+
+
+class InventoryMovement(Base):
+    __tablename__ = "inventory_movements"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty_delta = Column(Numeric(14, 2), nullable=False)
+    reason = Column(String(50), nullable=False)
+    ref_type = Column(String(50), nullable=False)
+    ref_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+
+
 class PurchaseOrderLine(Base):
     __tablename__ = "purchase_order_lines"
 

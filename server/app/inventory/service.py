@@ -2,12 +2,44 @@ from datetime import datetime
 from decimal import Decimal
 import logging
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Inventory, InventoryTransaction, Item, PurchaseOrder
+from app.models import (
+    Inventory,
+    InventoryMovement,
+    InventoryReservation,
+    InventoryTransaction,
+    Item,
+    PurchaseOrder,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def get_reserved_qty(db: Session, item_id: int) -> Decimal:
+    reserved = (
+        db.query(func.coalesce(func.sum(InventoryReservation.qty_reserved), 0))
+        .filter(InventoryReservation.item_id == item_id, InventoryReservation.released_at.is_(None))
+        .scalar()
+    )
+    return Decimal(reserved or 0)
+
+
+def get_reserved_qty_map(db: Session, item_ids: list[int]) -> dict[int, Decimal]:
+    if not item_ids:
+        return {}
+    rows = (
+        db.query(InventoryReservation.item_id, func.coalesce(func.sum(InventoryReservation.qty_reserved), 0))
+        .filter(InventoryReservation.item_id.in_(item_ids), InventoryReservation.released_at.is_(None))
+        .group_by(InventoryReservation.item_id)
+        .all()
+    )
+    reserved_by_id = {item_id: Decimal(total or 0) for item_id, total in rows}
+    for item_id in item_ids:
+        reserved_by_id.setdefault(item_id, Decimal("0"))
+    return reserved_by_id
 
 
 def get_available_qty(db: Session, item_id: int, company_id: int | None = None) -> Decimal:
@@ -15,11 +47,15 @@ def get_available_qty(db: Session, item_id: int, company_id: int | None = None) 
     scoped_company_id = company_id  # inventory records are currently global in this app.
 
     inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
-    available_qty = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal("0")
+    on_hand = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal("0")
+    reserved = get_reserved_qty(db, item_id)
+    available_qty = on_hand - reserved
     logger.debug(
-        "Inventory availability lookup: item_id=%s company_id=%s available_qty=%s",
+        "Inventory availability lookup: item_id=%s company_id=%s on_hand=%s reserved=%s available_qty=%s",
         item_id,
         scoped_company_id,
+        on_hand,
+        reserved,
         available_qty,
     )
     return available_qty
@@ -27,10 +63,14 @@ def get_available_qty(db: Session, item_id: int, company_id: int | None = None) 
 
 def get_available_qty_map(db: Session, item_ids: list[int], company_id: int | None = None) -> dict[int, Decimal]:
     scoped_company_id = company_id  # inventory records are currently global in this app.
-    rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
-    available_by_id = {row.item_id: Decimal(row.quantity_on_hand or 0) for row in rows}
+    inventory_rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+    on_hand_by_id = {row.item_id: Decimal(row.quantity_on_hand or 0) for row in inventory_rows}
+    reserved_by_id = get_reserved_qty_map(db, item_ids)
+
+    available_by_id: dict[int, Decimal] = {}
     for item_id in item_ids:
-        available_by_id.setdefault(item_id, Decimal("0"))
+        available_by_id[item_id] = on_hand_by_id.get(item_id, Decimal("0")) - reserved_by_id.get(item_id, Decimal("0"))
+
     logger.debug(
         "Bulk inventory availability lookup: item_ids=%s company_id=%s available_by_id=%s",
         item_ids,
@@ -60,6 +100,27 @@ def create_inventory_transaction(
     )
     db.add(txn)
     return txn
+
+
+def create_inventory_movement(
+    db: Session,
+    *,
+    item_id: int,
+    qty_delta: Decimal,
+    reason: str,
+    ref_type: str,
+    ref_id: int,
+) -> InventoryMovement:
+    movement = InventoryMovement(
+        item_id=item_id,
+        qty_delta=qty_delta,
+        reason=reason,
+        ref_type=ref_type,
+        ref_id=ref_id,
+        created_at=datetime.utcnow(),
+    )
+    db.add(movement)
+    return movement
 
 
 def adjust_inventory(
@@ -99,6 +160,44 @@ def reserve_inventory(
         reference_type=reference_type,
         reference_id=reference_id,
     )
+
+
+def reserve_inventory_record(
+    db: Session,
+    *,
+    item_id: int,
+    qty_reserved: Decimal,
+    sales_request_id: int | None = None,
+    invoice_id: int | None = None,
+) -> InventoryReservation:
+    reservation = InventoryReservation(
+        item_id=item_id,
+        sales_request_id=sales_request_id,
+        invoice_id=invoice_id,
+        qty_reserved=qty_reserved,
+        created_at=datetime.utcnow(),
+    )
+    db.add(reservation)
+    return reservation
+
+
+def release_reservations(
+    db: Session,
+    *,
+    sales_request_id: int | None = None,
+    invoice_id: int | None = None,
+) -> list[InventoryReservation]:
+    query = db.query(InventoryReservation).filter(InventoryReservation.released_at.is_(None))
+    if sales_request_id is not None:
+        query = query.filter(InventoryReservation.sales_request_id == sales_request_id)
+    if invoice_id is not None:
+        query = query.filter(InventoryReservation.invoice_id == invoice_id)
+
+    rows = query.with_for_update().all()
+    released_at = datetime.utcnow()
+    for row in rows:
+        row.released_at = released_at
+    return rows
 
 
 def receive_inventory(

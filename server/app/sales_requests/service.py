@@ -4,7 +4,12 @@ from typing import Optional
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.inventory.service import get_available_qty
+from app.inventory.service import (
+    get_available_qty,
+    get_reserved_qty,
+    release_reservations,
+    reserve_inventory_record,
+)
 from app.models import Company, Customer, Inventory, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
 from app.suppliers.service import get_supplier_link
 
@@ -42,6 +47,7 @@ def _resolve_created_by_user_id(db: Session, created_by_user_id: Optional[int]) 
     )
     return created_by_user_id if exists is not None else None
 
+
 class InventoryQuantityExceededError(ValueError):
     def __init__(self, violations: list[dict]):
         self.violations = violations
@@ -63,6 +69,15 @@ class InsufficientInventoryError(ValueError):
 class SalesRequestImmutableError(ValueError):
     pass
 
+
+def _reserve_sales_request_lines(db: Session, sales_request: SalesRequest) -> None:
+    for line in sales_request.lines:
+        reserve_inventory_record(
+            db,
+            item_id=line.item_id,
+            qty_reserved=Decimal(line.quantity or 0),
+            sales_request_id=sales_request.id,
+        )
 
 
 def create_sales_request(db: Session, payload: dict) -> SalesRequest:
@@ -120,6 +135,8 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
         raise InventoryQuantityExceededError(inventory_violations)
 
     db.add(sales_request)
+    db.flush()
+    _reserve_sales_request_lines(db, sales_request)
     return sales_request
 
 
@@ -150,6 +167,9 @@ def update_open_sales_request(db: Session, sales_request: SalesRequest, payload:
     inventory_violations = []
     company_id = _get_default_company_id(db)
     new_lines: list[SalesRequestLine] = []
+
+    release_reservations(db, sales_request_id=sales_request.id)
+
     for line in line_items:
         item = db.query(Item).filter(Item.id == line["item_id"]).first()
         if not item:
@@ -183,6 +203,8 @@ def update_open_sales_request(db: Session, sales_request: SalesRequest, payload:
 
     sales_request.lines.clear()
     sales_request.lines.extend(new_lines)
+    db.flush()
+    _reserve_sales_request_lines(db, sales_request)
     return sales_request
 
 
@@ -191,38 +213,12 @@ def calculate_sales_request_total(sales_request: SalesRequest) -> Decimal:
 
 
 def update_sales_request_status(sales_request: SalesRequest, status: str):
-    was_closed = sales_request.status == "CLOSED"
     sales_request.status = status
-    return not was_closed and status == "CLOSED"
 
 
 def deduct_inventory_for_sales_request(db: Session, sales_request: SalesRequest) -> None:
-    if sales_request.inventory_deducted_at is not None:
-        return
-
-    deductions: list[tuple[Inventory, Decimal]] = []
-    for line in sales_request.lines:
-        inventory = (
-            db.query(Inventory)
-            .filter(Inventory.item_id == line.item_id)
-            .with_for_update()
-            .first()
-        )
-        if inventory is None:
-            raise MissingInventoryRecordError(f"No inventory record for item: {line.item_name}")
-
-        line_qty = Decimal(line.quantity or 0)
-        on_hand_qty = Decimal(inventory.quantity_on_hand or 0)
-        if on_hand_qty < line_qty:
-            raise InsufficientInventoryError(
-                f"Insufficient inventory for {line.item_name} (requested {line_qty}, available {on_hand_qty})."
-            )
-        deductions.append((inventory, line_qty))
-
-    for inventory, line_qty in deductions:
-        inventory.quantity_on_hand = Decimal(inventory.quantity_on_hand or 0) - line_qty
-
-    sales_request.inventory_deducted_at = datetime.utcnow()
+    """Deprecated: inventory deduction now happens only when invoice is shipped."""
+    return None
 
 
 def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dict]:
@@ -275,6 +271,12 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
                     "is_preferred": si.is_preferred,
                     "lead_time_days": si.lead_time_days,
                 })
+        on_hand_qty = Decimal("0")
+        reserved_qty = Decimal("0")
+        if item:
+            inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+            on_hand_qty = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal("0")
+            reserved_qty = get_reserved_qty(db, item.id)
         enriched_lines.append({
             "id": line.id,
             "item_id": line.item_id,
@@ -284,8 +286,8 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
             "line_total": line.line_total,
             "invoice_unit_price": matched_invoice_line.unit_price if matched_invoice_line else None,
             "invoice_line_total": matched_invoice_line.line_total if matched_invoice_line else None,
-            "on_hand_qty": item.on_hand_qty if item else Decimal(0),
-            "reserved_qty": item.reserved_qty if item else Decimal(0),
+            "on_hand_qty": on_hand_qty,
+            "reserved_qty": reserved_qty,
             "available_qty": get_available_qty(db, item.id, company_id=company_id) if item else Decimal(0),
             "supplier_options": supplier_options,
         })
@@ -343,7 +345,6 @@ def generate_invoice_from_sales_request(
         supplier_id = sel.get("supplier_id")
         unit_cost = sel.get("unit_cost")
 
-        # Resolve cost from supplier if not overridden
         if unit_cost is None and supplier_id:
             link = get_supplier_link(db, sr_line.item_id, supplier_id)
             if link:
@@ -353,7 +354,6 @@ def generate_invoice_from_sales_request(
             if link:
                 unit_cost = link.landed_cost
 
-        # Determine unit_price: use override, or apply markup to cost, or fall back to SR price
         unit_price = sel.get("unit_price")
         if unit_price is None:
             if unit_cost is not None:
@@ -380,7 +380,7 @@ def generate_invoice_from_sales_request(
         "terms": payload.get("terms"),
         "line_items": invoice_lines_data,
     }
-    invoice = create_invoice(db, invoice_payload)
+    invoice = create_invoice(db, invoice_payload, reserve_stock=False)
     invoice.sales_request_id = sales_request.id
 
     update_sales_request_status(sales_request, "INVOICED")

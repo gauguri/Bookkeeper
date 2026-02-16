@@ -8,12 +8,10 @@ from sqlalchemy.orm import Session
 from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
-from app.models import Customer, Invoice, Item, Payment
+from app.inventory.service import create_inventory_movement, release_reservations
+from app.models import Customer, Inventory, Invoice, Item, Payment
 from app.sales_requests.service import (
-    deduct_inventory_for_sales_request,
     update_sales_request_status,
-    InsufficientInventoryError,
-    MissingInventoryRecordError,
 )
 from app.sales import schemas
 from app.sales.service import (
@@ -247,17 +245,45 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     if invoice.status not in {"SENT", "PARTIALLY_PAID"}:
         raise HTTPException(status_code=400, detail="Only sent invoices can be marked as shipped.")
 
+    reservations = []
+    if invoice.sales_request_id is not None:
+        reservations = release_reservations(db, sales_request_id=invoice.sales_request_id)
+    else:
+        reservations = release_reservations(db, invoice_id=invoice.id)
+
+    reserved_by_item: dict[int, Decimal] = {}
+    for reservation in reservations:
+        reserved_by_item[reservation.item_id] = reserved_by_item.get(reservation.item_id, Decimal("0")) + Decimal(reservation.qty_reserved or 0)
+
+    for line in invoice.lines:
+        if line.item_id is None:
+            continue
+        inventory = db.query(Inventory).filter(Inventory.item_id == line.item_id).with_for_update().first()
+        if inventory is None:
+            raise HTTPException(status_code=400, detail=f"No inventory record for item_id {line.item_id}.")
+
+        qty_shipped = Decimal(line.quantity or 0)
+        if Decimal(inventory.quantity_on_hand or 0) < qty_shipped:
+            raise HTTPException(status_code=409, detail=f"Insufficient inventory for item_id {line.item_id}.")
+
+        if reserved_by_item.get(line.item_id, Decimal("0")) < qty_shipped:
+            raise HTTPException(status_code=409, detail=f"Insufficient reserved inventory for item_id {line.item_id}.")
+
+        inventory.quantity_on_hand = Decimal(inventory.quantity_on_hand or 0) - qty_shipped
+        create_inventory_movement(
+            db,
+            item_id=line.item_id,
+            qty_delta=-qty_shipped,
+            reason="SHIPMENT",
+            ref_type="invoice",
+            ref_id=invoice.id,
+        )
+
     invoice.status = "SHIPPED"
     invoice.shipped_at = datetime.utcnow()
 
     if invoice.sales_request:
         update_sales_request_status(invoice.sales_request, "SHIPPED")
-        try:
-            deduct_inventory_for_sales_request(db, invoice.sales_request)
-        except MissingInventoryRecordError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except InsufficientInventoryError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
 
     db.commit()
     db.refresh(invoice)
@@ -271,6 +297,12 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         raise HTTPException(status_code=404, detail="Invoice not found.")
     if invoice.status in {"PAID", "PARTIALLY_PAID", "SHIPPED"}:
         raise HTTPException(status_code=400, detail="Paid or shipped invoices cannot be voided.")
+
+    if invoice.sales_request_id is not None:
+        release_reservations(db, sales_request_id=invoice.sales_request_id)
+    else:
+        release_reservations(db, invoice_id=invoice.id)
+
     invoice.status = "VOID"
     invoice.amount_due = Decimal("0.00")
     db.commit()

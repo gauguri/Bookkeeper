@@ -5,6 +5,7 @@ from typing import Iterable, List, Optional, Sequence
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.inventory.service import get_available_qty, reserve_inventory_record
 from app.models import Customer, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
 from app.sales.calculations import (
     InvoiceLineInput,
@@ -157,7 +158,7 @@ def list_invoices(
     return query.order_by(Invoice.issue_date.desc(), Invoice.id.desc()).all()
 
 
-def create_invoice(db: Session, payload: dict) -> Invoice:
+def create_invoice(db: Session, payload: dict, *, reserve_stock: bool = True) -> Invoice:
     invoice = Invoice(
         customer_id=payload["customer_id"],
         invoice_number=get_next_invoice_number(db),
@@ -174,6 +175,22 @@ def create_invoice(db: Session, payload: dict) -> Invoice:
     invoice.amount_due = invoice.total
     db.add(invoice)
     db.flush()
+
+    if reserve_stock:
+        for line in invoice.lines:
+            if line.item_id is None:
+                continue
+            available = get_available_qty(db, line.item_id)
+            requested = Decimal(line.quantity or 0)
+            if requested > available:
+                raise ValueError(f"Insufficient available inventory for line item {line.item_id}.")
+            reserve_inventory_record(
+                db,
+                item_id=line.item_id,
+                qty_reserved=requested,
+                invoice_id=invoice.id,
+            )
+
     return invoice
 
 

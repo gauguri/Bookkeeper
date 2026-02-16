@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Inventory, Invoice, InvoiceLine, Item, SalesRequest, SalesRequestLine
+from app.models import Customer, Inventory, InventoryReservation, Invoice, InvoiceLine, Item, SalesRequest, SalesRequestLine
 
 
 @pytest.fixture()
@@ -56,6 +56,7 @@ def client():
                 )
             )
             db.add(Inventory(item_id=item.id, quantity_on_hand=Decimal("10.00"), landed_unit_cost=Decimal("4.00")))
+            db.add(InventoryReservation(item_id=item.id, sales_request_id=sr.id, qty_reserved=Decimal("3.00")))
 
             invoice = Invoice(
                 customer_id=customer.id,
@@ -122,8 +123,10 @@ def test_shipping_deducts_inventory_once(client: TestClient):
     db = next(db_gen)
     try:
         inventory = db.query(Inventory).filter(Inventory.item_id == 1).first()
+        reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
         assert inventory is not None
         assert inventory.quantity_on_hand == Decimal("7.00")
+        assert reservation.released_at is not None
     finally:
         db_gen.close()
 
@@ -134,7 +137,34 @@ def test_shipping_deducts_inventory_once(client: TestClient):
     db = next(db_gen)
     try:
         inventory = db.query(Inventory).filter(Inventory.item_id == 1).first()
+        reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
         assert inventory is not None
         assert inventory.quantity_on_hand == Decimal("7.00")
+        assert reservation.released_at is not None
+    finally:
+        db_gen.close()
+
+
+def test_void_invoice_releases_reservation_without_on_hand_change(client: TestClient):
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        invoice = db.query(Invoice).filter(Invoice.id == 1).first()
+        invoice.status = "SENT"
+        db.commit()
+        before = db.query(Inventory).filter(Inventory.item_id == 1).first().quantity_on_hand
+    finally:
+        db_gen.close()
+
+    response = client.post("/api/invoices/1/void")
+    assert response.status_code == 200
+
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        inventory = db.query(Inventory).filter(Inventory.item_id == 1).first()
+        reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
+        assert inventory.quantity_on_hand == before
+        assert reservation.released_at is not None
     finally:
         db_gen.close()

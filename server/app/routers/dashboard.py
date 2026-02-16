@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.auth import require_module
+from app.module_keys import ModuleKey
 from app.dashboard.schemas import RevenueDashboardResponse
 from app.dashboard.service import get_revenue_dashboard_metrics
 from app.db import get_db
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_module("DASHBOARD"))])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_module(ModuleKey.DASHBOARD.value))])
 
 
 @router.get("/revenue", response_model=RevenueDashboardResponse)

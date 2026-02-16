@@ -151,17 +151,27 @@ export default function InvoicesPage() {
   };
 
   const loadData = async () => {
+    setError("");
     try {
-      const [customersData, itemsData, invoicesData] = await Promise.all([
-        apiFetch<Customer[]>("/customers"),
-        apiFetch<Item[]>("/items"),
-        loadInvoices()
-      ]);
-      setCustomers(customersData);
-      setItems(itemsData);
+      const invoicesData = await loadInvoices();
       setInvoices(invoicesData);
     } catch (err) {
       setError((err as Error).message);
+      return;
+    }
+
+    const [customersResult, itemsResult] = await Promise.allSettled([apiFetch<Customer[]>("/customers"), apiFetch<Item[]>("/items")]);
+
+    if (customersResult.status === "fulfilled") {
+      setCustomers(customersResult.value);
+    } else if (!(customersResult.reason as Error).message.toLowerCase().includes("not authorized")) {
+      setError((customersResult.reason as Error).message);
+    }
+
+    if (itemsResult.status === "fulfilled") {
+      setItems(itemsResult.value);
+    } else if (!(itemsResult.reason as Error).message.toLowerCase().includes("not authorized")) {
+      setError((itemsResult.reason as Error).message);
     }
   };
 

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch, setAuthToken } from "./api";
+import { ModuleKey, normalizeModuleKeys } from "./constants/modules";
 
 type AuthUser = {
   id: number;
@@ -13,7 +14,7 @@ type MeResponse = AuthUser & { allowed_modules: string[] };
 type AuthContextValue = {
   token: string | null;
   user: AuthUser | null;
-  allowedModules: string[];
+  allowedModules: ModuleKey[];
   isAdmin: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -25,7 +26,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(() => window.localStorage.getItem("bookkeeper-token"));
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [allowedModules, setAllowedModules] = useState<string[]>([]);
+  const [allowedModules, setAllowedModules] = useState<ModuleKey[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     apiFetch<MeResponse>("/auth/me")
       .then((me) => {
         setUser(me);
-        setAllowedModules(me.allowed_modules ?? []);
+        setAllowedModules(normalizeModuleKeys(me.allowed_modules ?? []));
       })
       .catch(() => {
         window.localStorage.removeItem("bookkeeper-token");

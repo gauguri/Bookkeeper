@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.auth import get_current_user, require_module
+from app.module_keys import ModuleKey
 from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
@@ -26,7 +27,7 @@ from app.sales_requests.service import (
 router = APIRouter(
     prefix="/api/sales-requests",
     tags=["sales-requests"],
-    dependencies=[Depends(require_module("SALES_REQUESTS"))],
+    dependencies=[Depends(require_module(ModuleKey.SALES_REQUESTS.value))],
 )
 
 

@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import (
-    MODULE_DEFINITIONS,
     create_access_token,
     get_allowed_modules,
     get_current_user,
@@ -19,6 +18,7 @@ from app.auth import (
 )
 from app.db import get_db
 from app.models import Company, User
+from app.module_keys import MODULE_DEFINITIONS
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -121,7 +121,7 @@ def bootstrap_admin(payload: BootstrapAdminPayload, db: Session = Depends(get_db
         db.add(user)
         db.flush()
 
-        all_module_keys = [key for key, _ in MODULE_DEFINITIONS]
+        all_module_keys = [key.value for key, _ in MODULE_DEFINITIONS]
         replace_user_module_access(db, user.id, all_module_keys)
         db.commit()
     except HTTPException:
@@ -176,7 +176,7 @@ def bootstrap_users(
             db.add(user)
             db.flush()
 
-            module_keys = [key for key, _ in MODULE_DEFINITIONS] if is_admin else item.permissions
+            module_keys = [key.value for key, _ in MODULE_DEFINITIONS] if is_admin else item.permissions
             replace_user_module_access(db, user.id, module_keys)
             created_users.append(_serialize_user(user))
         db.commit()
@@ -220,7 +220,7 @@ def dev_reset_admin(payload: DevResetPayload, db: Session = Depends(get_db)):
         admin.is_admin = True
         admin.is_active = True
 
-    replace_user_module_access(db, admin.id, [key for key, _ in MODULE_DEFINITIONS])
+    replace_user_module_access(db, admin.id, [key.value for key, _ in MODULE_DEFINITIONS])
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,6 +3,8 @@ import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion";
 import { Banknote, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sun, Truck, Users } from "lucide-react";
 import { useAuth } from "./auth";
+import { canAccess } from "./authz";
+import { MODULES, ModuleKey } from "./constants/modules";
 import { apiFetch } from "./api";
 import ChartOfAccountsBulkImportPage from "./pages/ChartOfAccountsBulkImportPage";
 import ChartOfAccountsPage from "./pages/ChartOfAccountsPage";
@@ -26,28 +28,28 @@ import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
 
 type BootstrapStatus = { needs_bootstrap: boolean };
-type NavItem = { label: string; to: string; icon: any; moduleKey?: string; children?: NavItem[] };
+type NavItem = { label: string; to: string; icon: any; moduleKey?: ModuleKey; children?: NavItem[] };
 const navSections: { title: string; items: NavItem[] }[] = [
   { title: "Sales", items: [
-    { label: "Overview", to: "/sales", icon: LayoutGrid, moduleKey: "DASHBOARD" },
-    { label: "Customers", to: "/sales/customers", icon: Users, moduleKey: "CUSTOMERS" },
-    { label: "Items", to: "/sales/items", icon: ClipboardList, moduleKey: "ITEMS" },
-    { label: "Sales Requests", to: "/sales-requests", icon: ClipboardList, moduleKey: "SALES_REQUESTS" },
-    { label: "Invoices", to: "/sales/invoices", icon: FileText, moduleKey: "INVOICES" },
-    { label: "Payments", to: "/sales/payments", icon: Banknote, moduleKey: "PAYMENTS" },
-    { label: "Reports", to: "/sales/reports", icon: Layers, moduleKey: "REPORTS" }
+    { label: "Overview", to: "/sales", icon: LayoutGrid, moduleKey: MODULES.DASHBOARD },
+    { label: "Customers", to: "/sales/customers", icon: Users, moduleKey: MODULES.CUSTOMERS },
+    { label: "Items", to: "/sales/items", icon: ClipboardList, moduleKey: MODULES.ITEMS },
+    { label: "Sales Requests", to: "/sales-requests", icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
+    { label: "Invoices", to: "/sales/invoices", icon: FileText, moduleKey: MODULES.INVOICES },
+    { label: "Payments", to: "/sales/payments", icon: Banknote, moduleKey: MODULES.PAYMENTS },
+    { label: "Reports", to: "/sales/reports", icon: Layers, moduleKey: MODULES.REPORTS }
   ]},
   { title: "Accounting", items: [
-    { label: "Expenses", to: "/expenses", icon: FileText, moduleKey: "EXPENSES" },
-    { label: "Banking", to: "/banking", icon: Banknote, moduleKey: "BANKING" },
-    { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: "CHART_OF_ACCOUNTS", children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: "IMPORT" }] }
+    { label: "Expenses", to: "/expenses", icon: FileText, moduleKey: MODULES.EXPENSES },
+    { label: "Banking", to: "/banking", icon: Banknote, moduleKey: MODULES.BANKING },
+    { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: MODULES.CHART_OF_ACCOUNTS, children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: MODULES.IMPORT }] }
   ]},
   { title: "Purchasing", items: [
-    { label: "Suppliers", to: "/purchasing/suppliers", icon: Truck, moduleKey: "SUPPLIERS" },
-    { label: "Purchase Orders", to: "/purchasing/purchase-orders", icon: PackageCheck, moduleKey: "PURCHASE_ORDERS" }
+    { label: "Suppliers", to: "/purchasing/suppliers", icon: Truck, moduleKey: MODULES.SUPPLIERS },
+    { label: "Purchase Orders", to: "/purchasing/purchase-orders", icon: PackageCheck, moduleKey: MODULES.PURCHASE_ORDERS }
   ]},
-  { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: "INVENTORY" }]},
-  { title: "Admin", items: [{ label: "Control", to: "/control", icon: Settings, moduleKey: "CONTROL" }]}
+  { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: MODULES.INVENTORY }]},
+  { title: "Admin", items: [{ label: "Control", to: "/control", icon: Settings, moduleKey: MODULES.CONTROL }]}
 ];
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -55,10 +57,9 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { allowedModules, isAdmin, user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(() => window.localStorage.getItem("bookkeeper-theme") === "dark");
-  const hasModule = (key?: string) => {
-    if (!key) return true;
-    if (key === "CONTROL") return isAdmin;
-    return isAdmin || allowedModules.includes(key);
+  const hasModule = (moduleKey?: ModuleKey) => {
+    if (!moduleKey) return true;
+    return canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules });
   };
   const filteredSections = navSections.map((section) => ({ ...section, items: section.items.filter((item) => hasModule(item.moduleKey)) })).filter((s) => s.items.length > 0);
 
@@ -82,12 +83,11 @@ function Layout({ children }: { children: React.ReactNode }) {
   </div>;
 }
 
-function ProtectedRoute({ moduleKey, children }: { moduleKey?: string; children: JSX.Element }) {
+function ProtectedRoute({ moduleKey, children }: { moduleKey?: ModuleKey; children: JSX.Element }) {
   const { token, loading, isAdmin, allowedModules } = useAuth();
   if (loading) return <div className="p-8">Loading...</div>;
   if (!token) return <Navigate to="/login" replace />;
-  if (moduleKey === "CONTROL" && !isAdmin) return <PlaceholderPage title="Not authorized" />;
-  if (moduleKey && !isAdmin && !allowedModules.includes(moduleKey)) return <PlaceholderPage title="Not authorized" />;
+  if (moduleKey && !canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules })) return <PlaceholderPage title="Not authorized for this module" />;
   return children;
 }
 
@@ -118,28 +118,28 @@ export default function App() {
           <Route path="/setup" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="*" element={<Layout><Routes>
-            <Route path="/" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
-            <Route path="/sales" element={<ProtectedRoute moduleKey="DASHBOARD"><SalesLanding /></ProtectedRoute>} />
-            <Route path="/sales/customers" element={<ProtectedRoute moduleKey="CUSTOMERS"><CustomersPage /></ProtectedRoute>} />
-            <Route path="/sales/items" element={<ProtectedRoute moduleKey="ITEMS"><ItemsPage /></ProtectedRoute>} />
-            <Route path="/sales-requests" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestsPage /></ProtectedRoute>} />
-            <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestDetailPage /></ProtectedRoute>} />
-            <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey="SALES_REQUESTS"><SalesRequestEditPage /></ProtectedRoute>} />
-            <Route path="/sales/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
-            <Route path="/sales/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
-            <Route path="/invoices" element={<ProtectedRoute moduleKey="INVOICES"><InvoicesPage /></ProtectedRoute>} />
-            <Route path="/invoices/:invoiceId" element={<ProtectedRoute moduleKey="INVOICES"><InvoiceDetailPage /></ProtectedRoute>} />
-            <Route path="/sales/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
-            <Route path="/payments" element={<ProtectedRoute moduleKey="PAYMENTS"><PaymentsPage /></ProtectedRoute>} />
-            <Route path="/sales/reports" element={<ProtectedRoute moduleKey="REPORTS"><ReportsPage /></ProtectedRoute>} />
-            <Route path="/expenses" element={<ProtectedRoute moduleKey="EXPENSES"><ExpensesPage /></ProtectedRoute>} />
-            <Route path="/banking" element={<ProtectedRoute moduleKey="BANKING"><PlaceholderPage title="Banking" /></ProtectedRoute>} />
-            <Route path="/accounts" element={<ProtectedRoute moduleKey="CHART_OF_ACCOUNTS"><ChartOfAccountsPage /></ProtectedRoute>} />
-            <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey="IMPORT"><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
-            <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey="SUPPLIERS"><SuppliersPage /></ProtectedRoute>} />
-            <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey="PURCHASE_ORDERS"><PurchaseOrdersPage /></ProtectedRoute>} />
-            <Route path="/inventory" element={<ProtectedRoute moduleKey="INVENTORY"><InventoryPage /></ProtectedRoute>} />
-            <Route path="/control" element={<ProtectedRoute moduleKey="CONTROL"><ControlPage /></ProtectedRoute>} />
+            <Route path="/" element={<ProtectedRoute moduleKey={MODULES.DASHBOARD}><SalesLanding /></ProtectedRoute>} />
+            <Route path="/sales" element={<ProtectedRoute moduleKey={MODULES.DASHBOARD}><SalesLanding /></ProtectedRoute>} />
+            <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
+            <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />
+            <Route path="/sales-requests" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestsPage /></ProtectedRoute>} />
+            <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestDetailPage /></ProtectedRoute>} />
+            <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestEditPage /></ProtectedRoute>} />
+            <Route path="/sales/invoices" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/sales/invoices/:invoiceId" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoiceDetailPage /></ProtectedRoute>} />
+            <Route path="/invoices" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/invoices/:invoiceId" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoiceDetailPage /></ProtectedRoute>} />
+            <Route path="/sales/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />
+            <Route path="/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />
+            <Route path="/sales/reports" element={<ProtectedRoute moduleKey={MODULES.REPORTS}><ReportsPage /></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute moduleKey={MODULES.EXPENSES}><ExpensesPage /></ProtectedRoute>} />
+            <Route path="/banking" element={<ProtectedRoute moduleKey={MODULES.BANKING}><PlaceholderPage title="Banking" /></ProtectedRoute>} />
+            <Route path="/accounts" element={<ProtectedRoute moduleKey={MODULES.CHART_OF_ACCOUNTS}><ChartOfAccountsPage /></ProtectedRoute>} />
+            <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
+            <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
+            <Route path="/inventory" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><InventoryPage /></ProtectedRoute>} />
+            <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
           </Routes></Layout>} />
         </>
       )}

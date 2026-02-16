@@ -1,6 +1,6 @@
 """remove forced seeded admin for bootstrap
 
-Revision ID: 0013_remove_seeded_admin_for_bootstrap
+Revision ID: 0013_bootstrap_cleanup
 Revises: 0012_control_auth_access
 Create Date: 2026-02-15
 """
@@ -8,7 +8,7 @@ Create Date: 2026-02-15
 from alembic import op
 
 
-revision = "0013_remove_seeded_admin_for_bootstrap"
+revision = "0013_bootstrap_cleanup"
 down_revision = "0012_control_auth_access"
 branch_labels = None
 depends_on = None

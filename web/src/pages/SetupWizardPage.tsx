@@ -13,6 +13,14 @@ type AdditionalUser = {
   permissions: string[];
 };
 
+type BootstrapUserCreate = {
+  email: string;
+  full_name?: string;
+  password: string;
+  role: "ADMIN" | "EMPLOYEE";
+  permissions: string[];
+};
+
 const MODULE_OPTIONS: ModuleOption[] = [
   { key: "INVOICES", name: "Invoices" },
   { key: "SALES_REQUESTS", name: "Sales Requests" },
@@ -38,6 +46,7 @@ export default function SetupWizardPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [adminEmail, setAdminEmail] = useState("admin@bookkeeper.local");
   const [adminPassword, setAdminPassword] = useState("");
@@ -114,15 +123,48 @@ export default function SetupWizardPage() {
       return;
     }
 
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const candidateUsers = users.filter(
+      (user) => user.email.trim().length > 0 || user.password.trim().length > 0 || user.full_name.trim().length > 0
+    );
+
+    for (const user of candidateUsers) {
+      if (!user.email.trim()) {
+        setError("Each additional user must include an email.");
+        return;
+      }
+      if (!EMAIL_REGEX.test(user.email.trim())) {
+        setError(`Invalid email format for ${user.email || "a user"}.`);
+        return;
+      }
+      if (!user.password.trim()) {
+        setError(`Password is required for ${user.email}.`);
+        return;
+      }
+      if (user.password.length < 8) {
+        setError(`Password must be at least 8 characters for ${user.email}.`);
+        return;
+      }
+    }
+
+    const payload: BootstrapUserCreate[] = candidateUsers.map((user) => ({
+      email: user.email.trim(),
+      full_name: user.full_name.trim() || undefined,
+      password: user.password,
+      role: user.role,
+      permissions: user.role === "ADMIN" ? [] : user.permissions
+    }));
+
     setBusy(true);
     setError(null);
+    setSuccessMessage(null);
     try {
-      const payload = users.filter((user) => user.email.trim().length > 0);
       await apiFetch("/auth/bootstrap/users", {
         method: "POST",
         headers: { Authorization: `Bearer ${adminToken}` },
-        body: JSON.stringify(payload)
+        body: JSON.stringify([...payload])
       });
+      setSuccessMessage("Additional users saved successfully.");
       setStep(3);
     } catch (requestError) {
       setError((requestError as Error).message);
@@ -141,6 +183,7 @@ export default function SetupWizardPage() {
         <h1 className="text-2xl font-semibold">First-run Setup Wizard</h1>
         <p className="text-sm text-muted">Step {step} of 3</p>
         {error ? <p className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</p> : null}
+        {successMessage ? <p className="rounded-lg border border-green-400/40 bg-green-500/10 px-3 py-2 text-sm text-green-500">{successMessage}</p> : null}
 
         {step === 1 ? (
           <form className="space-y-4" onSubmit={createAdmin}>
@@ -189,7 +232,7 @@ export default function SetupWizardPage() {
                     type="password"
                     value={user.password}
                     onChange={(event) => updateUser(index, { password: event.target.value })}
-                    placeholder="Password (10+ characters)"
+                    placeholder="Password (8+ characters)"
                   />
                   <select className="app-input w-full" value={user.role} onChange={(event) => updateUser(index, { role: event.target.value as "ADMIN" | "EMPLOYEE" })}>
                     <option value="ADMIN">Admin</option>

@@ -1,11 +1,10 @@
 import { FormEvent, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth";
 import { getDefaultRoute } from "../auth-routing";
 
 export default function LoginPage() {
   const { login, token, loading, isAdmin, allowedModules } = useAuth();
-  const navigate = useNavigate();
   const [email, setEmail] = useState("admin@bookkeeper.local");
   const [password, setPassword] = useState("password123");
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +18,6 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(email, password);
-      navigate("/", { replace: true });
     } catch (err) {
       setError((err as Error).message);
     }

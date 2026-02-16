@@ -76,7 +76,10 @@ def require_module(module_key: str):
             return current_user
         allowed = _get_allowed_modules(db, current_user)
         if module_key not in allowed:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this module")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Not authorized for module '{module_key}'",
+            )
         return current_user
 
     return dependency

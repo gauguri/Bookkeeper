@@ -235,6 +235,8 @@ def login(payload: LoginPayload, db: Session = Depends(get_db)):
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    allowed_modules = get_allowed_modules(current_user=user, db=db)
+
     access_token = create_access_token(
         {
             "sub": str(user.id),
@@ -250,6 +252,9 @@ def login(payload: LoginPayload, db: Session = Depends(get_db)):
             "email": user.email,
             "full_name": user.full_name,
             "is_admin": user.is_admin,
+            "is_active": user.is_active,
+            "role": "ADMIN" if user.is_admin else "EMPLOYEE",
+            "allowed_modules": allowed_modules,
         },
     }
 

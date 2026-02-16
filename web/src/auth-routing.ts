@@ -5,38 +5,38 @@ type AccessContext = { isAdmin: boolean; allowedModules: ModuleKey[] };
 
 export const MODULE_ROUTE_MAP: Record<ModuleKey, string> = {
   [MODULES.DASHBOARD]: "/",
-  [MODULES.CUSTOMERS]: "/sales/customers",
-  [MODULES.ITEMS]: "/sales/items",
   [MODULES.SALES_REQUESTS]: "/sales-requests",
   [MODULES.INVOICES]: "/invoices",
   [MODULES.PAYMENTS]: "/payments",
-  [MODULES.SUPPLIERS]: "/purchasing/suppliers",
-  [MODULES.PURCHASE_ORDERS]: "/purchasing/purchase-orders",
   [MODULES.INVENTORY]: "/inventory",
+  [MODULES.PURCHASE_ORDERS]: "/purchasing/purchase-orders",
+  [MODULES.SUPPLIERS]: "/purchasing/suppliers",
   [MODULES.CHART_OF_ACCOUNTS]: "/accounts",
   [MODULES.EXPENSES]: "/expenses",
   [MODULES.REPORTS]: "/sales/reports",
   [MODULES.IMPORT]: "/accounts/bulk-import",
-  [MODULES.BANKING]: "/banking",
-  [MODULES.CONTROL]: "/control"
+  [MODULES.CONTROL]: "/control",
+  [MODULES.CUSTOMERS]: "/sales/customers",
+  [MODULES.ITEMS]: "/sales/items",
+  [MODULES.BANKING]: "/banking"
 };
 
-export const MODULE_ROUTE_PRIORITY: ModuleKey[] = [
-  MODULES.DASHBOARD,
+const LIMITED_USER_DEFAULT_PRIORITY: ModuleKey[] = [
   MODULES.SALES_REQUESTS,
   MODULES.INVOICES,
   MODULES.PAYMENTS,
+  MODULES.INVENTORY,
+  MODULES.PURCHASE_ORDERS,
+  MODULES.SUPPLIERS,
+  MODULES.CHART_OF_ACCOUNTS,
+  MODULES.EXPENSES,
+  MODULES.REPORTS,
+  MODULES.IMPORT,
   MODULES.CUSTOMERS,
   MODULES.ITEMS,
-  MODULES.REPORTS,
-  MODULES.EXPENSES,
   MODULES.BANKING,
-  MODULES.CHART_OF_ACCOUNTS,
-  MODULES.IMPORT,
-  MODULES.SUPPLIERS,
-  MODULES.PURCHASE_ORDERS,
-  MODULES.INVENTORY,
-  MODULES.CONTROL
+  MODULES.CONTROL,
+  MODULES.DASHBOARD
 ];
 
 const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: string) => boolean }> = [
@@ -58,11 +58,16 @@ const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: stri
 ];
 
 export function getDefaultRoute({ isAdmin, allowedModules }: AccessContext): string {
-  for (const moduleKey of MODULE_ROUTE_PRIORITY) {
-    if (canAccess(moduleKey, { is_admin: isAdmin, allowed_modules: allowedModules })) {
+  if (isAdmin) {
+    return MODULE_ROUTE_MAP[MODULES.DASHBOARD];
+  }
+
+  for (const moduleKey of LIMITED_USER_DEFAULT_PRIORITY) {
+    if (canAccess(moduleKey, { is_admin: false, allowed_modules: allowedModules })) {
       return MODULE_ROUTE_MAP[moduleKey];
     }
   }
+
   return "/no-access";
 }
 

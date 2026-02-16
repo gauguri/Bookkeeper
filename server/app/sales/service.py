@@ -208,6 +208,11 @@ def update_invoice(db: Session, invoice: Invoice, payload: dict) -> Invoice:
     return invoice
 
 
+def create_payment_accounting_entry_stub(payment: Payment) -> None:
+    """Placeholder for posting payment-related accounting entries."""
+    _ = payment
+
+
 def apply_payment(
     db: Session,
     payment_data: dict,
@@ -237,9 +242,8 @@ def apply_payment(
                 raise ValueError("Invoice does not belong to the payment customer.")
     for invoice in invoices:
         if invoice.status == "VOID":
-            raise ValueError("Payments can only be applied to sent invoices.")
+            raise ValueError("Payments can only be applied to active invoices.")
         if invoice.status == "DRAFT":
-            # Payments against drafts mark them as sent before updating balances.
             invoice.status = "SENT"
             invoice.updated_at = datetime.utcnow()
     applications_inputs: List[PaymentApplicationInput] = []
@@ -259,16 +263,16 @@ def apply_payment(
 
     payment = Payment(
         customer_id=payment_data["customer_id"],
+        invoice_id=payment_data.get("invoice_id"),
         amount=payment_data["amount"],
         payment_date=payment_data["payment_date"],
         method=payment_data.get("method"),
         reference=payment_data.get("reference"),
         memo=payment_data.get("memo"),
+        notes=payment_data.get("notes"),
     )
     payment.applications = [
-        PaymentApplication(
-            invoice_id=application["invoice_id"], applied_amount=application["applied_amount"]
-        )
+        PaymentApplication(invoice_id=application["invoice_id"], applied_amount=application["applied_amount"])
         for application in normalized_applications
     ]
     db.add(payment)
@@ -278,7 +282,39 @@ def apply_payment(
         recalculate_invoice_balance(db, invoice)
         update_invoice_status(invoice)
         invoice.updated_at = datetime.utcnow()
+
+    create_payment_accounting_entry_stub(payment)
     return payment
+
+
+def create_invoice_payment(db: Session, payload: dict) -> Payment:
+    invoice = db.query(Invoice).filter(Invoice.id == payload["invoice_id"]).first()
+    if not invoice:
+        raise ValueError("Invoice not found.")
+    if invoice.status == "VOID":
+        raise ValueError("Cannot record payment for a void invoice.")
+
+    recalculate_invoice_balance(db, invoice)
+    current_balance = Decimal(invoice.amount_due or 0)
+    amount = Decimal(payload["amount"])
+    if amount <= 0:
+        raise ValueError("Payment amount must be greater than 0.")
+    if amount > current_balance:
+        raise ValueError("Payment amount cannot exceed current balance due.")
+
+    return apply_payment(
+        db,
+        {
+            "customer_id": invoice.customer_id,
+            "invoice_id": invoice.id,
+            "amount": amount,
+            "payment_date": payload["payment_date"],
+            "method": payload.get("method"),
+            "notes": payload.get("notes"),
+            "memo": payload.get("notes"),
+        },
+        [{"invoice_id": invoice.id, "applied_amount": amount}],
+    )
 
 
 def get_invoice_payments(db: Session, invoice_id: int) -> List[dict]:

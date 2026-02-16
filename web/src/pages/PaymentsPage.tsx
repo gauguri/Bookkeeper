@@ -1,120 +1,52 @@
 import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 
-type Customer = {
-  id: number;
-  name: string;
-};
-
-type InvoiceList = {
+type InvoiceDetail = {
   id: number;
   invoice_number: string;
-  status: string;
-  total: number;
-  amount_due: number;
-  issue_date: string;
-  due_date: string;
   customer_id: number;
-  customer_name?: string;
+  customer: {
+    id: number;
+    name: string;
+  };
+  status: string;
+  amount_due: number;
 };
 
 type Payment = {
   id: number;
+  invoice_id: number;
+  invoice_number?: string;
   customer_id: number;
   amount: number;
   payment_date: string;
   method?: string;
-  reference?: string;
-  memo?: string;
+  notes?: string;
 };
 
-type Application = {
-  invoice_id: number;
-  applied_amount: string;
-};
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function PaymentsPage() {
   const [searchParams] = useSearchParams();
   const invoiceIdParam = searchParams.get("invoiceId");
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceList[]>([]);
+
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    customer_id: "",
+    invoice_id: "",
     amount: "",
-    payment_date: "",
+    payment_date: todayISO(),
     method: "",
-    reference: "",
-    memo: ""
+    notes: ""
   });
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [deepLinkedInvoiceId, setDeepLinkedInvoiceId] = useState<number | null>(null);
-  const [prefilledInvoice, setPrefilledInvoice] = useState<InvoiceList | null>(null);
 
-  useEffect(() => {
-    if (!invoiceIdParam) {
-      setDeepLinkedInvoiceId(null);
-      return;
-    }
-
-    const parsedInvoiceId = Number(invoiceIdParam);
-    if (!Number.isInteger(parsedInvoiceId) || parsedInvoiceId <= 0) {
-      setError("Invalid invoice link. Please choose an invoice manually.");
-      setDeepLinkedInvoiceId(null);
-      return;
-    }
-
-    setDeepLinkedInvoiceId(parsedInvoiceId);
-  }, [invoiceIdParam]);
-
-  useEffect(() => {
-    const hydrateDeepLink = async () => {
-      if (!deepLinkedInvoiceId) {
-        setPrefilledInvoice(null);
-        return;
-      }
-
-      try {
-        const invoice = await apiFetch<InvoiceList>(`/invoices/${deepLinkedInvoiceId}`);
-        const today = new Date().toISOString().slice(0, 10);
-        const amountDue = Math.max(Number(invoice.amount_due) || 0, 0);
-
-        setPrefilledInvoice(invoice);
-        setForm((prev) => ({
-          ...prev,
-          customer_id: String(invoice.customer_id),
-          amount: amountDue.toFixed(2),
-          payment_date: prev.payment_date || today
-        }));
-        setApplications([{ invoice_id: invoice.id, applied_amount: amountDue.toFixed(2) }]);
-
-        setTimeout(() => {
-          document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 0);
-
-        setError("");
-      } catch (err) {
-        setPrefilledInvoice(null);
-        setError("Invoice from link was not found. Please choose an invoice manually.");
-      }
-    };
-
-    hydrateDeepLink();
-  }, [deepLinkedInvoiceId]);
-
-  const loadData = async () => {
+  const loadPayments = async () => {
     try {
-      const [customersData, invoicesData, paymentsData] = await Promise.all([
-        apiFetch<Customer[]>("/customers"),
-        apiFetch<InvoiceList[]>("/invoices"),
-        apiFetch<Payment[]>("/payments")
-      ]);
-      setCustomers(customersData);
-      setInvoices(invoicesData);
+      const paymentsData = await apiFetch<Payment[]>("/payments");
       setPayments(paymentsData);
     } catch (err) {
       setError((err as Error).message);
@@ -122,90 +54,78 @@ export default function PaymentsPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadPayments();
   }, []);
 
-  const selectedInvoice = useMemo(() => {
-    const selectedInvoiceId = applications.find((application) => Number(application.applied_amount) > 0)?.invoice_id;
-    if (!selectedInvoiceId) {
+  useEffect(() => {
+    const hydrateDeepLink = async () => {
+      if (!invoiceIdParam) {
+        setInvoice(null);
+        setForm((prev) => ({ ...prev, invoice_id: "", amount: "" }));
+        return;
+      }
+      const parsedInvoiceId = Number(invoiceIdParam);
+      if (!Number.isInteger(parsedInvoiceId) || parsedInvoiceId <= 0) {
+        setError("Invalid invoice link. Please open payments from a valid invoice.");
+        return;
+      }
+      try {
+        const invoiceDetails = await apiFetch<InvoiceDetail>(`/invoices/${parsedInvoiceId}`);
+        const dueAmount = Math.max(Number(invoiceDetails.amount_due) || 0, 0);
+
+        setInvoice(invoiceDetails);
+        setForm((prev) => ({
+          ...prev,
+          invoice_id: String(invoiceDetails.id),
+          amount: dueAmount.toFixed(2),
+          payment_date: prev.payment_date || todayISO()
+        }));
+        setError("");
+      } catch {
+        setError("Invoice from link was not found.");
+      }
+    };
+
+    hydrateDeepLink();
+  }, [invoiceIdParam]);
+
+  const selectedInvoiceDisplay = useMemo(() => {
+    if (!invoice) {
       return null;
     }
-    return invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null;
-  }, [applications, invoices]);
-
-  const invoiceInFocus = prefilledInvoice ?? selectedInvoice;
-
-  const selectedCustomerName =
-    customers.find((customer) => customer.id === invoiceInFocus?.customer_id)?.name ?? "—";
-
-  const { openInvoices, draftInvoices, visibleInvoices } = useMemo(() => {
-    if (!form.customer_id) {
-      return { openInvoices: [], draftInvoices: [], visibleInvoices: [] };
-    }
-    const customerInvoiceList = invoices.filter((invoice) => invoice.customer_id === Number(form.customer_id));
-    const open = customerInvoiceList.filter(
-      (invoice) => invoice.amount_due > 0 && invoice.status !== "VOID" && invoice.status !== "DRAFT"
-    );
-    const drafts = customerInvoiceList.filter(
-      (invoice) => invoice.amount_due > 0 && invoice.status === "DRAFT"
-    );
     return {
-      openInvoices: open,
-      draftInvoices: drafts,
-      visibleInvoices: open.length > 0 ? open : drafts
+      customerName: invoice.customer?.name ?? "—",
+      number: invoice.invoice_number,
+      amountDue: invoice.amount_due
     };
-  }, [form.customer_id, invoices]);
-
-  const totalApplied = applications.reduce((sum, app) => sum + (Number(app.applied_amount) || 0), 0);
-
-  const updateApplication = (invoiceId: number, amount: string) => {
-    setApplications((prev) => {
-      const existing = prev.find((app) => app.invoice_id === invoiceId);
-      if (existing) {
-        return prev.map((app) => (app.invoice_id === invoiceId ? { ...app, applied_amount: amount } : app));
-      }
-      return [...prev, { invoice_id: invoiceId, applied_amount: amount }];
-    });
-  };
-
-  const autoApply = () => {
-    let remaining = Number(form.amount || 0);
-    const nextApplications = visibleInvoices.map((invoice) => {
-      const applied = Math.min(invoice.amount_due, remaining);
-      remaining -= applied;
-      return { invoice_id: invoice.id, applied_amount: applied.toFixed(2) };
-    });
-    setApplications(nextApplications);
-  };
+  }, [invoice]);
 
   const submitPayment = async () => {
-    if (!form.customer_id || !form.amount || !form.payment_date) {
-      setError("Customer, amount, and payment date are required.");
-      return;
-    }
-    if (Number(form.amount || 0) !== totalApplied) {
-      setError("Apply the full payment amount to one or more invoices to continue.");
+    if (!form.invoice_id || !form.amount || !form.payment_date) {
+      setError("Invoice, amount, and payment date are required.");
       return;
     }
     const payload = {
-      customer_id: Number(form.customer_id),
+      invoice_id: Number(form.invoice_id),
       amount: Number(form.amount),
       payment_date: form.payment_date,
       method: form.method || null,
-      reference: form.reference || null,
-      memo: form.memo || null,
-      applications: applications
-        .filter((app) => Number(app.applied_amount) > 0)
-        .map((app) => ({ invoice_id: app.invoice_id, applied_amount: Number(app.applied_amount) }))
+      notes: form.notes || null
     };
+
     try {
       await apiFetch("/payments", {
         method: "POST",
         body: JSON.stringify(payload)
       });
-      setForm({ customer_id: "", amount: "", payment_date: "", method: "", reference: "", memo: "" });
-      setApplications([]);
-      loadData();
+      setForm({ invoice_id: form.invoice_id, amount: "", payment_date: todayISO(), method: "", notes: "" });
+      await loadPayments();
+      if (invoice) {
+        const refreshedInvoice = await apiFetch<InvoiceDetail>(`/invoices/${invoice.id}`);
+        const refreshedDue = Math.max(Number(refreshedInvoice.amount_due) || 0, 0);
+        setInvoice(refreshedInvoice);
+        setForm((prev) => ({ ...prev, amount: refreshedDue.toFixed(2) }));
+      }
       setError("");
     } catch (err) {
       setError((err as Error).message);
@@ -218,7 +138,7 @@ export default function PaymentsPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Payments</p>
           <h1 className="text-3xl font-semibold">Cash application</h1>
-          <p className="text-muted">Match incoming payments to outstanding invoices.</p>
+          <p className="text-muted">Record payments against invoices and keep balances up to date.</p>
         </div>
         <button className="app-button" onClick={() => document.getElementById("payment-form")?.scrollIntoView()}>
           <Plus className="h-4 w-4" /> Record payment
@@ -227,52 +147,39 @@ export default function PaymentsPage() {
 
       {error && <p className="text-sm text-danger">{error}</p>}
 
+      {selectedInvoiceDisplay && (
+        <div className="app-card border-primary/30 bg-primary/5 p-5" id="linked-invoice-panel">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Deep link</p>
+          <h2 className="mt-2 text-lg font-semibold">Record Payment for Invoice {selectedInvoiceDisplay.number}</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-3 text-sm">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted">Customer</p>
+              <p className="font-medium">{selectedInvoiceDisplay.customerName}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted">Invoice</p>
+              <p className="font-medium">{selectedInvoiceDisplay.number}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted">Balance due</p>
+              <p className="font-medium tabular-nums">{currency(selectedInvoiceDisplay.amountDue)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div id="payment-form" className="app-card p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Record payment</h2>
           <span className="app-badge border-primary/30 bg-primary/10 text-primary">New receipt</span>
         </div>
-        {invoiceInFocus && (
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
-            <p className="font-semibold text-primary">Invoice ready for payment</p>
-            <p className="text-muted">
-              {invoiceInFocus.invoice_number} · {selectedCustomerName} · Balance due{" "}
-              {currency(invoiceInFocus.amount_due)}
-            </p>
-          </div>
-        )}
-        {invoiceInFocus && (
-          <div className="grid gap-3 md:grid-cols-3">
-            <input className="app-input" value={invoiceInFocus.invoice_number} readOnly aria-label="Invoice" />
-            <input className="app-input" value={selectedCustomerName} readOnly aria-label="Customer" />
-            <input
-              className="app-input"
-              value={currency(invoiceInFocus.amount_due)}
-              readOnly
-              aria-label="Balance due"
-            />
-          </div>
-        )}
+
         <div className="grid gap-3 md:grid-cols-3">
-          <select
-            className="app-select"
-            value={form.customer_id}
-            onChange={(event) => {
-              setForm({ ...form, customer_id: event.target.value });
-              setApplications([]);
-            }}
-          >
-            <option value="">Select customer *</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
+          <input className="app-input" value={form.invoice_id} readOnly placeholder="Invoice ID" />
           <input
             className="app-input"
             type="number"
-            min="0"
+            min="0.01"
             step="0.01"
             placeholder="Amount *"
             value={form.amount}
@@ -294,74 +201,14 @@ export default function PaymentsPage() {
             <option value="Check">Check</option>
             <option value="ACH">ACH</option>
             <option value="Card">Card</option>
+            <option value="Wire">Wire</option>
           </select>
           <input
-            className="app-input"
-            placeholder="Reference"
-            value={form.reference}
-            onChange={(event) => setForm({ ...form, reference: event.target.value })}
+            className="app-input md:col-span-2"
+            placeholder="Notes"
+            value={form.notes}
+            onChange={(event) => setForm({ ...form, notes: event.target.value })}
           />
-          <input
-            className="app-input"
-            placeholder="Memo"
-            value={form.memo}
-            onChange={(event) => setForm({ ...form, memo: event.target.value })}
-          />
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Apply to invoices</h3>
-            <button className="app-button-ghost text-xs" onClick={autoApply} disabled={!form.amount}>
-              Auto-apply
-            </button>
-          </div>
-          {!form.customer_id ? (
-            <p className="text-sm text-muted">Select a customer to see open invoices.</p>
-          ) : visibleInvoices.length === 0 ? (
-            <p className="text-sm text-muted">No invoices available for this customer. Create an invoice first.</p>
-          ) : (
-            <table className="min-w-full text-sm">
-              <thead className="text-left text-xs uppercase tracking-widest text-muted">
-                <tr>
-                  <th className="py-2">Invoice</th>
-                  <th>Balance</th>
-                  <th className="text-right">Apply</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="app-table-row border-t">
-                    <td className="py-2 font-medium">
-                      <div className="flex items-center gap-2">
-                        <span>{invoice.invoice_number}</span>
-                        {invoice.status === "DRAFT" && (
-                          <span className="app-badge border-border bg-secondary text-muted">Draft</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
-                    <td className="text-right">
-                      <input
-                        className="app-input w-28 text-right"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={applications.find((app) => app.invoice_id === invoice.id)?.applied_amount ?? ""}
-                        onChange={(event) => updateApplication(invoice.id, event.target.value)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {visibleInvoices.length > 0 && draftInvoices.length > 0 && openInvoices.length === 0 && (
-            <p className="text-sm text-muted">Draft invoices will be marked as Sent when you record this payment.</p>
-          )}
-          <div className="text-sm text-muted">
-            Applied total: {currency(totalApplied)} / Payment amount: {currency(Number(form.amount || 0))}
-          </div>
         </div>
 
         <div className="flex justify-end">
@@ -380,7 +227,7 @@ export default function PaymentsPage() {
           <thead className="text-left text-xs uppercase tracking-widest text-muted">
             <tr>
               <th className="py-2">Date</th>
-              <th>Customer</th>
+              <th>Invoice</th>
               <th>Method</th>
               <th className="text-right">Amount</th>
               <th className="text-right">Actions</th>
@@ -390,7 +237,11 @@ export default function PaymentsPage() {
             {payments.map((payment) => (
               <tr key={payment.id} className="app-table-row border-t">
                 <td className="py-2">{payment.payment_date}</td>
-                <td>{customers.find((customer) => customer.id === payment.customer_id)?.name ?? "-"}</td>
+                <td>
+                  <Link className="text-primary hover:underline" to={`/invoices/${payment.invoice_id}`}>
+                    {payment.invoice_number ?? `Invoice #${payment.invoice_id}`}
+                  </Link>
+                </td>
                 <td>{payment.method ?? "-"}</td>
                 <td className="text-right tabular-nums">{currency(payment.amount)}</td>
                 <td className="text-right">
@@ -410,13 +261,6 @@ export default function PaymentsPage() {
           </tbody>
         </table>
       </div>
-
-      <button
-        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
-        onClick={() => document.getElementById("payment-form")?.scrollIntoView({ behavior: "smooth" })}
-      >
-        <Plus className="h-4 w-4" /> Record
-      </button>
     </section>
   );
 }

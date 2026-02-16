@@ -40,7 +40,7 @@ export const MODULE_ROUTE_PRIORITY: ModuleKey[] = [
 ];
 
 const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: string) => boolean }> = [
-  { moduleKey: MODULES.DASHBOARD, matches: (pathname) => pathname === "/" || pathname.startsWith("/sales") },
+  { moduleKey: MODULES.DASHBOARD, matches: (pathname) => pathname === "/" || pathname === "/sales" },
   { moduleKey: MODULES.CUSTOMERS, matches: (pathname) => pathname.startsWith("/sales/customers") },
   { moduleKey: MODULES.ITEMS, matches: (pathname) => pathname.startsWith("/sales/items") },
   { moduleKey: MODULES.SALES_REQUESTS, matches: (pathname) => pathname.startsWith("/sales-requests") },

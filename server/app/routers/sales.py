@@ -15,7 +15,7 @@ from app.sales_requests.service import (
 )
 from app.sales import schemas
 from app.sales.service import (
-    apply_payment,
+    create_invoice_payment,
     create_invoice,
     get_invoice_payments,
     list_customers,
@@ -312,22 +312,50 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
 
 @router.get("/payments", response_model=List[schemas.PaymentResponse])
 def get_payments(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.PAYMENTS.value))):
-    payments = db.query(Payment).order_by(Payment.payment_date.desc(), Payment.id.desc()).all()
-    return payments
+    payments = (
+        db.query(Payment)
+        .order_by(Payment.payment_date.desc(), Payment.id.desc())
+        .all()
+    )
+    return [
+        schemas.PaymentResponse(
+            id=payment.id,
+            invoice_id=payment.invoice_id or (payment.applications[0].invoice_id if payment.applications else 0),
+            customer_id=payment.customer_id,
+            amount=payment.amount,
+            payment_date=payment.payment_date,
+            method=payment.method,
+            notes=payment.notes,
+            created_at=payment.created_at,
+            invoice_number=payment.invoice.invoice_number if payment.invoice else None,
+            applications=payment.applications,
+        )
+        for payment in payments
+    ]
 
 
 @router.post("/payments", response_model=schemas.PaymentResponse, status_code=status.HTTP_201_CREATED)
 def create_payment(payload: schemas.PaymentCreate, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.PAYMENTS.value))):
-    customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found.")
     try:
-        payment = apply_payment(db, payload.model_dump(exclude={"applications"}), payload.applications)
+        payment = create_invoice_payment(db, payload.model_dump())
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail)
     db.commit()
     db.refresh(payment)
-    return payment
+    return schemas.PaymentResponse(
+        id=payment.id,
+        invoice_id=payment.invoice_id or payload.invoice_id,
+        customer_id=payment.customer_id,
+        amount=payment.amount,
+        payment_date=payment.payment_date,
+        method=payment.method,
+        notes=payment.notes,
+        created_at=payment.created_at,
+        invoice_number=payment.invoice.invoice_number if payment.invoice else None,
+        applications=payment.applications,
+    )
 
 
 @router.get("/reports/sales-summary", response_model=List[schemas.SalesSummaryResponse])

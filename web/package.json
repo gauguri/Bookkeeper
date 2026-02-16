@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "test:authz": "node scripts/authz-sanity.mjs",
-    "test:default-route": "node scripts/default-route-sanity.mjs"
+    "test:default-route": "node scripts/default-route-sanity.mjs",
+    "test:route-module": "node scripts/route-module-sanity.mjs"
   },
   "dependencies": {
     "framer-motion": "11.3.1",

@@ -323,6 +323,7 @@ class Invoice(Base):
     sales_request = relationship("SalesRequest", back_populates="invoice")
     lines = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan")
     payment_applications = relationship("PaymentApplication", back_populates="invoice", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="invoice")
 
 
 class InvoiceLine(Base):
@@ -350,14 +351,17 @@ class Payment(Base):
 
     id = Column(Integer, primary_key=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
     amount = Column(Numeric(14, 2), nullable=False)
     payment_date = Column(Date, nullable=False)
     method = Column(String(50), nullable=True)
     reference = Column(String(100), nullable=True)
     memo = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     customer = relationship("Customer", back_populates="payments")
+    invoice = relationship("Invoice", back_populates="payments")
     applications = relationship("PaymentApplication", back_populates="payment", cascade="all, delete-orphan")
 
 

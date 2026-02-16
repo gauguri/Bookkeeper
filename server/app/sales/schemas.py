@@ -123,6 +123,7 @@ class InvoiceResponse(InvoiceBase):
     total: DecimalValue
     amount_due: DecimalValue
     sales_request_id: Optional[int] = None
+    shipped_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     line_items: List[InvoiceLineResponse] = Field(alias="lines")

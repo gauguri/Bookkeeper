@@ -44,7 +44,7 @@ type SalesRequestDetail = {
   request_number: string;
   customer_id: number | null;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "CLOSED";
+  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
   created_at: string;
   updated_at: string;
   notes: string | null;
@@ -55,6 +55,8 @@ type SalesRequestDetail = {
   linked_invoice_number: string | null;
   invoice_id: number | null;
   invoice_number: string | null;
+  linked_invoice_status: string | null;
+  linked_invoice_shipped_at: string | null;
 };
 
 type LineSelection = {
@@ -78,6 +80,8 @@ type GenerateResult = {
 const statusStyles: Record<string, string> = {
   OPEN: "border-primary/30 bg-primary/10 text-primary",
   IN_PROGRESS: "border-warning/30 bg-warning/10 text-warning",
+  INVOICED: "border-info/30 bg-info/10 text-info",
+  SHIPPED: "border-primary/30 bg-primary/10 text-primary",
   CLOSED: "border-success/30 bg-success/10 text-success",
 };
 
@@ -466,6 +470,14 @@ export default function SalesRequestDetailPage() {
                 <p className="text-sm text-muted">
                   {detail.linked_invoice_number}
                 </p>
+                {detail.linked_invoice_status && (
+                  <p className="mt-1 text-xs text-muted">
+                    Invoice status: {detail.linked_invoice_status.replace(/_/g, " ")}
+                    {detail.linked_invoice_shipped_at
+                      ? ` · Shipped ${formatDate(detail.linked_invoice_shipped_at)}`
+                      : ""}
+                  </p>
+                )}
               </div>
             </div>
             <button
@@ -704,7 +716,10 @@ export default function SalesRequestDetailPage() {
                     {detail.linked_invoice_number}
                   </p>
                   <p className="text-xs text-muted">
-                    Invoice has been generated for this sales request.
+                    Invoice: {detail.linked_invoice_status?.replace(/_/g, " ") ?? "Created"}
+                    {detail.linked_invoice_shipped_at
+                      ? ` · Shipped ${formatDate(detail.linked_invoice_shipped_at)}`
+                      : ""}
                   </p>
                 </div>
               </div>

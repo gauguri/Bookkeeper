@@ -16,7 +16,7 @@ type SalesRequest = {
   id: number;
   request_number: string;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "CLOSED";
+  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
   created_at: string;
   requested_fulfillment_date: string | null;
   notes?: string | null;
@@ -30,6 +30,8 @@ type Item = { id: number; name: string; unit_price: number };
 const statusStyles: Record<string, string> = {
   OPEN: "border-primary/30 bg-primary/10 text-primary",
   IN_PROGRESS: "border-warning/30 bg-warning/10 text-warning",
+  INVOICED: "border-info/30 bg-info/10 text-info",
+  SHIPPED: "border-primary/30 bg-primary/10 text-primary",
   CLOSED: "border-success/30 bg-success/10 text-success",
 };
 
@@ -130,6 +132,8 @@ export default function SalesRequestsPage() {
             <option value="">All statuses</option>
             <option value="OPEN">Open</option>
             <option value="IN_PROGRESS">In Progress</option>
+            <option value="INVOICED">Invoiced</option>
+            <option value="SHIPPED">Shipped</option>
             <option value="CLOSED">Closed</option>
           </select>
           <input

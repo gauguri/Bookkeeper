@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Invoice, Payment
 
-OPEN_STATUSES = ("SENT", "PARTIALLY_PAID")
+OPEN_STATUSES = ("SENT", "SHIPPED", "PARTIALLY_PAID")
 REVENUE_STATUSES = ("SENT", "PAID")
 
 

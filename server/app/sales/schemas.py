@@ -150,16 +150,15 @@ class PaymentApplicationCreate(BaseModel):
 
 
 class PaymentBase(BaseModel):
-    customer_id: int
+    invoice_id: int
     amount: DecimalValue
     payment_date: date
     method: Optional[str] = None
-    reference: Optional[str] = None
-    memo: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class PaymentCreate(PaymentBase):
-    applications: List[PaymentApplicationCreate]
+    pass
 
 
 class PaymentApplicationResponse(BaseModel):
@@ -171,6 +170,8 @@ class PaymentApplicationResponse(BaseModel):
 
 class PaymentResponse(PaymentBase):
     id: int
+    customer_id: int
+    invoice_number: Optional[str] = None
     created_at: datetime
     applications: List[PaymentApplicationResponse]
 

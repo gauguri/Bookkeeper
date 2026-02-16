@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import Base
 from app.models import Customer, Inventory, Invoice, Item
 from app.sales.schemas import PaymentApplicationCreate
-from app.sales.service import apply_payment
+from app.sales.service import apply_payment, create_invoice_payment
 
 
 def create_session():
@@ -199,3 +199,53 @@ def test_apply_payment_does_not_change_inventory_quantities():
 
     assert invoice.status == "PAID"
     assert inventory.quantity_on_hand == Decimal("10.00")
+
+
+def test_create_invoice_payment_sets_invoice_link_and_partial_status():
+    db = create_session()
+    customer = create_customer(db, name="Linked Payment")
+    invoice = create_invoice(db, customer.id, "SENT", Decimal("125.00"), Decimal("125.00"))
+
+    payment = create_invoice_payment(
+        db,
+        {
+            "invoice_id": invoice.id,
+            "amount": Decimal("25.00"),
+            "payment_date": date(2024, 2, 11),
+            "method": "ACH",
+            "notes": "Partial payment",
+        },
+    )
+    db.commit()
+    db.refresh(invoice)
+
+    assert payment.invoice_id == invoice.id
+    assert payment.customer_id == customer.id
+    assert invoice.amount_due == Decimal("100.00")
+    assert invoice.status == "PARTIALLY_PAID"
+
+
+def test_create_invoice_payment_rejects_amount_outside_balance():
+    db = create_session()
+    customer = create_customer(db, name="Validation Customer")
+    invoice = create_invoice(db, customer.id, "SENT", Decimal("90.00"), Decimal("90.00"))
+
+    with pytest.raises(ValueError):
+        create_invoice_payment(
+            db,
+            {
+                "invoice_id": invoice.id,
+                "amount": Decimal("0.00"),
+                "payment_date": date(2024, 2, 12),
+            },
+        )
+
+    with pytest.raises(ValueError):
+        create_invoice_payment(
+            db,
+            {
+                "invoice_id": invoice.id,
+                "amount": Decimal("120.00"),
+                "payment_date": date(2024, 2, 12),
+            },
+        )

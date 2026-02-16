@@ -410,7 +410,7 @@ export default function InvoiceDetailPage() {
             )}
             <button
               className="app-button"
-              onClick={() => navigate(`/sales/payments?invoiceId=${invoice.id}`)}
+              onClick={() => navigate(`/payments?invoiceId=${invoice.id}`)}
             >
               Record payment
             </button>

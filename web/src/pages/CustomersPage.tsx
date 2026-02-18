@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
+import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
 
 type Customer = {
   id: number;
@@ -30,6 +31,7 @@ export default function CustomersPage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [selectedInsightsCustomerId, setSelectedInsightsCustomerId] = useState<number | null>(null);
 
   const filtered = useMemo(() => {
     if (!search) {
@@ -85,6 +87,7 @@ export default function CustomersPage() {
 
   const startEdit = (customer: Customer) => {
     setEditingId(customer.id);
+    setSelectedInsightsCustomerId(customer.id);
     setForm({
       name: customer.name,
       email: customer.email ?? "",
@@ -166,6 +169,9 @@ export default function CustomersPage() {
                       <button className="app-button-ghost" onClick={() => startEdit(customer)}>
                         Edit
                       </button>
+                      <button className="app-button-ghost" onClick={() => setSelectedInsightsCustomerId(customer.id)}>
+                        Insights
+                      </button>
                       <button
                         className="app-button-ghost text-danger"
                         onClick={() => archiveCustomer(customer.id)}
@@ -201,6 +207,12 @@ export default function CustomersPage() {
           </table>
         </div>
       </div>
+
+
+
+      {selectedInsightsCustomerId ? (
+        <CustomerInsightsPanel customerId={selectedInsightsCustomerId} mode="full" />
+      ) : null}
 
       <div id="customer-form" className="app-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

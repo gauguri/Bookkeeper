@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
+import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
 
 /* ---------- types ---------- */
 
@@ -705,7 +706,9 @@ export default function SalesRequestDetailPage() {
         </div>
 
         {/* Invoice generation or linked invoice */}
-        <div className="app-card p-6 space-y-4">
+        <div className="space-y-6">
+          <CustomerInsightsPanel customerId={detail.customer_id} mode="full" />
+          <div className="app-card p-6 space-y-4">
           {hasLinkedInvoice ? (
             <>
               <p className="text-sm font-semibold">Invoice</p>
@@ -804,6 +807,7 @@ export default function SalesRequestDetailPage() {
               </button>
             </>
           )}
+          </div>
         </div>
       </div>
     </section>

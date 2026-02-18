@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
+import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
 
 type InvoiceLine = {
   id: number;
@@ -542,6 +543,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         <div className="space-y-6">
+          <CustomerInsightsPanel customerId={invoice.customer.id} mode="full" />
           <div className="app-card p-6">
             <p className="text-sm font-semibold">Status timeline</p>
             <div className="mt-4 space-y-4">

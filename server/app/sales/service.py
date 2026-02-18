@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Iterable, List, Optional, Sequence
 
@@ -25,6 +25,104 @@ DEFAULT_MARKUP_BY_TIER = {
     "GOLD": Decimal("15"),
     "PLATINUM": Decimal("12"),
 }
+
+
+def get_customer_insights(db: Session, customer_id: int) -> dict:
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise ValueError("Customer not found.")
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+    ltm_start = today - timedelta(days=365)
+
+    active_invoice_filter = (
+        Invoice.customer_id == customer_id,
+        Invoice.status != "VOID",
+    )
+
+    ytd_revenue = (
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(*active_invoice_filter, Invoice.issue_date >= ytd_start)
+        .scalar()
+    )
+    ltm_revenue = (
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(*active_invoice_filter, Invoice.issue_date >= ltm_start)
+        .scalar()
+    )
+
+    margin_data = (
+        db.query(
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.landed_unit_cost * InvoiceLine.quantity), 0).label("cost"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            *active_invoice_filter,
+            Invoice.issue_date >= ltm_start,
+            InvoiceLine.landed_unit_cost.isnot(None),
+            InvoiceLine.landed_unit_cost > 0,
+        )
+        .one()
+    )
+    gross_margin_percent = None
+    revenue = Decimal(margin_data.revenue or 0)
+    cost = Decimal(margin_data.cost or 0)
+    if revenue > 0:
+        gross_margin_percent = ((revenue - cost) / revenue) * Decimal("100")
+
+    outstanding_ar = (
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(*active_invoice_filter, Invoice.amount_due > 0)
+        .scalar()
+    )
+
+    payment_stats = (
+        db.query(
+            func.coalesce(func.sum(PaymentApplication.applied_amount), 0).label("applied_total"),
+            func.coalesce(
+                func.sum(
+                    (func.julianday(Payment.payment_date) - func.julianday(Invoice.issue_date))
+                    * PaymentApplication.applied_amount
+                ),
+                0,
+            ).label("weighted_days"),
+        )
+        .join(Payment, Payment.id == PaymentApplication.payment_id)
+        .join(Invoice, Invoice.id == PaymentApplication.invoice_id)
+        .filter(
+            Invoice.customer_id == customer_id,
+            Invoice.status != "VOID",
+            Payment.payment_date >= ltm_start,
+        )
+        .one()
+    )
+
+    average_days_to_pay = None
+    applied_total = Decimal(payment_stats.applied_total or 0)
+    weighted_days = Decimal(payment_stats.weighted_days or 0)
+    if applied_total > 0:
+        average_days_to_pay = weighted_days / applied_total
+
+    last_invoices = (
+        db.query(Invoice)
+        .filter(*active_invoice_filter)
+        .order_by(Invoice.issue_date.desc(), Invoice.id.desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "customer_id": customer.id,
+        "customer_name": customer.name,
+        "ytd_revenue": Decimal(ytd_revenue or 0),
+        "ltm_revenue": Decimal(ltm_revenue or 0),
+        "gross_margin_percent": gross_margin_percent,
+        "outstanding_ar": Decimal(outstanding_ar or 0),
+        "average_days_to_pay": average_days_to_pay,
+        "last_invoices": last_invoices,
+    }
 
 
 def get_default_markup_percent(customer_tier: str | None) -> Decimal:

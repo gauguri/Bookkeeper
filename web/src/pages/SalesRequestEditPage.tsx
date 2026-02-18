@@ -17,7 +17,7 @@ type SalesRequestDetail = {
   id: number;
   customer_id: number | null;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
+  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
   notes: string | null;
   requested_fulfillment_date: string | null;
   linked_invoice_id: number | null;
@@ -60,7 +60,7 @@ export default function SalesRequestEditPage() {
 
   const blockedReason = useMemo(() => {
     if (!detail) return "";
-    if (detail.status !== "OPEN") return "Only OPEN sales requests can be edited.";
+    if (detail.status !== "NEW" && detail.status !== "QUOTED") return "Only NEW or QUOTED sales requests can be edited.";
     if (detail.linked_invoice_id) return "This sales request has a linked invoice and cannot be edited.";
     return "";
   }, [detail]);

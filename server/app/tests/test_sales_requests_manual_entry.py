@@ -29,7 +29,7 @@ def test_rep_can_create_sales_request_and_see_it_in_list():
         {
             "customer_id": customer.id,
             "notes": "Phone order from branch manager",
-            "status": "OPEN",
+            "status": "NEW",
             "created_by_user_id": 1,
             "lines": [{"item_id": item.id, "quantity": Decimal("2"), "unit_price": Decimal("12.50")}],
         },
@@ -59,7 +59,7 @@ def test_sales_request_detail_prefers_linked_invoice_values_for_closed_requests(
         db,
         {
             "customer_id": customer.id,
-            "status": "OPEN",
+            "status": "NEW",
             "lines": [{"item_id": item.id, "quantity": Decimal("2"), "unit_price": Decimal("12.50")}],
         },
     )

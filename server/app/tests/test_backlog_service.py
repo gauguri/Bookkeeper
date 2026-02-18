@@ -39,7 +39,7 @@ def test_backlog_metrics_and_shortages():
         request_number="SR-1001",
         customer_id=customer.id,
         customer_name=customer.name,
-        status="OPEN",
+        status="NEW",
         created_at=datetime.utcnow() - timedelta(days=9),
     )
     db.add(sr)

@@ -15,6 +15,37 @@ from app.models import Company, Customer, Inventory, Invoice, Item, SalesRequest
 from app.suppliers.service import get_supplier_link
 
 
+SALES_REQUEST_STATUS_FLOW = ["NEW", "QUOTED", "CONFIRMED", "INVOICED", "SHIPPED", "CLOSED"]
+SALES_REQUEST_TERMINAL_STATUSES = {"LOST", "CANCELLED", "CLOSED"}
+
+
+def _status_rank(status: str) -> int:
+    try:
+        return SALES_REQUEST_STATUS_FLOW.index(status)
+    except ValueError:
+        return -1
+
+
+def should_reserve_inventory_for_status(status: str) -> bool:
+    return _status_rank(status) >= _status_rank("CONFIRMED") and status not in SALES_REQUEST_TERMINAL_STATUSES
+
+
+def get_allowed_sales_request_status_transitions(sales_request: SalesRequest) -> list[str]:
+    status = sales_request.status
+    if status in SALES_REQUEST_TERMINAL_STATUSES:
+        return []
+
+    transitions: list[str] = []
+    rank = _status_rank(status)
+    if rank >= 0 and rank < len(SALES_REQUEST_STATUS_FLOW) - 1:
+        transitions.append(SALES_REQUEST_STATUS_FLOW[rank + 1])
+
+    transitions.extend(["LOST", "CANCELLED"])
+    if status != "CLOSED":
+        transitions.append("CLOSED")
+    return transitions
+
+
 def _next_request_number(db: Session) -> str:
     year = datetime.utcnow().year
     prefix = f"SR-{year}-"
@@ -72,6 +103,15 @@ class SalesRequestImmutableError(ValueError):
 
 
 def _sync_sales_request_reservations(db: Session, sales_request: SalesRequest) -> None:
+    if not should_reserve_inventory_for_status(sales_request.status):
+        sync_reservations_for_source(
+            db,
+            source_type=SOURCE_SALES_REQUEST,
+            source_id=sales_request.id,
+            item_qty_map={},
+        )
+        return
+
     item_qty_map: dict[int, Decimal] = {}
     for line in sales_request.lines:
         item_qty_map[line.item_id] = item_qty_map.get(line.item_id, Decimal("0")) + Decimal(line.quantity or 0)
@@ -97,7 +137,7 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
         payload["customer_name"] = customer_name
 
     payload["request_number"] = _next_request_number(db)
-    payload.setdefault("status", "OPEN")
+    payload.setdefault("status", "NEW")
     payload["created_by_user_id"] = _resolve_created_by_user_id(db, payload.get("created_by_user_id"))
 
     sales_request = SalesRequest(**payload)
@@ -144,8 +184,8 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
 
 
 def update_open_sales_request(db: Session, sales_request: SalesRequest, payload: dict) -> SalesRequest:
-    if sales_request.status != "OPEN":
-        raise SalesRequestImmutableError("Only OPEN sales requests can be edited.")
+    if sales_request.status not in {"NEW", "QUOTED"}:
+        raise SalesRequestImmutableError("Only NEW or QUOTED sales requests can be edited.")
 
     existing_invoice = db.query(Invoice.id).filter(Invoice.sales_request_id == sales_request.id).scalar()
     if existing_invoice is not None:
@@ -220,6 +260,22 @@ def calculate_sales_request_total(sales_request: SalesRequest) -> Decimal:
 
 def update_sales_request_status(sales_request: SalesRequest, status: str):
     sales_request.status = status
+
+
+def close_sales_request_if_paid(db: Session, sales_request_id: int) -> bool:
+    invoices = db.query(Invoice.status).filter(Invoice.sales_request_id == sales_request_id).all()
+    if not invoices:
+        return False
+
+    if any(row.status != "PAID" for row in invoices):
+        return False
+
+    sales_request = db.query(SalesRequest).filter(SalesRequest.id == sales_request_id).first()
+    if not sales_request:
+        return False
+
+    sales_request.status = "CLOSED"
+    return True
 
 
 def deduct_inventory_for_sales_request(db: Session, sales_request: SalesRequest) -> None:
@@ -320,6 +376,9 @@ def generate_invoice_from_sales_request(
 ) -> Invoice:
     """Generate a DRAFT invoice from a fulfilled sales request."""
     from app.sales.service import create_invoice
+
+    if sales_request.status != "CONFIRMED":
+        raise ValueError("Invoice generation is only allowed when the sales request is CONFIRMED.")
 
     if not sales_request.customer_id:
         raise ValueError(

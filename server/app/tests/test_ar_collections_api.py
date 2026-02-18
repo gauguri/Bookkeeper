@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Invoice, Payment, PaymentApplication
+from app.models import Account, Company, Customer, Invoice, Item, JournalEntry, JournalLine, Payment, PaymentApplication, PurchaseOrder, PurchaseOrderLine, Supplier
 
 
 def build_client() -> TestClient:
@@ -30,6 +30,10 @@ def build_client() -> TestClient:
     app.dependency_overrides[get_db] = override_get_db
 
     with TestingSessionLocal() as db:
+
+        company = Company(name="Forecast Co", base_currency="USD", fiscal_year_start_month=1)
+        db.add(company)
+        db.flush()
         alpha = Customer(name="Alpha Manufacturing", email="ar@alpha.test")
         beta = Customer(name="Beta Retail", email="billing@beta.test")
         db.add_all([alpha, beta])
@@ -71,6 +75,20 @@ def build_client() -> TestClient:
         db.add_all([inv1, inv2, inv3])
         db.flush()
 
+        near_term_invoice = Invoice(
+            customer_id=beta.id,
+            invoice_number="INV-AR-004",
+            status="SENT",
+            issue_date=date.today(),
+            due_date=date.today(),
+            subtotal=Decimal("400.00"),
+            tax_total=Decimal("0.00"),
+            total=Decimal("400.00"),
+            amount_due=Decimal("400.00"),
+        )
+        db.add(near_term_invoice)
+        db.flush()
+
         payment = Payment(
             customer_id=alpha.id,
             invoice_id=inv2.id,
@@ -87,6 +105,67 @@ def build_client() -> TestClient:
                 applied_amount=Decimal("200.00"),
             )
         )
+
+        supplier = Supplier(name="Forecast Supplier", email="supplier@test.com")
+        item = Item(name="Forecast Item", unit_price=Decimal("20.00"), on_hand_qty=Decimal("0.00"), reserved_qty=Decimal("0.00"))
+        db.add_all([supplier, item])
+        db.flush()
+
+        po = PurchaseOrder(
+            supplier_id=supplier.id,
+            po_number="PO-AR-001",
+            order_date=date.today(),
+            expected_date=date.today(),
+            status="SENT",
+            freight_cost=Decimal("50.00"),
+            tariff_cost=Decimal("25.00"),
+        )
+        db.add(po)
+        db.flush()
+        db.add(
+            PurchaseOrderLine(
+                purchase_order_id=po.id,
+                item_id=item.id,
+                qty_ordered=Decimal("10.00"),
+                unit_cost=Decimal("15.00"),
+                freight_cost=Decimal("0.00"),
+                tariff_cost=Decimal("0.00"),
+                landed_cost=Decimal("15.00"),
+            )
+        )
+
+        expense_account = Account(
+            company_id=company.id,
+            code="6000",
+            name="Office Expense",
+            type="EXPENSE",
+            normal_balance="DEBIT",
+            is_active=True,
+        )
+        cash_account = Account(
+            company_id=company.id,
+            code="1000",
+            name="Cash",
+            type="ASSET",
+            normal_balance="DEBIT",
+            is_active=True,
+        )
+        db.add_all([expense_account, cash_account])
+        db.flush()
+
+        scheduled = JournalEntry(
+            company_id=company.id,
+            description="Scheduled rent",
+            txn_date=date.today(),
+            source_type="MANUAL",
+        )
+        db.add(scheduled)
+        db.flush()
+        db.add_all([
+            JournalLine(journal_entry_id=scheduled.id, account_id=expense_account.id, debit=Decimal("120.00"), credit=Decimal("0.00")),
+            JournalLine(journal_entry_id=scheduled.id, account_id=cash_account.id, debit=Decimal("0.00"), credit=Decimal("120.00")),
+        ])
+
         db.commit()
 
     return TestClient(app)
@@ -141,3 +220,19 @@ def test_ar_notes_and_reminders_log_activity():
         refreshed_customer = next(row for row in refreshed if row["customer_id"] == customer_id)
         assert refreshed_customer["last_action_type"] == "REMINDER"
         assert refreshed_customer["follow_up_date"] == "2025-05-08"
+
+
+def test_cash_forecast_returns_eight_weeks_with_inflows_and_outflows():
+    with build_client() as client:
+        response = client.get("/api/ar/cash-forecast?weeks=8")
+        assert response.status_code == 200
+
+        payload = response.json()
+        assert len(payload["buckets"]) == 8
+        assert payload["default_days_to_pay"] == 30
+
+        first_week = payload["buckets"][0]
+        assert Decimal(first_week["expected_outflows"]) >= Decimal("345.00")
+
+        inflows_total = sum(Decimal(bucket["expected_inflows"]) for bucket in payload["buckets"])
+        assert inflows_total >= Decimal("400.00")

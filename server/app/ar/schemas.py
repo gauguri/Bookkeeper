@@ -46,3 +46,20 @@ class ARActivityResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CashForecastBucket(BaseModel):
+    week_start: date
+    week_end: date
+    expected_inflows: DecimalValue
+    expected_outflows: DecimalValue
+    net: DecimalValue
+    cumulative: DecimalValue
+
+
+class CashForecastResponse(BaseModel):
+    generated_at: datetime
+    default_days_to_pay: int
+    default_po_lead_days: int
+    includes_scheduled_expenses: bool
+    buckets: list[CashForecastBucket]

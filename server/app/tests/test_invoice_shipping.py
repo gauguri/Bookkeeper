@@ -56,7 +56,7 @@ def client():
                 )
             )
             db.add(Inventory(item_id=item.id, quantity_on_hand=Decimal("10.00"), landed_unit_cost=Decimal("4.00")))
-            db.add(InventoryReservation(item_id=item.id, sales_request_id=sr.id, qty_reserved=Decimal("3.00")))
+            db.add(InventoryReservation(item_id=item.id, source_type="sales_request", source_id=sr.id, sales_request_id=sr.id, qty_reserved=Decimal("3.00")))
 
             invoice = Invoice(
                 customer_id=customer.id,
@@ -166,5 +166,27 @@ def test_void_invoice_releases_reservation_without_on_hand_change(client: TestCl
         reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
         assert inventory.quantity_on_hand == before
         assert reservation.released_at is not None
+    finally:
+        db_gen.close()
+
+
+def test_ship_invoice_rejects_when_on_hand_is_insufficient(client: TestClient):
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        inventory = db.query(Inventory).filter(Inventory.item_id == 1).first()
+        inventory.quantity_on_hand = Decimal("2.00")
+        db.commit()
+    finally:
+        db_gen.close()
+
+    response = client.post("/api/invoices/1/ship")
+    assert response.status_code == 409
+
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
+        assert reservation.released_at is None
     finally:
         db_gen.close()

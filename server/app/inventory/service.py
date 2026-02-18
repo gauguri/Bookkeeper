@@ -17,6 +17,9 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
+SOURCE_SALES_REQUEST = "sales_request"
+SOURCE_INVOICE = "invoice"
+
 
 def get_reserved_qty(db: Session, item_id: int) -> Decimal:
     reserved = (
@@ -40,6 +43,20 @@ def get_reserved_qty_map(db: Session, item_ids: list[int]) -> dict[int, Decimal]
     for item_id in item_ids:
         reserved_by_id.setdefault(item_id, Decimal("0"))
     return reserved_by_id
+
+
+def get_source_reserved_qty_map(db: Session, *, source_type: str, source_id: int) -> dict[int, Decimal]:
+    rows = (
+        db.query(InventoryReservation.item_id, func.coalesce(func.sum(InventoryReservation.qty_reserved), 0))
+        .filter(
+            InventoryReservation.source_type == source_type,
+            InventoryReservation.source_id == source_id,
+            InventoryReservation.released_at.is_(None),
+        )
+        .group_by(InventoryReservation.item_id)
+        .all()
+    )
+    return {item_id: Decimal(total or 0) for item_id, total in rows}
 
 
 def get_available_qty(db: Session, item_id: int, company_id: int | None = None) -> Decimal:
@@ -167,11 +184,15 @@ def reserve_inventory_record(
     *,
     item_id: int,
     qty_reserved: Decimal,
-    sales_request_id: int | None = None,
-    invoice_id: int | None = None,
+    source_type: str,
+    source_id: int,
 ) -> InventoryReservation:
+    sales_request_id = source_id if source_type == SOURCE_SALES_REQUEST else None
+    invoice_id = source_id if source_type == SOURCE_INVOICE else None
     reservation = InventoryReservation(
         item_id=item_id,
+        source_type=source_type,
+        source_id=source_id,
         sales_request_id=sales_request_id,
         invoice_id=invoice_id,
         qty_reserved=qty_reserved,
@@ -184,10 +205,17 @@ def reserve_inventory_record(
 def release_reservations(
     db: Session,
     *,
+    source_type: str | None = None,
+    source_id: int | None = None,
     sales_request_id: int | None = None,
     invoice_id: int | None = None,
 ) -> list[InventoryReservation]:
     query = db.query(InventoryReservation).filter(InventoryReservation.released_at.is_(None))
+    if source_type is not None and source_id is not None:
+        query = query.filter(
+            InventoryReservation.source_type == source_type,
+            InventoryReservation.source_id == source_id,
+        )
     if sales_request_id is not None:
         query = query.filter(InventoryReservation.sales_request_id == sales_request_id)
     if invoice_id is not None:
@@ -198,6 +226,47 @@ def release_reservations(
     for row in rows:
         row.released_at = released_at
     return rows
+
+
+def sync_reservations_for_source(
+    db: Session,
+    *,
+    source_type: str,
+    source_id: int,
+    item_qty_map: dict[int, Decimal],
+) -> list[InventoryReservation]:
+    active = (
+        db.query(InventoryReservation)
+        .filter(
+            InventoryReservation.source_type == source_type,
+            InventoryReservation.source_id == source_id,
+            InventoryReservation.released_at.is_(None),
+        )
+        .with_for_update()
+        .all()
+    )
+    active_by_item = {row.item_id: row for row in active}
+    released_at = datetime.utcnow()
+
+    for item_id, reservation in active_by_item.items():
+        target = Decimal(item_qty_map.get(item_id, Decimal("0")) or 0)
+        if target <= 0:
+            reservation.released_at = released_at
+        else:
+            reservation.qty_reserved = target
+
+    for item_id, qty in item_qty_map.items():
+        qty_decimal = Decimal(qty or 0)
+        if qty_decimal <= 0 or item_id in active_by_item:
+            continue
+        reserve_inventory_record(
+            db,
+            item_id=item_id,
+            qty_reserved=qty_decimal,
+            source_type=source_type,
+            source_id=source_id,
+        )
+    return active
 
 
 def receive_inventory(

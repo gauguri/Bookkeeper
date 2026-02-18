@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.auth import get_current_user, require_module
 from app.module_keys import ModuleKey
+from app.inventory.service import SOURCE_SALES_REQUEST, release_reservations
 from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
@@ -190,6 +191,18 @@ def patch_sales_request(sales_request_id: int, payload: schemas.SalesRequestUpda
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
     update_sales_request_status(sales_request, payload.status)
+    if payload.status == "CLOSED":
+        release_reservations(db, source_type=SOURCE_SALES_REQUEST, source_id=sales_request.id)
     db.commit()
     db.refresh(sales_request)
     return _to_response(sales_request)
+
+
+@router.delete("/{sales_request_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sales_request(sales_request_id: int, db: Session = Depends(get_db)):
+    sales_request = db.query(SalesRequest).filter(SalesRequest.id == sales_request_id).first()
+    if not sales_request:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    release_reservations(db, source_type=SOURCE_SALES_REQUEST, source_id=sales_request.id)
+    db.delete(sales_request)
+    db.commit()

@@ -15,7 +15,7 @@ from .routers import (
     suppliers,
 )
 
-app = FastAPI(title="Bookkeeper API")
+app = FastAPI(title="Bedrock API")
 
 app.add_middleware(
     CORSMiddleware,

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiRequestError, apiFetch } from "../api";
 import { MODULES } from "../constants/modules";
+import { APP_NAME } from "../branding";
 
 type BootstrapStatus = { needs_bootstrap: boolean };
 type ModuleOption = { key: string; name: string };
@@ -49,7 +50,7 @@ export default function SetupWizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [adminEmail, setAdminEmail] = useState("admin@bookkeeper.local");
+  const [adminEmail, setAdminEmail] = useState("admin@bedrock.local");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
   const [adminToken, setAdminToken] = useState<string | null>(null);
@@ -182,6 +183,7 @@ export default function SetupWizardPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="app-card w-full max-w-3xl space-y-6 p-6">
         <h1 className="text-2xl font-semibold">First-run Setup Wizard</h1>
+        <p className="text-sm text-muted">Welcome to {APP_NAME}.</p>
         <p className="text-sm text-muted">Step {step} of 3</p>
         {error ? <p className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</p> : null}
         {successMessage ? <p className="rounded-lg border border-green-400/40 bg-green-500/10 px-3 py-2 text-sm text-green-500">{successMessage}</p> : null}

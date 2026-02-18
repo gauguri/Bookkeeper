@@ -14,7 +14,7 @@ def override_auth(request):
     app.dependency_overrides[get_current_user] = lambda: User(
         id=1,
         company_id=1,
-        email="admin@bookkeeper.local",
+        email="admin@bedrock.local",
         full_name="Test Admin",
         password_hash="x",
         is_admin=True,

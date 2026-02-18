@@ -44,14 +44,14 @@ def test_bootstrap_admin_can_only_be_created_once(client):
 
     first = test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "admin@bookkeeper.local", "password": "password123!", "full_name": "Admin User"},
+        json={"email": "admin@bedrock.local", "password": "password123!", "full_name": "Admin User"},
     )
     assert first.status_code == 201
-    assert first.json()["user"]["email"] == "admin@bookkeeper.local"
+    assert first.json()["user"]["email"] == "admin@bedrock.local"
 
     second = test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "other-admin@bookkeeper.local", "password": "anotherpass123!"},
+        json={"email": "other-admin@bedrock.local", "password": "anotherpass123!"},
     )
     assert second.status_code == 409
 
@@ -62,7 +62,7 @@ def test_bootstrap_status_false_after_admin_created(client):
 
     test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "admin@bookkeeper.local", "password": "password123!", "full_name": "Admin User"},
+        json={"email": "admin@bedrock.local", "password": "password123!", "full_name": "Admin User"},
     )
 
     status_response = test_client.get("/api/auth/bootstrap/status")
@@ -84,6 +84,6 @@ def test_dev_reset_admin_is_flag_gated(client, monkeypatch):
     assert allowed.status_code == 204
 
     with session_local() as db:
-        user = db.query(User).filter(User.email == "admin@bookkeeper.local").first()
+        user = db.query(User).filter(User.email == "admin@bedrock.local").first()
         assert user is not None
         assert user.is_admin is True

@@ -199,11 +199,11 @@ def dev_reset_admin(payload: DevResetPayload, db: Session = Depends(get_db)):
 
     seed_modules(db)
     company = _get_or_create_company(db)
-    admin = db.query(User).filter(User.email == "admin@bookkeeper.local").first()
+    admin = db.query(User).filter(User.email == "admin@bedrock.local").first()
     if not admin:
         admin = User(
             company_id=company.id,
-            email="admin@bookkeeper.local",
+            email="admin@bedrock.local",
             full_name="System Admin",
             password_hash=hash_password(payload.password),
             role="admin",

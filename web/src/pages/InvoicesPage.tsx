@@ -40,6 +40,8 @@ type LineItem = {
   override_cost: boolean;
   discount: string;
   tax_rate: string;
+  landed_unit_cost: string;
+  margin_threshold_percent: number;
 };
 
 type SupplierLink = {
@@ -59,7 +61,16 @@ const emptyLine: LineItem = {
   supplier_id: undefined,
   override_cost: false,
   discount: "0",
-  tax_rate: "0"
+  tax_rate: "0",
+  landed_unit_cost: "0",
+  margin_threshold_percent: 20
+};
+
+type PricingContextResponse = {
+  landed_unit_cost: number;
+  available_qty: number;
+  recommended_price: number;
+  margin_threshold_percent: number;
 };
 
 const statusStyles: Record<string, string> = {
@@ -227,7 +238,9 @@ export default function InvoicesPage() {
         unit_price: "",
         unit_cost: "",
         supplier_id: undefined,
-        override_cost: false
+        override_cost: false,
+        landed_unit_cost: "0",
+        margin_threshold_percent: 20
       });
       return;
     }
@@ -237,17 +250,29 @@ export default function InvoicesPage() {
       unit_price: item.unit_price.toString(),
       supplier_id: item.preferred_supplier_id ?? undefined,
       unit_cost: item.preferred_landed_cost != null ? item.preferred_landed_cost.toString() : "",
+      landed_unit_cost: item.preferred_landed_cost != null ? item.preferred_landed_cost.toString() : "0",
       override_cost: false
     });
     try {
+      const customerIdParam = form.customer_id ? `?customer_id=${form.customer_id}` : "";
+      const pricingContext = await apiFetch<PricingContextResponse>(`/items/${item.id}/pricing-context${customerIdParam}`);
+      updateLine(index, {
+        landed_unit_cost: String(pricingContext.landed_unit_cost),
+        margin_threshold_percent: pricingContext.margin_threshold_percent,
+        unit_price: String(pricingContext.recommended_price),
+        unit_cost: String(pricingContext.landed_unit_cost)
+      });
+
       const suppliersForItem = await loadSuppliersForItem(item.id);
       if (suppliersForItem.length > 0) {
         const preferred = suppliersForItem.find((link) => link.is_preferred);
         const supplierId = item.preferred_supplier_id ?? preferred?.supplier_id;
         if (supplierId) {
+          const selectedSupplierCost = suppliersForItem.find((link) => link.supplier_id === supplierId)?.landed_cost.toString();
           updateLine(index, {
             supplier_id: supplierId,
-            unit_cost: suppliersForItem.find((link) => link.supplier_id === supplierId)?.landed_cost.toString() ?? ""
+            unit_cost: selectedSupplierCost ?? "",
+            landed_unit_cost: selectedSupplierCost ?? "0"
           });
         }
       }
@@ -337,6 +362,7 @@ export default function InvoicesPage() {
         unit_price: Number(line.unit_price),
         unit_cost: line.unit_cost ? Number(line.unit_cost) : null,
         supplier_id: line.supplier_id ?? null,
+        landed_unit_cost: Number(line.landed_unit_cost || 0),
         discount: Number(line.discount || 0),
         tax_rate: Number(line.tax_rate || 0)
       }))
@@ -718,6 +744,21 @@ export default function InvoicesPage() {
               <button className="app-button-ghost text-danger" onClick={() => removeLine(index)} disabled={lines.length === 1}>
                 Remove
               </button>
+              <div className="col-span-full text-xs text-muted">
+                {(() => {
+                  const qty = Number(line.quantity || 0);
+                  const sell = Number(line.unit_price || 0);
+                  const landed = Number(line.landed_unit_cost || 0);
+                  const marginDollars = (sell - landed) * qty;
+                  const marginPercent = sell > 0 ? ((sell - landed) / sell) * 100 : 0;
+                  return (
+                    <span className={marginPercent < line.margin_threshold_percent ? "text-danger" : ""}>
+                      Landed unit cost: {currency(landed)} • Margin: {currency(marginDollars)} ({marginPercent.toFixed(1)}%)
+                      {marginPercent < line.margin_threshold_percent ? ` • Below ${line.margin_threshold_percent}% target` : ""}
+                    </span>
+                  );
+                })()}
+              </div>
             </div>
           ))}
           <div>

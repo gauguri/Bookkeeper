@@ -16,6 +16,7 @@ class CustomerBase(BaseModel):
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     notes: Optional[str] = None
+    tier: str = "STANDARD"
     is_active: bool = True
 
 
@@ -78,6 +79,7 @@ class InvoiceLineBase(BaseModel):
     quantity: DecimalValue = Field(..., gt=0)
     unit_price: DecimalValue = Field(..., ge=0)
     unit_cost: Optional[DecimalValue] = Field(None, ge=0)
+    landed_unit_cost: Optional[DecimalValue] = Field(None, ge=0)
     supplier_id: Optional[int] = None
     discount: DecimalValue = Field(0, ge=0)
     tax_rate: TaxRateValue = Field(0, ge=0, le=1)
@@ -207,3 +209,14 @@ class CustomerRevenueResponse(BaseModel):
     customer_id: int
     customer_name: str
     total_revenue: DecimalValue
+
+
+class ItemPricingContextResponse(BaseModel):
+    item_id: int
+    customer_id: Optional[int] = None
+    customer_tier: str
+    landed_unit_cost: DecimalValue
+    available_qty: DecimalValue
+    recommended_price: DecimalValue
+    default_markup_percent: DecimalValue
+    margin_threshold_percent: DecimalValue

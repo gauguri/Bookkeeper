@@ -6,7 +6,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import SOURCE_INVOICE, get_available_qty, reserve_inventory_record
-from app.models import Customer, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
+from app.models import Customer, Inventory, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
 from app.sales.calculations import (
     InvoiceLineInput,
     PaymentApplicationInput,
@@ -15,6 +15,53 @@ from app.sales.calculations import (
     validate_payment_applications,
 )
 from app.suppliers.service import get_supplier_link
+
+
+DEFAULT_MARGIN_THRESHOLD_PERCENT = Decimal("20")
+DEFAULT_MARKUP_BY_TIER = {
+    "STANDARD": Decimal("30"),
+    "BRONZE": Decimal("25"),
+    "SILVER": Decimal("20"),
+    "GOLD": Decimal("15"),
+    "PLATINUM": Decimal("12"),
+}
+
+
+def get_default_markup_percent(customer_tier: str | None) -> Decimal:
+    normalized_tier = (customer_tier or "STANDARD").upper()
+    return DEFAULT_MARKUP_BY_TIER.get(normalized_tier, DEFAULT_MARKUP_BY_TIER["STANDARD"])
+
+
+def get_item_pricing_context(db: Session, *, item_id: int, customer_id: int | None = None) -> dict:
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise ValueError("Item not found.")
+
+    customer_tier = "STANDARD"
+    if customer_id is not None:
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("Customer not found.")
+        customer_tier = customer.tier or "STANDARD"
+
+    inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
+    landed_unit_cost = Decimal(inventory.landed_unit_cost or 0) if inventory else Decimal("0")
+    available_qty = get_available_qty(db, item_id)
+    markup_percent = get_default_markup_percent(customer_tier)
+    recommended_price = landed_unit_cost * (Decimal("1") + (markup_percent / Decimal("100")))
+    if recommended_price <= 0:
+        recommended_price = Decimal(item.unit_price or 0)
+
+    return {
+        "item_id": item_id,
+        "customer_id": customer_id,
+        "customer_tier": customer_tier.upper(),
+        "landed_unit_cost": landed_unit_cost,
+        "available_qty": available_qty,
+        "recommended_price": recommended_price,
+        "default_markup_percent": markup_percent,
+        "margin_threshold_percent": DEFAULT_MARGIN_THRESHOLD_PERCENT,
+    }
 
 
 def get_next_invoice_number(db: Session) -> str:
@@ -67,6 +114,7 @@ def build_invoice_lines(
         description = line.get("description")
         unit_price = line.get("unit_price")
         unit_cost = line.get("unit_cost")
+        landed_unit_cost = line.get("landed_unit_cost")
         supplier_id = line.get("supplier_id")
         if line.get("item_id"):
             item = db.query(Item).filter(Item.id == line["item_id"]).first()
@@ -86,6 +134,10 @@ def build_invoice_lines(
                 supplier_link = get_supplier_link(db, item.id, None)
                 if supplier_link:
                     unit_cost = supplier_link.landed_cost
+
+            inventory_record = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+            if landed_unit_cost is None and inventory_record is not None:
+                landed_unit_cost = Decimal(inventory_record.landed_unit_cost or 0)
         elif supplier_id:
             raise ValueError("Supplier cannot be set without an item.")
         if unit_price is None:
@@ -108,6 +160,7 @@ def build_invoice_lines(
                 quantity=quantity,
                 unit_price=unit_price,
                 unit_cost=Decimal(unit_cost) if unit_cost is not None else None,
+                landed_unit_cost=Decimal(landed_unit_cost or 0),
                 supplier_id=supplier_id,
                 discount=discount,
                 tax_rate=tax_rate,

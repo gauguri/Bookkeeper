@@ -373,6 +373,17 @@ def generate_invoice_from_sales_request(
             "quantity": sr_line.quantity,
             "unit_price": unit_price,
             "unit_cost": Decimal(str(unit_cost)) if unit_cost is not None else None,
+            "landed_unit_cost": Decimal(
+                str(
+                    (
+                        db.query(Inventory.landed_unit_cost)
+                        .filter(Inventory.item_id == sr_line.item_id)
+                        .scalar()
+                    )
+                    or unit_cost
+                    or 0
+                )
+            ),
             "supplier_id": supplier_id,
             "discount": Decimal(str(sel.get("discount", 0))),
             "tax_rate": Decimal(str(sel.get("tax_rate", 0))),

@@ -466,7 +466,7 @@ export default function InvoiceDetailPage() {
           <div className="mt-6 rounded-2xl border bg-gradient-to-b from-white to-slate-50 p-6 shadow-soft">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Bookkeeper</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Bedrock</p>
                 <p className="mt-2 text-lg font-semibold">Invoice statement</p>
               </div>
               <div className="text-right text-sm text-muted">

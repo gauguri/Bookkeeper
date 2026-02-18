@@ -46,7 +46,7 @@ const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: stri
   { moduleKey: MODULES.SALES_REQUESTS, matches: (pathname) => pathname.startsWith("/sales-requests") },
   { moduleKey: MODULES.INVOICES, matches: (pathname) => pathname.startsWith("/sales/invoices") || pathname.startsWith("/invoices") },
   { moduleKey: MODULES.PAYMENTS, matches: (pathname) => pathname.startsWith("/sales/payments") || pathname.startsWith("/payments") },
-  { moduleKey: MODULES.REPORTS, matches: (pathname) => pathname.startsWith("/sales/reports") || pathname.startsWith("/finance/ar-aging") },
+  { moduleKey: MODULES.REPORTS, matches: (pathname) => pathname.startsWith("/sales/reports") || pathname.startsWith("/finance/ar-aging") || pathname.startsWith("/finance/cash-forecast") },
   { moduleKey: MODULES.EXPENSES, matches: (pathname) => pathname.startsWith("/expenses") },
   { moduleKey: MODULES.BANKING, matches: (pathname) => pathname.startsWith("/banking") },
   { moduleKey: MODULES.IMPORT, matches: (pathname) => pathname.startsWith("/accounts/bulk-import") },

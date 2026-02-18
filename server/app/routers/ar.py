@@ -4,8 +4,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.ar.schemas import ARActivityResponse, ARAgingCustomerRow, ARNoteCreate, ARReminderCreate
-from app.ar.service import create_ar_activity, get_ar_aging_by_customer
+from app.ar.schemas import ARActivityResponse, ARAgingCustomerRow, ARNoteCreate, ARReminderCreate, CashForecastResponse
+from app.ar.service import create_ar_activity, get_ar_aging_by_customer, get_cash_forecast
 from app.auth import require_module
 from app.db import get_db
 from app.module_keys import ModuleKey
@@ -20,6 +20,15 @@ def get_ar_aging(
     _=Depends(require_module(ModuleKey.REPORTS.value)),
 ):
     return get_ar_aging_by_customer(db, as_of)
+
+
+@router.get("/cash-forecast", response_model=CashForecastResponse)
+def get_cash_forecast_endpoint(
+    weeks: int = Query(8, ge=1, le=26),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.REPORTS.value)),
+):
+    return get_cash_forecast(db, weeks=weeks)
 
 
 @router.post("/notes", response_model=ARActivityResponse, status_code=status.HTTP_201_CREATED)

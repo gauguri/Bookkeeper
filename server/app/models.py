@@ -201,6 +201,7 @@ class Customer(Base):
 
     invoices = relationship("Invoice", back_populates="customer")
     payments = relationship("Payment", back_populates="customer")
+    ar_activities = relationship("ARCollectionActivity", back_populates="customer", cascade="all, delete-orphan")
 
 
 class Supplier(Base):
@@ -377,6 +378,20 @@ class PaymentApplication(Base):
 
     payment = relationship("Payment", back_populates="applications")
     invoice = relationship("Invoice", back_populates="payment_applications")
+
+
+class ARCollectionActivity(Base):
+    __tablename__ = "ar_collection_activities"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
+    activity_type = Column(String(20), nullable=False)
+    note = Column(Text, nullable=True)
+    follow_up_date = Column(Date, nullable=True)
+    reminder_channel = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer", back_populates="ar_activities")
 
 
 class InventoryTransaction(Base):

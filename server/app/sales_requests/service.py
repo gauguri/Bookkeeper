@@ -5,10 +5,11 @@ from typing import Optional
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import (
+    SOURCE_SALES_REQUEST,
     get_available_qty,
     get_reserved_qty,
-    release_reservations,
-    reserve_inventory_record,
+    get_source_reserved_qty_map,
+    sync_reservations_for_source,
 )
 from app.models import Company, Customer, Inventory, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
 from app.suppliers.service import get_supplier_link
@@ -70,14 +71,16 @@ class SalesRequestImmutableError(ValueError):
     pass
 
 
-def _reserve_sales_request_lines(db: Session, sales_request: SalesRequest) -> None:
+def _sync_sales_request_reservations(db: Session, sales_request: SalesRequest) -> None:
+    item_qty_map: dict[int, Decimal] = {}
     for line in sales_request.lines:
-        reserve_inventory_record(
-            db,
-            item_id=line.item_id,
-            qty_reserved=Decimal(line.quantity or 0),
-            sales_request_id=sales_request.id,
-        )
+        item_qty_map[line.item_id] = item_qty_map.get(line.item_id, Decimal("0")) + Decimal(line.quantity or 0)
+    sync_reservations_for_source(
+        db,
+        source_type=SOURCE_SALES_REQUEST,
+        source_id=sales_request.id,
+        item_qty_map=item_qty_map,
+    )
 
 
 def create_sales_request(db: Session, payload: dict) -> SalesRequest:
@@ -136,7 +139,7 @@ def create_sales_request(db: Session, payload: dict) -> SalesRequest:
 
     db.add(sales_request)
     db.flush()
-    _reserve_sales_request_lines(db, sales_request)
+    _sync_sales_request_reservations(db, sales_request)
     return sales_request
 
 
@@ -167,8 +170,11 @@ def update_open_sales_request(db: Session, sales_request: SalesRequest, payload:
     inventory_violations = []
     company_id = _get_default_company_id(db)
     new_lines: list[SalesRequestLine] = []
-
-    release_reservations(db, sales_request_id=sales_request.id)
+    current_reserved_by_item = get_source_reserved_qty_map(
+        db,
+        source_type=SOURCE_SALES_REQUEST,
+        source_id=sales_request.id,
+    )
 
     for line in line_items:
         item = db.query(Item).filter(Item.id == line["item_id"]).first()
@@ -176,7 +182,7 @@ def update_open_sales_request(db: Session, sales_request: SalesRequest, payload:
             raise ValueError("One or more selected items no longer exist.")
 
         quantity = Decimal(str(line["quantity"]))
-        available_qty = get_available_qty(db, item.id, company_id=company_id)
+        available_qty = get_available_qty(db, item.id, company_id=company_id) + current_reserved_by_item.get(item.id, Decimal("0"))
         if quantity > available_qty:
             inventory_violations.append(
                 {
@@ -204,7 +210,7 @@ def update_open_sales_request(db: Session, sales_request: SalesRequest, payload:
     sales_request.lines.clear()
     sales_request.lines.extend(new_lines)
     db.flush()
-    _reserve_sales_request_lines(db, sales_request)
+    _sync_sales_request_reservations(db, sales_request)
     return sales_request
 
 

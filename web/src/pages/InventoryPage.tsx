@@ -12,9 +12,11 @@ type InventoryRow = {
   last_updated_at: string;
 };
 
-type Item = {
+type InventoryItem = {
   id: number;
   name: string;
+  reserved_qty: number;
+  available_qty: number;
 };
 
 type InventoryForm = {
@@ -31,7 +33,7 @@ const emptyForm: InventoryForm = {
 
 export default function InventoryPage() {
   const [rows, setRows] = useState<InventoryRow[]>([]);
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<InventoryItem[]>([]);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<InventoryRow | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -41,7 +43,7 @@ export default function InventoryPage() {
     try {
       const [inventoryData, itemData] = await Promise.all([
         apiFetch<InventoryRow[]>("/inventory"),
-        apiFetch<Item[]>("/items")
+        apiFetch<InventoryItem[]>("/inventory/items")
       ]);
       setRows(inventoryData);
       setItems(itemData);
@@ -186,6 +188,8 @@ export default function InventoryPage() {
             <tr>
               <th className="px-4 py-3">Item</th>
               <th className="px-4 py-3">Quantity On Hand</th>
+              <th className="px-4 py-3">Reserved</th>
+              <th className="px-4 py-3">Available</th>
               <th className="px-4 py-3">Landed Unit Cost</th>
               <th className="px-4 py-3">Total Value</th>
               <th className="px-4 py-3">Last Updated</th>
@@ -197,6 +201,8 @@ export default function InventoryPage() {
               <tr key={row.id} className="border-t border-muted/20">
                 <td className="px-4 py-3 font-medium">{row.item_name}</td>
                 <td className="px-4 py-3">{Number(row.quantity_on_hand).toFixed(2)}</td>
+                <td className="px-4 py-3">{Number(items.find((item) => item.id === row.item_id)?.reserved_qty ?? 0).toFixed(2)}</td>
+                <td className="px-4 py-3">{Number(items.find((item) => item.id === row.item_id)?.available_qty ?? row.quantity_on_hand).toFixed(2)}</td>
                 <td className="px-4 py-3">${Number(row.landed_unit_cost).toFixed(2)}</td>
                 <td className="px-4 py-3">${Number(row.total_value).toFixed(2)}</td>
                 <td className="px-4 py-3">{new Date(row.last_updated_at).toLocaleString()}</td>

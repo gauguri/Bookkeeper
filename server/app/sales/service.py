@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional, Sequence
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
-from app.inventory.service import get_available_qty, reserve_inventory_record
+from app.inventory.service import SOURCE_INVOICE, get_available_qty, reserve_inventory_record
 from app.models import Customer, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
 from app.sales.calculations import (
     InvoiceLineInput,
@@ -188,7 +188,8 @@ def create_invoice(db: Session, payload: dict, *, reserve_stock: bool = True) ->
                 db,
                 item_id=line.item_id,
                 qty_reserved=requested,
-                invoice_id=invoice.id,
+                source_type=SOURCE_INVOICE,
+                source_id=invoice.id,
             )
 
     return invoice

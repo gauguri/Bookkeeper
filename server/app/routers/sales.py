@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
-from app.inventory.service import create_inventory_movement, release_reservations
+from app.inventory.service import SOURCE_INVOICE, SOURCE_SALES_REQUEST, create_inventory_movement, get_source_reserved_qty_map, release_reservations
 from app.models import Customer, Inventory, Invoice, Item, Payment
 from app.sales_requests.service import (
     update_sales_request_status,
@@ -245,15 +245,18 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     if invoice.status not in {"SENT", "PARTIALLY_PAID"}:
         raise HTTPException(status_code=400, detail="Only sent invoices can be marked as shipped.")
 
-    reservations = []
     if invoice.sales_request_id is not None:
-        reservations = release_reservations(db, sales_request_id=invoice.sales_request_id)
+        source_type = SOURCE_SALES_REQUEST
+        source_id = invoice.sales_request_id
     else:
-        reservations = release_reservations(db, invoice_id=invoice.id)
+        source_type = SOURCE_INVOICE
+        source_id = invoice.id
 
-    reserved_by_item: dict[int, Decimal] = {}
-    for reservation in reservations:
-        reserved_by_item[reservation.item_id] = reserved_by_item.get(reservation.item_id, Decimal("0")) + Decimal(reservation.qty_reserved or 0)
+    reserved_by_item = get_source_reserved_qty_map(
+        db,
+        source_type=source_type,
+        source_id=source_id,
+    )
 
     for line in invoice.lines:
         if line.item_id is None:
@@ -279,6 +282,8 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
             ref_id=invoice.id,
         )
 
+    release_reservations(db, source_type=source_type, source_id=source_id)
+
     invoice.status = "SHIPPED"
     invoice.shipped_at = datetime.utcnow()
 
@@ -299,9 +304,9 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         raise HTTPException(status_code=400, detail="Paid or shipped invoices cannot be voided.")
 
     if invoice.sales_request_id is not None:
-        release_reservations(db, sales_request_id=invoice.sales_request_id)
+        release_reservations(db, source_type=SOURCE_SALES_REQUEST, source_id=invoice.sales_request_id)
     else:
-        release_reservations(db, invoice_id=invoice.id)
+        release_reservations(db, source_type=SOURCE_INVOICE, source_id=invoice.id)
 
     invoice.status = "VOID"
     invoice.amount_due = Decimal("0.00")

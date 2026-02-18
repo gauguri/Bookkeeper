@@ -183,8 +183,8 @@ def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: Tes
 
     item_1_inventory = client.get("/api/inventory/available?item_id=1")
     item_2_inventory = client.get("/api/inventory/available?item_id=2")
-    assert item_1_inventory.json()["available_qty"] == "8.00"
-    assert item_2_inventory.json()["available_qty"] == "-2.00"
+    assert item_1_inventory.json()["available_qty"] == "10.00"
+    assert item_2_inventory.json()["available_qty"] == "1.00"
 
 
 def _default_update_payload(**overrides):
@@ -307,3 +307,14 @@ def test_sales_request_detail_includes_invoice_identifiers(client: TestClient):
     payload = response.json()
     assert payload["invoice_id"] == invoice_id
     assert payload["invoice_number"] == "INV-000009"
+
+
+def test_delete_sales_request_releases_reservation(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=3)
+
+    delete_response = client.delete(f"/api/sales-requests/{sales_request_id}")
+    assert delete_response.status_code == 204
+
+    availability = client.get("/api/inventory/available?item_id=1")
+    assert availability.status_code == 200
+    assert availability.json() == {"item_id": 1, "available_qty": "10.00"}

@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import (
+    ar,
     auth,
     backlog,
     chart_of_accounts,
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(ar.router)
 app.include_router(auth.router)
 app.include_router(backlog.router)
 app.include_router(sales.router)

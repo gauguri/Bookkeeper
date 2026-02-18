@@ -23,6 +23,7 @@ import NoAccessPage from "./pages/NoAccessPage";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
+import ARAgingPage from "./pages/ARAgingPage";
 import SalesLanding from "./pages/SalesLanding";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
 import SalesRequestEditPage from "./pages/SalesRequestEditPage";
@@ -41,7 +42,8 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Sales Requests", to: MODULE_ROUTE_MAP[MODULES.SALES_REQUESTS], icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
     { label: "Invoices", to: MODULE_ROUTE_MAP[MODULES.INVOICES], icon: FileText, moduleKey: MODULES.INVOICES },
     { label: "Payments", to: MODULE_ROUTE_MAP[MODULES.PAYMENTS], icon: Banknote, moduleKey: MODULES.PAYMENTS },
-    { label: "Reports", to: "/sales/reports", icon: Layers, moduleKey: MODULES.REPORTS }
+    { label: "Reports", to: "/sales/reports", icon: Layers, moduleKey: MODULES.REPORTS },
+    { label: "A/R Aging", to: "/finance/ar-aging", icon: FileText, moduleKey: MODULES.REPORTS }
   ]},
   { title: "Accounting", items: [
     { label: "Expenses", to: "/expenses", icon: FileText, moduleKey: MODULES.EXPENSES },
@@ -159,6 +161,7 @@ export default function App() {
             <Route path="/sales/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />
             <Route path="/sales/reports" element={<ProtectedRoute moduleKey={MODULES.REPORTS}><ReportsPage /></ProtectedRoute>} />
+            <Route path="/finance/ar-aging" element={<ProtectedRoute moduleKey={MODULES.REPORTS}><ARAgingPage /></ProtectedRoute>} />
             <Route path="/expenses" element={<ProtectedRoute moduleKey={MODULES.EXPENSES}><ExpensesPage /></ProtectedRoute>} />
             <Route path="/banking" element={<ProtectedRoute moduleKey={MODULES.BANKING}><PlaceholderPage title="Banking" /></ProtectedRoute>} />
             <Route path="/accounts" element={<ProtectedRoute moduleKey={MODULES.CHART_OF_ACCOUNTS}><ChartOfAccountsPage /></ProtectedRoute>} />

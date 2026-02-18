@@ -13,6 +13,7 @@ import ControlPage from "./pages/ControlPage";
 import CustomersPage from "./pages/CustomersPage";
 import ExpensesPage from "./pages/ExpensesPage";
 import InventoryPage from "./pages/InventoryPage";
+import BacklogPage from "./pages/BacklogPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ItemsPage from "./pages/ItemsPage";
@@ -51,7 +52,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Suppliers", to: "/purchasing/suppliers", icon: Truck, moduleKey: MODULES.SUPPLIERS },
     { label: "Purchase Orders", to: "/purchasing/purchase-orders", icon: PackageCheck, moduleKey: MODULES.PURCHASE_ORDERS }
   ]},
-  { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: MODULES.INVENTORY }]},
+  { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: MODULES.INVENTORY }, { label: "Backlog", to: "/operations/backlog", icon: ClipboardList, moduleKey: MODULES.INVENTORY }]},
   { title: "Admin", items: [{ label: "Control", to: "/control", icon: Settings, moduleKey: MODULES.CONTROL }]}
 ];
 
@@ -165,6 +166,8 @@ export default function App() {
             <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><InventoryPage /></ProtectedRoute>} />
+            <Route path="/operations/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
+            <Route path="/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
             <Route path="/no-access" element={<ProtectedRoute><NoAccessPage /></ProtectedRoute>} />
           </Routes></Layout>} />

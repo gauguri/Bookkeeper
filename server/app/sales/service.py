@@ -430,10 +430,14 @@ def apply_payment(
     db.add(payment)
     db.flush()
 
+    from app.sales_requests.service import close_sales_request_if_paid
+
     for invoice in invoices:
         recalculate_invoice_balance(db, invoice)
         update_invoice_status(invoice)
         invoice.updated_at = datetime.utcnow()
+        if invoice.sales_request_id:
+            close_sales_request_if_paid(db, invoice.sales_request_id)
 
     create_payment_accounting_entry_stub(payment)
     return payment

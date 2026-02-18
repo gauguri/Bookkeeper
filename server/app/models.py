@@ -420,7 +420,7 @@ class SalesRequest(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     customer_name = Column(String(200), nullable=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    status = Column(String(20), nullable=False, default="OPEN")
+    status = Column(String(20), nullable=False, default="NEW")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     requested_fulfillment_date = Column(Date, nullable=True)

@@ -27,6 +27,7 @@ from app.sales.service import (
     update_invoice_status,
     customer_revenue,
     ar_aging,
+    get_item_pricing_context,
 )
 
 router = APIRouter(prefix="/api", tags=["sales"])
@@ -101,6 +102,21 @@ def get_item(item_id: int, db: Session = Depends(get_db), _=Depends(require_modu
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
     return item
+
+
+@router.get("/items/{item_id}/pricing-context", response_model=schemas.ItemPricingContextResponse)
+def get_item_pricing_context_endpoint(
+    item_id: int,
+    customer_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.ITEMS.value)),
+):
+    try:
+        return get_item_pricing_context(db, item_id=item_id, customer_id=customer_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.put("/items/{item_id}", response_model=schemas.ItemResponse)
@@ -273,6 +289,7 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
             raise HTTPException(status_code=409, detail=f"Insufficient reserved inventory for item_id {line.item_id}.")
 
         inventory.quantity_on_hand = Decimal(inventory.quantity_on_hand or 0) - qty_shipped
+        inventory.total_value = Decimal(inventory.quantity_on_hand or 0) * Decimal(inventory.landed_unit_cost or 0)
         create_inventory_movement(
             db,
             item_id=line.item_id,

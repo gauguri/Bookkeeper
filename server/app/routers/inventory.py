@@ -32,7 +32,7 @@ def list_inventory_records(db: Session = Depends(get_db)):
             item_sku=record.item.sku if record.item else None,
             quantity_on_hand=record.quantity_on_hand,
             landed_unit_cost=record.landed_unit_cost,
-            total_value=Decimal(record.quantity_on_hand or 0) * Decimal(record.landed_unit_cost or 0),
+            total_value=record.total_value,
             last_updated_at=record.last_updated_at,
         )
         for record in records
@@ -49,6 +49,7 @@ def create_inventory_record(payload: schemas.InventoryRecordCreate, db: Session 
         item_id=payload.item_id,
         quantity_on_hand=payload.quantity_on_hand,
         landed_unit_cost=payload.landed_unit_cost,
+        total_value=Decimal(payload.quantity_on_hand) * Decimal(payload.landed_unit_cost),
         last_updated_at=datetime.utcnow(),
     )
     db.add(record)
@@ -66,7 +67,7 @@ def create_inventory_record(payload: schemas.InventoryRecordCreate, db: Session 
         item_sku=item.sku,
         quantity_on_hand=record.quantity_on_hand,
         landed_unit_cost=record.landed_unit_cost,
-        total_value=Decimal(record.quantity_on_hand or 0) * Decimal(record.landed_unit_cost or 0),
+        total_value=record.total_value,
         last_updated_at=record.last_updated_at,
     )
 
@@ -80,6 +81,7 @@ def update_inventory_record(inventory_id: int, payload: schemas.InventoryRecordU
 
     record.quantity_on_hand = payload.quantity_on_hand
     record.landed_unit_cost = payload.landed_unit_cost
+    record.total_value = Decimal(payload.quantity_on_hand) * Decimal(payload.landed_unit_cost)
     record.last_updated_at = datetime.utcnow()
     db.commit()
     db.refresh(record)
@@ -91,7 +93,7 @@ def update_inventory_record(inventory_id: int, payload: schemas.InventoryRecordU
         item_sku=record.item.sku if record.item else None,
         quantity_on_hand=record.quantity_on_hand,
         landed_unit_cost=record.landed_unit_cost,
-        total_value=Decimal(record.quantity_on_hand or 0) * Decimal(record.landed_unit_cost or 0),
+        total_value=record.total_value,
         last_updated_at=record.last_updated_at,
     )
 

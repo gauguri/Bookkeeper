@@ -4,6 +4,13 @@ import { apiFetch, type ApiRequestError } from "../api";
 type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
 type InventoryAvailabilityResponse = { item_id: number; available_qty: number };
+type PricingContextResponse = {
+  item_id: number;
+  landed_unit_cost: number;
+  available_qty: number;
+  recommended_price: number;
+  margin_threshold_percent: number;
+};
 
 type LineItemForm = {
   item_id: number | "";
@@ -12,6 +19,9 @@ type LineItemForm = {
   available_qty: number | null;
   quantity_error: string;
   availability_loading: boolean;
+  landed_unit_cost: number | null;
+  recommended_price: number | null;
+  margin_threshold_percent: number;
 };
 
 type InitialValues = {
@@ -40,7 +50,10 @@ const emptyLine: LineItemForm = {
   unit_price: "0",
   available_qty: null,
   quantity_error: "",
-  availability_loading: false
+  availability_loading: false,
+  landed_unit_cost: null,
+  recommended_price: null,
+  margin_threshold_percent: 20
 };
 
 const getQuantityValidationError = (quantity: string, availableQty: number | null) => {
@@ -60,7 +73,10 @@ const mapInitialLine = (line: InitialValues["lines"][number]): LineItemForm => (
   unit_price: String(line.unit_price),
   available_qty: line.available_qty ?? null,
   quantity_error: getQuantityValidationError(String(line.quantity), line.available_qty ?? null),
-  availability_loading: false
+  availability_loading: false,
+  landed_unit_cost: null,
+  recommended_price: null,
+  margin_threshold_percent: 20
 });
 
 export default function SalesRequestForm({
@@ -129,6 +145,22 @@ export default function SalesRequestForm({
     } catch {
       updateLine(index, { availability_loading: false, available_qty: null });
       setError("Unable to load real-time inventory for the selected item.");
+    }
+  };
+
+  const fetchPricingContextForLine = async (index: number, itemId: number) => {
+    try {
+      const customerIdParam = !isWalkIn && customerId ? `?customer_id=${customerId}` : "";
+      const pricingContext = await apiFetch<PricingContextResponse>(`/items/${itemId}/pricing-context${customerIdParam}`);
+      updateLine(index, {
+        landed_unit_cost: Number(pricingContext.landed_unit_cost),
+        recommended_price: Number(pricingContext.recommended_price),
+        margin_threshold_percent: Number(pricingContext.margin_threshold_percent),
+        available_qty: Number(pricingContext.available_qty),
+        ...(Number(lines[index]?.unit_price || 0) <= 0 ? { unit_price: String(pricingContext.recommended_price) } : {})
+      });
+    } catch {
+      setError("Unable to load landed-cost pricing context for the selected item.");
     }
   };
 
@@ -279,6 +311,7 @@ export default function SalesRequestForm({
                 updateLine(index, { item_id: itemId, available_qty: null, quantity_error: "" });
                 if (typeof itemId === "number") {
                   void fetchAvailabilityForLine(index, itemId);
+                  void fetchPricingContextForLine(index, itemId);
                 }
               }}
             >
@@ -326,6 +359,27 @@ export default function SalesRequestForm({
             >
               Remove
             </button>
+            <div className="text-xs text-muted md:col-span-4">
+              <div>
+                Landed unit cost: {line.landed_unit_cost !== null ? `$${line.landed_unit_cost.toFixed(2)}` : "—"} • Suggested sell:
+                {line.recommended_price !== null ? ` $${line.recommended_price.toFixed(2)}` : " —"}
+              </div>
+              {line.landed_unit_cost !== null ? (() => {
+                const sellPrice = Number(line.unit_price || 0);
+                const qty = Number(line.quantity || 0);
+                const marginPerUnit = sellPrice - line.landed_unit_cost;
+                const marginDollars = marginPerUnit * qty;
+                const marginPercent = sellPrice > 0 ? (marginPerUnit / sellPrice) * 100 : 0;
+                return (
+                  <div className={marginPercent < line.margin_threshold_percent ? "text-danger" : ""}>
+                    Margin: ${marginDollars.toFixed(2)} ({marginPercent.toFixed(1)}%)
+                    {marginPercent < line.margin_threshold_percent
+                      ? ` • Below threshold (${line.margin_threshold_percent.toFixed(0)}%)`
+                      : ""}
+                  </div>
+                );
+              })() : null}
+            </div>
           </div>
         ))}
       </div>

@@ -292,10 +292,19 @@ def _get_or_create_inventory(db: Session, item_id: int) -> Inventory:
     inventory = db.query(Inventory).filter(Inventory.item_id == item_id).with_for_update().first()
     if inventory:
         return inventory
-    inventory = Inventory(item_id=item_id, quantity_on_hand=Decimal("0"), landed_unit_cost=Decimal("0"))
+    inventory = Inventory(
+        item_id=item_id,
+        quantity_on_hand=Decimal("0"),
+        landed_unit_cost=Decimal("0"),
+        total_value=Decimal("0"),
+    )
     db.add(inventory)
     db.flush()
     return inventory
+
+
+def _sync_inventory_total_value(inventory: Inventory) -> None:
+    inventory.total_value = Decimal(inventory.quantity_on_hand or 0) * Decimal(inventory.landed_unit_cost or 0)
 
 
 def land_inventory_from_purchase_order(db: Session, po: PurchaseOrder) -> None:
@@ -318,4 +327,5 @@ def land_inventory_from_purchase_order(db: Session, po: PurchaseOrder) -> None:
         if new_qty > 0:
             inventory.landed_unit_cost = (existing_value + incoming_value) / new_qty
         inventory.quantity_on_hand = new_qty
+        _sync_inventory_total_value(inventory)
         inventory.last_updated_at = datetime.utcnow()

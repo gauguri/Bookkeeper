@@ -195,6 +195,7 @@ class Customer(Base):
     billing_address = Column(Text, nullable=True)
     shipping_address = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    tier = Column(String(20), nullable=False, default="STANDARD")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -336,6 +337,7 @@ class InvoiceLine(Base):
     quantity = Column(Numeric(14, 2), nullable=False, default=1)
     unit_price = Column(Numeric(14, 2), nullable=False)
     unit_cost = Column(Numeric(14, 2), nullable=True)
+    landed_unit_cost = Column(Numeric(14, 2), nullable=False, default=0)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     discount = Column(Numeric(14, 2), nullable=False, default=0)
     tax_rate = Column(Numeric(5, 4), nullable=False, default=0)
@@ -473,6 +475,7 @@ class Inventory(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False, unique=True)
     quantity_on_hand = Column(Numeric(14, 2), nullable=False, default=0)
     landed_unit_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    total_value = Column(Numeric(14, 2), nullable=False, default=0)
     last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     item = relationship("Item")

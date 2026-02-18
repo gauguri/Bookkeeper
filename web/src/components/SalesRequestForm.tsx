@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { apiFetch, type ApiRequestError } from "../api";
+import CustomerInsightsPanel from "./CustomerInsightsPanel";
 
 type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
@@ -107,6 +108,7 @@ export default function SalesRequestForm({
 
   const isWalkIn = customerId === "WALK_IN";
   const isEdit = mode === "edit";
+  const selectedCustomerId = !isWalkIn && customerId ? Number(customerId) : null;
 
   const hasLineErrors = useMemo(() => lines.some((line) => Boolean(line.quantity_error)), [lines]);
 
@@ -261,7 +263,8 @@ export default function SalesRequestForm({
   };
 
   return (
-    <section className="app-card space-y-4 p-6">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+      <section className="app-card space-y-4 p-6">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">{isEdit ? "Update Sales Request" : "New Sales Request"}</h3>
         <span className="app-badge border-primary/30 bg-primary/10 text-primary">Internal entry</span>
@@ -402,6 +405,8 @@ export default function SalesRequestForm({
           </button>
         </div>
       </div>
-    </section>
+      </section>
+      <CustomerInsightsPanel customerId={selectedCustomerId} />
+    </div>
   );
 }

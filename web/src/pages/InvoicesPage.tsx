@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
+import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
 
 type Customer = {
   id: number;
@@ -138,6 +139,8 @@ export default function InvoicesPage() {
   const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([{ ...emptyLine }]);
   const [supplierOptions, setSupplierOptions] = useState<Record<number, SupplierLink[]>>({});
+
+  const selectedCustomerId = form.customer_id ? Number(form.customer_id) : null;
 
   const loadInvoices = async (filtersOverride = filters) => {
     const params = new URLSearchParams();
@@ -565,7 +568,8 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div id="invoice-form" className="app-card p-6 space-y-4">
+      <div id="invoice-form" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+        <div className="app-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold">Create invoice</h2>
           <span className="app-badge border-primary/30 bg-primary/10 text-primary">New document</span>
@@ -778,6 +782,8 @@ export default function InvoicesPage() {
             Create invoice
           </button>
         </div>
+        </div>
+        <CustomerInsightsPanel customerId={selectedCustomerId} />
       </div>
 
       <button

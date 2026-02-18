@@ -220,3 +220,24 @@ class ItemPricingContextResponse(BaseModel):
     recommended_price: DecimalValue
     default_markup_percent: DecimalValue
     margin_threshold_percent: DecimalValue
+
+
+class CustomerInsightInvoiceSummary(BaseModel):
+    id: int
+    invoice_number: str
+    issue_date: date
+    due_date: date
+    status: str
+    total: DecimalValue
+    amount_due: DecimalValue
+
+
+class CustomerInsightsResponse(BaseModel):
+    customer_id: int
+    customer_name: str
+    ytd_revenue: DecimalValue
+    ltm_revenue: DecimalValue
+    gross_margin_percent: Optional[Decimal] = None
+    outstanding_ar: DecimalValue
+    average_days_to_pay: Optional[Decimal] = None
+    last_invoices: List[CustomerInsightInvoiceSummary]

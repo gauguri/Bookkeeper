@@ -28,6 +28,7 @@ from app.sales.service import (
     customer_revenue,
     ar_aging,
     get_item_pricing_context,
+    get_customer_insights,
 )
 
 router = APIRouter(prefix="/api", tags=["sales"])
@@ -81,6 +82,19 @@ def archive_customer(customer_id: int, db: Session = Depends(get_db), _=Depends(
     db.refresh(customer)
     return customer
 
+
+
+
+@router.get("/customers/{customer_id}/insights", response_model=schemas.CustomerInsightsResponse)
+def get_customer_insights_endpoint(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.CUSTOMERS.value)),
+):
+    try:
+        return get_customer_insights(db, customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 @router.get("/items", response_model=List[schemas.ItemResponse])
 def get_items(search: Optional[str] = None, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.ITEMS.value))):

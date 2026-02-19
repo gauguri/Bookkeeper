@@ -51,8 +51,7 @@ const normalizeInput = (valuePercent: number, min: number, max: number): number 
     return min;
   }
 
-  const normalized = valuePercent <= 1 ? valuePercent * 100 : valuePercent;
-  return clamp(normalized, min, max);
+  return clamp(valuePercent, min, max);
 };
 
 export default function Gauge({ valuePercent, min = 0, max = 100, thresholds = DEFAULT_SEGMENTS, label = "Gauge" }: GaugeProps) {

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
 import { apiFetch } from "../api";
 import GrossMarginGauge from "../components/dashboard/GrossMarginGauge";
+import InventoryValueGauge, { TARGET_DIO_DAYS } from "../components/dashboard/InventoryValueGauge";
 import { normalizeGrossMargin } from "../utils/metrics";
 
 const cards = [
@@ -23,8 +24,10 @@ type CockpitShortage = {
 type OwnerCockpitResponse = {
   revenue_mtd: number;
   revenue_ytd: number;
+  revenue: number | string;
   gross_margin_pct: number | string | null;
-  inventory_value: number;
+  inventory_value: number | string;
+  inventory_value_total: number | string;
   ar_total: number;
   ar_90_plus: number;
   cash_forecast_30d: number;
@@ -65,6 +68,14 @@ const formatCurrency = (value: unknown, fieldName = "currency") => {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
 };
 
+
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const toSafeNumber = (value: unknown, fallback = 0): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 const formatQty = (value: unknown, fieldName = "quantity") => {
   const num = coerceNumber(value);
@@ -122,6 +133,23 @@ export default function SalesLanding() {
     return normalizeGrossMargin(rawMargin);
   }, [metrics?.gross_margin_pct]);
 
+  const inventoryGaugeMetrics = useMemo(() => {
+    const revenueTopLine = toSafeNumber(metrics?.revenue ?? metrics?.revenue_ytd, 0);
+    const grossMarginRatio = clamp(normalizeGrossMargin(metrics?.gross_margin_pct) / 100, 0, 1);
+    const cogs = revenueTopLine * (1 - grossMarginRatio);
+    const targetInventoryValue = cogs * (TARGET_DIO_DAYS / 365);
+
+    const actualInventoryValue = toSafeNumber(metrics?.inventory_value_total ?? metrics?.inventory_value, 0);
+    const inventoryHealthPctRaw = targetInventoryValue > 0 ? (actualInventoryValue / targetInventoryValue) * 100 : 0;
+
+    return {
+      actualInventoryValue,
+      targetInventoryValue,
+      inventoryHealthPctRaw,
+      inventoryHealthPctDisplay: clamp(inventoryHealthPctRaw, 0, 200)
+    };
+  }, [metrics]);
+
   const stats = useMemo(
     () => {
       const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
@@ -176,7 +204,16 @@ export default function SalesLanding() {
             <p className="mt-1 text-xs text-muted">From invoice snapshots</p>
           </div>
         ) : (
-          <GrossMarginGauge value={grossMargin} />
+          <>
+            <GrossMarginGauge value={grossMargin} />
+            <InventoryValueGauge
+              actualInventoryValue={inventoryGaugeMetrics.actualInventoryValue}
+              targetInventoryValue={inventoryGaugeMetrics.targetInventoryValue}
+              inventoryHealthPctRaw={inventoryGaugeMetrics.inventoryHealthPctRaw}
+              inventoryHealthPctDisplay={inventoryGaugeMetrics.inventoryHealthPctDisplay}
+              targetDioDays={TARGET_DIO_DAYS}
+            />
+          </>
         )}
       </div>
 

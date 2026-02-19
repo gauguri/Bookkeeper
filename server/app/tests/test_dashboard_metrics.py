@@ -161,10 +161,12 @@ def test_owner_cockpit_metrics_use_real_modules():
 
     metrics = get_owner_cockpit_metrics(db, as_of=as_of)
 
+    assert metrics["revenue"] == Decimal("440.00")
     assert metrics["revenue_mtd"] == Decimal("140.00")
     assert metrics["revenue_ytd"] == Decimal("440.00")
     assert metrics["gross_margin_pct"] == Decimal("60.00")
     assert metrics["inventory_value"] == Decimal("60.00")
+    assert metrics["inventory_value_total"] == Decimal("60.00")
     assert metrics["ar_total"] == Decimal("140.00")
     assert metrics["ar_90_plus"] == Decimal("100.00")
     assert metrics["cash_forecast_30d"] == Decimal("40.00")

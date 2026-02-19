@@ -30,13 +30,59 @@ type OwnerCockpitResponse = {
   top_shortages: CockpitShortage[];
 };
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+const warnedFields = new Set<string>();
+const isDev = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-const formatPercent = (value: number) => `${value.toFixed(1)}%`;
+const coerceNumber = (value: unknown): number => {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return Number(value);
+  }
+  if (value && typeof value === "object" && "toString" in value) {
+    return Number(String(value));
+  }
+  return Number.NaN;
+};
 
-const formatQty = (value: number) =>
-  new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+const warnBadValue = (fieldName: string, value: unknown) => {
+  if (isDev && !warnedFields.has(fieldName)) {
+    warnedFields.add(fieldName);
+    console.warn("[SalesLanding] bad percent value", value, { fieldName });
+  }
+};
+
+const formatCurrency = (value: unknown, fieldName = "currency") => {
+  const num = coerceNumber(value);
+  if (!Number.isFinite(num)) {
+    warnBadValue(fieldName, value);
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
+};
+
+const formatPercent = (value: unknown, decimals = 1, fieldName = "percent") => {
+  const num = coerceNumber(value);
+  if (!Number.isFinite(num)) {
+    warnBadValue(fieldName, value);
+    return "—";
+  }
+
+  // owner-cockpit returns `*_pct` fields in percentage points (e.g. 12.3 => 12.3%), not ratio values.
+  return `${num.toFixed(decimals)}%`;
+};
+
+const formatQty = (value: unknown, fieldName = "quantity") => {
+  const num = coerceNumber(value);
+  if (!Number.isFinite(num)) {
+    warnBadValue(fieldName, value);
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(num);
+};
 
 export default function SalesLanding() {
   const [metrics, setMetrics] = useState<OwnerCockpitResponse | null>(null);
@@ -71,20 +117,31 @@ export default function SalesLanding() {
   }, []);
 
   const stats = useMemo(
-    () => [
-      { label: "Revenue MTD", value: formatCurrency(metrics?.revenue_mtd ?? 0), helper: "Month to date" },
-      { label: "Revenue YTD", value: formatCurrency(metrics?.revenue_ytd ?? 0), helper: "Year to date" },
-      { label: "Gross Margin", value: formatPercent(metrics?.gross_margin_pct ?? 0), helper: "From invoice snapshots" },
-      { label: "Inventory Value", value: formatCurrency(metrics?.inventory_value ?? 0), helper: "On-hand × landed cost" },
-      { label: "A/R Total", value: formatCurrency(metrics?.ar_total ?? 0), helper: "Open receivables" },
-      { label: "A/R 90+", value: formatCurrency(metrics?.ar_90_plus ?? 0), helper: "Severely overdue" },
+    () => {
+      const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
+      const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
+      const grossMargin = Number(metrics?.gross_margin_pct ?? 0);
+      const inventoryValue = Number(metrics?.inventory_value ?? 0);
+      const arTotal = Number(metrics?.ar_total ?? 0);
+      const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
+      const cashForecast30d = Number(metrics?.cash_forecast_30d ?? 0);
+      const backlogValue = Number(metrics?.backlog_value ?? 0);
+
+      return [
+      { label: "Revenue MTD", value: formatCurrency(revenueMtd, "revenue_mtd"), helper: "Month to date" },
+      { label: "Revenue YTD", value: formatCurrency(revenueYtd, "revenue_ytd"), helper: "Year to date" },
+      { label: "Gross Margin", value: formatPercent(grossMargin, 1, "gross_margin_pct"), helper: "From invoice snapshots" },
+      { label: "Inventory Value", value: formatCurrency(inventoryValue, "inventory_value"), helper: "On-hand × landed cost" },
+      { label: "A/R Total", value: formatCurrency(arTotal, "ar_total"), helper: "Open receivables" },
+      { label: "A/R 90+", value: formatCurrency(ar90Plus, "ar_90_plus"), helper: "Severely overdue" },
       {
         label: "Cash Forecast 30d",
-        value: formatCurrency(metrics?.cash_forecast_30d ?? 0),
+        value: formatCurrency(cashForecast30d, "cash_forecast_30d"),
         helper: "Net inflow / outflow"
       },
-      { label: "Backlog Value", value: formatCurrency(metrics?.backlog_value ?? 0), helper: "Active commitments" }
-    ],
+      { label: "Backlog Value", value: formatCurrency(backlogValue, "backlog_value"), helper: "Active commitments" }
+    ];
+    },
     [metrics]
   );
 
@@ -131,8 +188,8 @@ export default function SalesLanding() {
               {(metrics?.top_shortages ?? []).map((row) => (
                 <tr key={row.item_id} className="border-b last:border-b-0">
                   <td className="py-2 pr-4">{row.item_name}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.shortage_qty)}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.backlog_qty)}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.shortage_qty, "shortage_qty")}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.backlog_qty, "backlog_qty")}</td>
                   <td className="py-2 text-right">{row.next_inbound_eta ?? "TBD"}</td>
                 </tr>
               ))}

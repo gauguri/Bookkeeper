@@ -9,7 +9,8 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "test:authz": "node scripts/authz-sanity.mjs",
     "test:default-route": "node scripts/default-route-sanity.mjs",
-    "test:route-module": "node scripts/route-module-sanity.mjs"
+    "test:route-module": "node scripts/route-module-sanity.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "framer-motion": "11.3.1",
@@ -27,6 +28,7 @@
     "postcss": "8.4.41",
     "tailwindcss": "3.4.10",
     "typescript": "5.5.4",
-    "vite": "5.4.0"
+    "vite": "5.4.0",
+    "vitest": "^2.1.9"
   }
 }

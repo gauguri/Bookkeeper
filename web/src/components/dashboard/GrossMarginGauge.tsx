@@ -1,105 +1,130 @@
 import { formatPercent, getGmZoneColor, getGmZoneLabel, normalizeGrossMargin } from "../../utils/metrics";
 
 type GrossMarginGaugeProps = {
-  valuePercent: unknown;
+  value?: unknown;
+  valuePercent?: unknown;
   title?: string;
   subtitle?: string;
 };
 
-const zoneStyles = {
-  red: "stroke-rose-500",
-  amber: "stroke-amber-500",
-  green: "stroke-emerald-500"
-};
+type Point = { x: number; y: number };
 
-const labelStyles = {
-  red: "text-rose-600",
-  amber: "text-amber-600",
-  green: "text-emerald-600"
-};
+const ZONE_COLORS = {
+  red: "#EF4444",
+  amber: "#F59E0B",
+  green: "#10B981"
+} as const;
 
-const polarToCartesian = (cx: number, cy: number, r: number, angleDeg: number) => {
-  const angleRad = (angleDeg * Math.PI) / 180;
+const ZONE_LABEL_COLORS = {
+  red: "#DC2626",
+  amber: "#D97706",
+  green: "#059669"
+} as const;
+
+const TRACK_COLOR = "#E5E7EB";
+const NEEDLE_COLOR = "#1F2937";
+const VALUE_COLOR = "#111827";
+
+const toRadians = (angleDeg: number) => (angleDeg * Math.PI) / 180;
+
+const polarToCartesian = (cx: number, cy: number, radius: number, angleDeg: number): Point => {
+  const rad = toRadians(angleDeg);
   return {
-    x: cx + r * Math.cos(angleRad),
-    y: cy + r * Math.sin(angleRad)
+    x: cx + radius * Math.cos(rad),
+    y: cy - radius * Math.sin(rad)
   };
 };
 
-const describeArc = (cx: number, cy: number, r: number, startAngle: number, endAngle: number) => {
-  const start = polarToCartesian(cx, cy, r, startAngle);
-  const end = polarToCartesian(cx, cy, r, endAngle);
-  const largeArcFlag = Math.abs(endAngle - startAngle) > 180 ? 1 : 0;
+const describeArc = (cx: number, cy: number, radius: number, startAngleDeg: number, endAngleDeg: number): string => {
+  const start = polarToCartesian(cx, cy, radius, startAngleDeg);
+  const end = polarToCartesian(cx, cy, radius, endAngleDeg);
+  const delta = Math.abs(endAngleDeg - startAngleDeg);
+  const largeArcFlag = delta > 180 ? 1 : 0;
+  const sweepFlag = startAngleDeg > endAngleDeg ? 1 : 0;
 
-  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} 1 ${end.x} ${end.y}`;
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`;
 };
 
-const pctToAngle = (percent: number) => -90 + (percent / 100) * 180;
+const percentToAngle = (percent: number): number => 180 - (percent / 100) * 180;
 
 export default function GrossMarginGauge({
+  value,
   valuePercent,
-  title = "Gross Margin",
+  title = "GROSS MARGIN",
   subtitle = "From invoice snapshots"
 }: GrossMarginGaugeProps) {
-  const normalizedPercent = normalizeGrossMargin(valuePercent);
+  const rawValue = value ?? valuePercent;
+  const normalizedPercent = normalizeGrossMargin(rawValue);
   const zone = getGmZoneColor(normalizedPercent);
-  const zoneLabel = getGmZoneLabel(normalizedPercent);
+  const zoneLabel = getGmZoneLabel(normalizedPercent).toUpperCase();
 
-  const centerX = 100;
-  const centerY = 100;
-  const radius = 74;
-  const needleAngle = pctToAngle(normalizedPercent);
-  const needleTip = polarToCartesian(centerX, centerY, radius - 10, needleAngle);
+  const cx = 120;
+  const cy = 120;
+  const radius = 80;
+  const strokeWidth = 16;
+  const needleLength = 66;
 
-  const zones = [
-    { start: 0, end: 40, color: zoneStyles.red },
-    { start: 40, end: 50, color: zoneStyles.amber },
-    { start: 50, end: 100, color: zoneStyles.green }
-  ];
+  const angleAt40 = percentToAngle(40);
+  const angleAt50 = percentToAngle(50);
 
-  const tickValues = [0, 40, 50, 100];
+  const needleAngle = percentToAngle(normalizedPercent);
+  const needleTip = polarToCartesian(cx, cy, needleLength, needleAngle);
+
+  const ticks = [0, 40, 50, 100];
 
   return (
     <div className="app-card p-5" aria-label={`${title} ${formatPercent(normalizedPercent)} in ${zoneLabel} zone`}>
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{title}</p>
-      <div className="mt-2 flex items-center justify-center">
-        <svg viewBox="0 0 200 130" className="w-full max-w-[260px]" role="img" aria-hidden="true">
-          {zones.map((segment) => (
-            <path
-              key={`${segment.start}-${segment.end}`}
-              d={describeArc(centerX, centerY, radius, pctToAngle(segment.start), pctToAngle(segment.end))}
-              fill="none"
-              strokeWidth="14"
-              strokeLinecap="round"
-              className={segment.color}
-            />
-          ))}
+      <div className="mt-3 flex items-center justify-center">
+        <svg viewBox="0 0 240 160" className="w-full max-w-[320px]" role="img" aria-hidden="true">
+          <path d={describeArc(cx, cy, radius, 180, 0)} fill="none" stroke={TRACK_COLOR} strokeWidth={strokeWidth} strokeLinecap="round" />
 
-          {tickValues.map((tick) => {
-            const tickAngle = pctToAngle(tick);
-            const outer = polarToCartesian(centerX, centerY, radius + 8, tickAngle);
-            const inner = polarToCartesian(centerX, centerY, radius - 8, tickAngle);
-            const labelPos = polarToCartesian(centerX, centerY, radius + 22, tickAngle);
+          <path d={describeArc(cx, cy, radius, 180, angleAt40)} fill="none" stroke={ZONE_COLORS.red} strokeWidth={strokeWidth} strokeLinecap="round" />
+          <path d={describeArc(cx, cy, radius, angleAt40, angleAt50)} fill="none" stroke={ZONE_COLORS.amber} strokeWidth={strokeWidth} strokeLinecap="round" />
+          <path d={describeArc(cx, cy, radius, angleAt50, 0)} fill="none" stroke={ZONE_COLORS.green} strokeWidth={strokeWidth} strokeLinecap="round" />
+
+          {ticks.map((tick) => {
+            const angle = percentToAngle(tick);
+            const inner = polarToCartesian(cx, cy, radius - strokeWidth / 2 - 3, angle);
+            const outer = polarToCartesian(cx, cy, radius + strokeWidth / 2 + 3, angle);
+            const labelBase = polarToCartesian(cx, cy, radius + strokeWidth / 2 + 16, angle);
+
+            const xAdjust = tick === 40 ? -6 : tick === 50 ? 6 : 0;
+            const yAdjust = tick === 0 || tick === 100 ? 5 : 1;
+
             return (
               <g key={tick}>
-                <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="currentColor" className="text-slate-400" strokeWidth="2" />
-                <text x={labelPos.x} y={labelPos.y} textAnchor="middle" dominantBaseline="middle" className="fill-slate-400 text-[9px]">
+                <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" />
+                <text
+                  x={labelBase.x + xAdjust}
+                  y={labelBase.y + yAdjust}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize="10"
+                  fontWeight="600"
+                  fill="#6B7280"
+                >
                   {tick}
                 </text>
               </g>
             );
           })}
 
-          <line x1={centerX} y1={centerY} x2={needleTip.x} y2={needleTip.y} stroke="currentColor" className="text-slate-700" strokeWidth="3" strokeLinecap="round" />
-          <circle cx={centerX} cy={centerY} r="5" className="fill-slate-700" />
+          <line x1={cx} y1={cy} x2={needleTip.x} y2={needleTip.y} stroke={NEEDLE_COLOR} strokeWidth="4" strokeLinecap="round" />
+          <circle cx={cx} cy={cy} r="9" fill="#F9FAFB" stroke="#D1D5DB" strokeWidth="2" />
+          <circle cx={cx} cy={cy} r="5" fill={NEEDLE_COLOR} />
         </svg>
       </div>
 
-      <div className="-mt-2 flex flex-col items-center">
-        <p className="text-2xl font-semibold tabular-nums">{formatPercent(normalizedPercent, 1)}</p>
-        <p className={`text-xs font-semibold uppercase tracking-[0.12em] ${labelStyles[zone]}`}>{zoneLabel}</p>
+      <div className="-mt-1 flex flex-col items-center">
+        <p className="text-3xl font-bold tabular-nums" style={{ color: VALUE_COLOR }}>
+          {formatPercent(normalizedPercent, 1)}
+        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: ZONE_LABEL_COLORS[zone] }}>
+          {zoneLabel}
+        </p>
       </div>
-      <p className="mt-1 text-xs text-muted text-center">{subtitle}</p>
+      <p className="mt-1 text-center text-xs text-muted">{subtitle}</p>
     </div>
   );
 }

@@ -1,11 +1,14 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.dashboard.service import get_owner_cockpit_metrics, get_revenue_dashboard_metrics
-from app.db import Base
+from app.db import Base, get_db
+from app.main import app
 from app.models import Customer, Inventory, InventoryReservation, Invoice, InvoiceLine, Item, SalesRequest, SalesRequestLine
 
 
@@ -169,3 +172,55 @@ def test_owner_cockpit_metrics_use_real_modules():
     assert len(metrics["top_shortages"]) == 1
     assert metrics["top_shortages"][0]["item_name"] == "Widget"
     assert metrics["top_shortages"][0]["shortage_qty"] == Decimal("3.00")
+
+
+def test_owner_cockpit_endpoint_returns_200():
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    with TestingSessionLocal() as db:
+        customer = create_customer(db, name="Endpoint Customer")
+        item = create_item(db, "Endpoint Widget")
+        db.add(
+            Inventory(
+                item_id=item.id,
+                quantity_on_hand=Decimal("10"),
+                landed_unit_cost=Decimal("3"),
+                total_value=Decimal("30"),
+            )
+        )
+        sales_request = SalesRequest(request_number="SR-ENDPOINT-1", customer_id=customer.id, status="NEW")
+        db.add(sales_request)
+        db.flush()
+        db.add(
+            InventoryReservation(
+                item_id=item.id,
+                source_type="sales_request",
+                source_id=sales_request.id,
+                sales_request_id=sales_request.id,
+                qty_reserved=Decimal("2"),
+            )
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/owner-cockpit")
+
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(engine)
+
+    assert response.status_code == 200

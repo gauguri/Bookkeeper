@@ -164,7 +164,7 @@ export default function SalesLanding() {
             <p className="mt-1 text-xs text-muted">From invoice snapshots</p>
           </div>
         ) : (
-          <GrossMarginGauge valuePercent={grossMargin} />
+          <GrossMarginGauge value={grossMargin} />
         )}
       </div>
 

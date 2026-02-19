@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ARCollectionActivity, Account, Customer, Invoice, Payment, PaymentApplication, PurchaseOrder, JournalEntry, JournalLine
 from app.sales.service import recalculate_invoice_balance
+from app.sql_expressions import days_between
 
 
 ZERO = Decimal("0.00")
@@ -76,7 +77,7 @@ def get_ar_aging_by_customer(db: Session, as_of: date) -> list[dict[str, Any]]:
             func.coalesce(func.sum(PaymentApplication.applied_amount), 0).label("applied_total"),
             func.coalesce(
                 func.sum(
-                    (func.julianday(Payment.payment_date) - func.julianday(Invoice.issue_date))
+                    days_between(Payment.payment_date, Invoice.issue_date, dialect_name=db.get_bind().dialect.name)
                     * PaymentApplication.applied_amount
                 ),
                 0,
@@ -168,7 +169,7 @@ def get_cash_forecast(
                 Invoice.customer_id.label("customer_id"),
                 (
                     func.sum(
-                        (func.julianday(Payment.payment_date) - func.julianday(Invoice.issue_date))
+                        days_between(Payment.payment_date, Invoice.issue_date, dialect_name=db.get_bind().dialect.name)
                         * PaymentApplication.applied_amount
                     )
                     / func.nullif(func.sum(PaymentApplication.applied_amount), 0)

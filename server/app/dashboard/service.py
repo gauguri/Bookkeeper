@@ -161,7 +161,17 @@ def get_owner_cockpit_metrics(db: Session, as_of: Optional[date] = None) -> dict
         gross_margin_pct = ((margin_revenue - margin_cost) / margin_revenue) * Decimal("100")
 
     inventory_value = (
-        db.query(func.coalesce(func.sum(Inventory.quantity_on_hand * Inventory.landed_unit_cost), 0))
+        db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (Inventory.total_value.is_not(None), Inventory.total_value),
+                        else_=(Inventory.quantity_on_hand * Inventory.landed_unit_cost),
+                    )
+                ),
+                0,
+            )
+        )
         .scalar()
     )
 
@@ -201,10 +211,12 @@ def get_owner_cockpit_metrics(db: Session, as_of: Optional[date] = None) -> dict
     ][:5]
 
     return {
+        "revenue": Decimal(revenue_ytd or 0),
         "revenue_mtd": Decimal(revenue_mtd or 0),
         "revenue_ytd": Decimal(revenue_ytd or 0),
         "gross_margin_pct": gross_margin_pct.quantize(Decimal("0.01")),
         "inventory_value": Decimal(inventory_value or 0),
+        "inventory_value_total": Decimal(inventory_value or 0),
         "ar_total": Decimal(ar_total or 0),
         "ar_90_plus": Decimal(overdue_90_plus or 0),
         "cash_forecast_30d": cash_forecast_30_days.quantize(Decimal("0.01")),

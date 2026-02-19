@@ -32,10 +32,12 @@ class OwnerCockpitShortage(BaseModel):
 
 
 class OwnerCockpitResponse(BaseModel):
+    revenue: DecimalValue
     revenue_mtd: DecimalValue
     revenue_ytd: DecimalValue
     gross_margin_pct: Decimal
     inventory_value: DecimalValue
+    inventory_value_total: DecimalValue
     ar_total: DecimalValue
     ar_90_plus: DecimalValue
     cash_forecast_30d: DecimalValue

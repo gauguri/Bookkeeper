@@ -149,7 +149,8 @@ def test_customer_insights_returns_expected_aggregates(client: TestClient):
     assert data["ltm_revenue"] == "300.00"
     assert data["outstanding_ar"] == "20.00"
     assert float(data["gross_margin_percent"]) == pytest.approx(46.6666, abs=0.01)
-    assert float(data["average_days_to_pay"]) == pytest.approx(17.1428, abs=0.01)
+    assert isinstance(data["average_days_to_pay"], float)
+    assert data["average_days_to_pay"] == pytest.approx(17.1428, abs=0.01)
     assert [invoice["invoice_number"] for invoice in data["last_invoices"][:2]] == ["INV-RECENT", "INV-LTM"]
 
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
-import { currency } from "../utils/format";
+import { currency, formatNumber } from "../utils/format";
 
 type CustomerInsightInvoice = {
   id: number;
@@ -70,8 +70,13 @@ export default function CustomerInsightsPanel({ customerId, mode = "compact", cl
     if (insights?.average_days_to_pay == null) {
       return "—";
     }
-    return `${insights.average_days_to_pay.toFixed(1)} days`;
+    return `${formatNumber(insights.average_days_to_pay, 1)} days`;
   }, [insights?.average_days_to_pay]);
+
+  const grossMarginLabel = useMemo(() => {
+    const value = formatNumber(insights?.gross_margin_percent, 1);
+    return value === "—" ? value : `${value}%`;
+  }, [insights?.gross_margin_percent]);
 
   if (!customerId) {
     return (
@@ -105,9 +110,7 @@ export default function CustomerInsightsPanel({ customerId, mode = "compact", cl
             </div>
             <div>
               <p className="text-xs text-muted">Gross margin %</p>
-              <p className="text-sm font-semibold">
-                {insights.gross_margin_percent == null ? "—" : `${insights.gross_margin_percent.toFixed(1)}%`}
-              </p>
+              <p className="text-sm font-semibold">{grossMarginLabel}</p>
             </div>
             <div>
               <p className="text-xs text-muted">Outstanding A/R</p>

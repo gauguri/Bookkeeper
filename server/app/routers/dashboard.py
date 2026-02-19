@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_module
 from app.module_keys import ModuleKey
-from app.dashboard.schemas import RevenueDashboardResponse
-from app.dashboard.service import get_revenue_dashboard_metrics
+from app.dashboard.schemas import OwnerCockpitResponse, RevenueDashboardResponse
+from app.dashboard.service import get_owner_cockpit_metrics, get_revenue_dashboard_metrics
 from app.db import get_db
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_module(ModuleKey.DASHBOARD.value))])
@@ -28,3 +28,8 @@ def revenue_dashboard(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/owner-cockpit", response_model=OwnerCockpitResponse)
+def owner_cockpit_dashboard(db: Session = Depends(get_db)):
+    return get_owner_cockpit_metrics(db)

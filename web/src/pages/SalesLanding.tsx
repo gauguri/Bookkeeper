@@ -1,62 +1,45 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
 import { ArrowUpRight } from "lucide-react";
 import { apiFetch } from "../api";
 
 const cards = [
-  { title: "Customers", description: "Manage customer profiles and contacts.", to: "/sales/customers" },
-  { title: "Items", description: "Maintain your sales catalog.", to: "/sales/items" },
-  { title: "Invoices", description: "Create and manage customer invoices.", to: "/sales/invoices" },
-  { title: "Payments", description: "Apply customer payments to invoices.", to: "/sales/payments" },
-  { title: "Reports", description: "Monitor revenue and receivables.", to: "/sales/reports" }
+  { title: "Invoices", description: "Ship and collect faster.", to: "/sales/invoices" },
+  { title: "Backlog", description: "Resolve shortages and unblock demand.", to: "/operations/backlog" },
+  { title: "A/R Aging", description: "Prioritize collections this week.", to: "/finance/ar-aging" },
+  { title: "Cash Forecast", description: "Inspect inflows and outflows.", to: "/finance/cash-forecast" }
 ];
 
-type RevenueTrendPoint = {
-  month: string;
-  value: number;
+type CockpitShortage = {
+  item_id: number;
+  item_name: string;
+  shortage_qty: number;
+  backlog_qty: number;
+  next_inbound_eta: string | null;
 };
 
-type RevenueDashboardResponse = {
-  total_revenue_ytd: number;
-  outstanding_ar: number;
-  paid_this_month: number;
-  open_invoices_count: number;
-  revenue_trend: RevenueTrendPoint[];
+type OwnerCockpitResponse = {
+  revenue_mtd: number;
+  revenue_ytd: number;
+  gross_margin_pct: number;
+  inventory_value: number;
+  ar_total: number;
+  ar_90_plus: number;
+  cash_forecast_30d: number;
+  backlog_value: number;
+  top_shortages: CockpitShortage[];
 };
 
-const formatCurrencyCompact = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 1
-  }).format(value);
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 
-const formatNumberCompact = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 0
-  }).format(value);
+const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
-const formatMonthLabel = (value: string) => {
-  const date = new Date(`${value}-01T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString("en-US", { month: "short" });
-};
+const formatQty = (value: number) =>
+  new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 
 export default function SalesLanding() {
-  const [metrics, setMetrics] = useState<RevenueDashboardResponse | null>(null);
+  const [metrics, setMetrics] = useState<OwnerCockpitResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,17 +49,15 @@ export default function SalesLanding() {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await apiFetch<RevenueDashboardResponse>("/dashboard/revenue");
-        if (!isActive) {
-          return;
+        const data = await apiFetch<OwnerCockpitResponse>("/dashboard/owner-cockpit");
+        if (isActive) {
+          setMetrics(data);
         }
-        setMetrics(data);
       } catch (err) {
         console.error(err);
-        if (!isActive) {
-          return;
+        if (isActive) {
+          setError(err instanceof Error ? err.message : "Unable to load owner cockpit.");
         }
-        setError(err instanceof Error ? err.message : "Unable to load dashboard metrics.");
       } finally {
         if (isActive) {
           setIsLoading(false);
@@ -91,137 +72,86 @@ export default function SalesLanding() {
 
   const stats = useMemo(
     () => [
+      { label: "Revenue MTD", value: formatCurrency(metrics?.revenue_mtd ?? 0), helper: "Month to date" },
+      { label: "Revenue YTD", value: formatCurrency(metrics?.revenue_ytd ?? 0), helper: "Year to date" },
+      { label: "Gross Margin", value: formatPercent(metrics?.gross_margin_pct ?? 0), helper: "From invoice snapshots" },
+      { label: "Inventory Value", value: formatCurrency(metrics?.inventory_value ?? 0), helper: "On-hand × landed cost" },
+      { label: "A/R Total", value: formatCurrency(metrics?.ar_total ?? 0), helper: "Open receivables" },
+      { label: "A/R 90+", value: formatCurrency(metrics?.ar_90_plus ?? 0), helper: "Severely overdue" },
       {
-        label: "Total Revenue",
-        value: formatCurrencyCompact(metrics?.total_revenue_ytd ?? 0),
-        helper: "Year to date"
+        label: "Cash Forecast 30d",
+        value: formatCurrency(metrics?.cash_forecast_30d ?? 0),
+        helper: "Net inflow / outflow"
       },
-      {
-        label: "Outstanding AR",
-        value: formatCurrencyCompact(metrics?.outstanding_ar ?? 0),
-        helper: "Open receivables"
-      },
-      {
-        label: "Paid This Month",
-        value: formatCurrencyCompact(metrics?.paid_this_month ?? 0),
-        helper: "Cash received"
-      },
-      {
-        label: "Open Invoices",
-        value: formatNumberCompact(metrics?.open_invoices_count ?? 0),
-        helper: "Unpaid invoices"
-      }
+      { label: "Backlog Value", value: formatCurrency(metrics?.backlog_value ?? 0), helper: "Active commitments" }
     ],
-    [metrics]
-  );
-
-  const revenueData = useMemo(
-    () =>
-      (metrics?.revenue_trend ?? []).map((point) => ({
-        month: formatMonthLabel(point.month),
-        value: point.value
-      })),
     [metrics]
   );
 
   return (
     <section className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Sales</p>
-          <h1 className="text-3xl font-semibold">Revenue command center</h1>
-          <p className="text-muted">Track performance, keep cash flowing, and move faster.</p>
-        </div>
-        <button className="app-button">Create invoice</button>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Owner cockpit</p>
+        <h1 className="text-3xl font-semibold">Operator dashboard</h1>
+        <p className="text-muted">One place to run revenue, margin, cash, and fulfillment risk.</p>
       </div>
 
-      {error ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
-          {error} Please try again.
-        </div>
-      ) : null}
+      {error ? <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</div> : null}
 
-      <div className="grid gap-4 lg:grid-cols-4">
-        {stats.map((stat, index) => (
-          <div
-            key={stat.label}
-            className={`app-card p-5 shadow-soft transition hover:-translate-y-1 hover:shadow-glow ${
-              index === 0 ? "bg-gradient-to-br from-indigo-500/10 to-transparent" : ""
-            }`}
-          >
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {stats.map((stat) => (
+          <div key={stat.label} className="app-card p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{stat.label}</p>
-            <div className="mt-3 flex items-end justify-between">
-              {isLoading ? (
-                <div className="h-7 w-24 animate-pulse rounded bg-slate-200" />
-              ) : (
-                <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>
-              )}
+            <div className="mt-2">
+              {isLoading ? <div className="h-7 w-24 animate-pulse rounded bg-slate-200" /> : <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>}
             </div>
-            <p className="mt-2 text-xs text-muted">{stat.helper}</p>
+            <p className="mt-1 text-xs text-muted">{stat.helper}</p>
           </div>
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="app-card p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Revenue trend</p>
-              <p className="text-xs text-muted">Updated moments ago</p>
-            </div>
-            <button className="app-button-secondary text-xs">View report</button>
-          </div>
-          <div className="mt-6 h-56">
-            {isLoading ? (
-              <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={revenueData}>
-                  <defs>
-                    <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366F1" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                  <YAxis tickLine={false} axisLine={false} />
-                  <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} />
-                  <Area type="monotone" dataKey="value" stroke="#6366F1" fill="url(#revenueGradient)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+      <div className="app-card p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Top 5 shortages</h2>
+          <Link className="app-button-secondary text-xs" to="/operations/backlog">
+            Open backlog
+          </Link>
         </div>
-
-        <div className="space-y-4">
-          <div className="app-card p-6">
-            <p className="text-sm font-semibold">Collections health</p>
-            <p className="mt-2 text-3xl font-semibold">94%</p>
-            <p className="mt-1 text-sm text-muted">Invoices paid within terms</p>
-            <button className="app-button-ghost mt-4 text-xs">
-              View aging report <ArrowUpRight className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="app-card p-6">
-            <p className="text-sm font-semibold">Next actions</p>
-            <ul className="mt-4 space-y-3 text-sm text-muted">
-              <li>Follow up with Horizon Labs (Invoice #1024)</li>
-              <li>Send monthly statements to 12 customers</li>
-              <li>Review late fees for 8 overdue invoices</li>
-            </ul>
-          </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted">
+                <th className="pb-2 pr-4">Item</th>
+                <th className="pb-2 pr-4 text-right">Shortage Qty</th>
+                <th className="pb-2 pr-4 text-right">Backlog Qty</th>
+                <th className="pb-2 text-right">Next Inbound</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(metrics?.top_shortages ?? []).map((row) => (
+                <tr key={row.item_id} className="border-b last:border-b-0">
+                  <td className="py-2 pr-4">{row.item_name}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.shortage_qty)}</td>
+                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.backlog_qty)}</td>
+                  <td className="py-2 text-right">{row.next_inbound_eta ?? "TBD"}</td>
+                </tr>
+              ))}
+              {!isLoading && (metrics?.top_shortages.length ?? 0) === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-3 text-center text-muted">
+                    No active shortages.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         {cards.map((card) => (
-          <Link
-            key={card.to}
-            to={card.to}
-            className="app-card group p-6 transition hover:-translate-y-1 hover:shadow-glow"
-          >
-            <h2 className="text-xl font-semibold mb-2">{card.title}</h2>
+          <Link key={card.to} to={card.to} className="app-card group p-6 transition hover:-translate-y-1 hover:shadow-glow">
+            <h2 className="mb-2 text-xl font-semibold">{card.title}</h2>
             <p className="text-muted">{card.description}</p>
             <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">
               Open module <ArrowUpRight className="h-4 w-4 transition group-hover:translate-x-1" />

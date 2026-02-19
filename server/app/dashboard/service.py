@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models import Invoice, Payment
+from app.ar.service import get_cash_forecast
+from app.backlog.service import get_backlog_items, get_backlog_summary
+from app.models import Invoice, InvoiceLine, Inventory, Payment
 
 OPEN_STATUSES = ("SENT", "SHIPPED", "PARTIALLY_PAID")
 REVENUE_STATUSES = ("SENT", "PAID")
@@ -121,4 +123,91 @@ def get_revenue_dashboard_metrics(
         "paid_this_month": Decimal(paid_this_month or 0),
         "open_invoices_count": int(open_invoices_count or 0),
         "revenue_trend": revenue_trend,
+    }
+
+
+def get_owner_cockpit_metrics(db: Session, as_of: Optional[date] = None) -> dict:
+    today = as_of or datetime.utcnow().date()
+    month_start = _month_start(today)
+    year_start = date(today.year, 1, 1)
+
+    revenue_mtd = (
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(Invoice.status.in_(REVENUE_STATUSES))
+        .filter(Invoice.issue_date >= month_start, Invoice.issue_date <= today)
+        .scalar()
+    )
+    revenue_ytd = (
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(Invoice.status.in_(REVENUE_STATUSES))
+        .filter(Invoice.issue_date >= year_start, Invoice.issue_date <= today)
+        .scalar()
+    )
+
+    margin_revenue, margin_cost = (
+        db.query(
+            func.coalesce(func.sum(InvoiceLine.line_total), 0),
+            func.coalesce(func.sum(InvoiceLine.quantity * InvoiceLine.landed_unit_cost), 0),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(Invoice.status.in_(REVENUE_STATUSES))
+        .filter(Invoice.issue_date >= year_start, Invoice.issue_date <= today)
+        .one()
+    )
+    margin_revenue = Decimal(margin_revenue or 0)
+    margin_cost = Decimal(margin_cost or 0)
+    gross_margin_pct = Decimal("0.00")
+    if margin_revenue > 0:
+        gross_margin_pct = ((margin_revenue - margin_cost) / margin_revenue) * Decimal("100")
+
+    inventory_value = (
+        db.query(func.coalesce(func.sum(Inventory.quantity_on_hand * Inventory.landed_unit_cost), 0))
+        .scalar()
+    )
+
+    ar_total = (
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(Invoice.status.in_(OPEN_STATUSES))
+        .filter(Invoice.amount_due > 0)
+        .scalar()
+    )
+
+    overdue_90_plus = (
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(Invoice.status.in_(OPEN_STATUSES))
+        .filter(Invoice.amount_due > 0)
+        .filter(Invoice.due_date <= (today - timedelta(days=90)))
+        .scalar()
+    )
+
+    cash_forecast = get_cash_forecast(db, weeks=5)
+    horizon_end = today + timedelta(days=30)
+    cash_forecast_30_days = sum(
+        (Decimal(bucket["net"]) for bucket in cash_forecast["buckets"] if bucket["week_start"] <= horizon_end),
+        Decimal("0"),
+    )
+
+    backlog_summary = get_backlog_summary(db)
+    top_shortages = [
+        {
+            "item_id": row.item_id,
+            "item_name": row.item_name,
+            "shortage_qty": row.shortage_qty,
+            "backlog_qty": row.backlog_qty,
+            "next_inbound_eta": row.next_inbound_eta,
+        }
+        for row in get_backlog_items(db)
+        if row.shortage_qty > 0
+    ][:5]
+
+    return {
+        "revenue_mtd": Decimal(revenue_mtd or 0),
+        "revenue_ytd": Decimal(revenue_ytd or 0),
+        "gross_margin_pct": gross_margin_pct.quantize(Decimal("0.01")),
+        "inventory_value": Decimal(inventory_value or 0),
+        "ar_total": Decimal(ar_total or 0),
+        "ar_90_plus": Decimal(overdue_90_plus or 0),
+        "cash_forecast_30d": cash_forecast_30_days.quantize(Decimal("0.01")),
+        "backlog_value": backlog_summary.total_backlog_value,
+        "top_shortages": top_shortages,
     }

@@ -1,5 +1,6 @@
+from datetime import date
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, condecimal
 
@@ -18,5 +19,27 @@ class RevenueDashboardResponse(BaseModel):
     paid_this_month: DecimalValue
     open_invoices_count: int
     revenue_trend: List[RevenueTrendPoint]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OwnerCockpitShortage(BaseModel):
+    item_id: int
+    item_name: str
+    shortage_qty: DecimalValue
+    backlog_qty: DecimalValue
+    next_inbound_eta: Optional[date] = None
+
+
+class OwnerCockpitResponse(BaseModel):
+    revenue_mtd: DecimalValue
+    revenue_ytd: DecimalValue
+    gross_margin_pct: Decimal
+    inventory_value: DecimalValue
+    ar_total: DecimalValue
+    ar_90_plus: DecimalValue
+    cash_forecast_30d: DecimalValue
+    backlog_value: DecimalValue
+    top_shortages: List[OwnerCockpitShortage]
 
     model_config = ConfigDict(from_attributes=True)

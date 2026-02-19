@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
 import { apiFetch } from "../api";
+import GrossMarginGauge from "../components/dashboard/GrossMarginGauge";
+import { normalizeGrossMargin } from "../utils/metrics";
 
 const cards = [
   { title: "Invoices", description: "Ship and collect faster.", to: "/sales/invoices" },
@@ -63,16 +65,6 @@ const formatCurrency = (value: unknown, fieldName = "currency") => {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
 };
 
-const formatPercent = (value: unknown, decimals = 1, fieldName = "percent") => {
-  const num = coerceNumber(value);
-  if (!Number.isFinite(num)) {
-    warnBadValue(fieldName, value);
-    return "—";
-  }
-
-  // owner-cockpit returns `*_pct` fields in percentage points (e.g. 12.3 => 12.3%), not ratio values.
-  return `${num.toFixed(decimals)}%`;
-};
 
 const formatQty = (value: unknown, fieldName = "quantity") => {
   const num = coerceNumber(value);
@@ -116,11 +108,12 @@ export default function SalesLanding() {
     };
   }, []);
 
+  const grossMargin = useMemo(() => normalizeGrossMargin(metrics?.gross_margin_pct), [metrics?.gross_margin_pct]);
+
   const stats = useMemo(
     () => {
       const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
       const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
-      const grossMargin = Number(metrics?.gross_margin_pct ?? 0);
       const inventoryValue = Number(metrics?.inventory_value ?? 0);
       const arTotal = Number(metrics?.ar_total ?? 0);
       const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
@@ -130,7 +123,6 @@ export default function SalesLanding() {
       return [
       { label: "Revenue MTD", value: formatCurrency(revenueMtd, "revenue_mtd"), helper: "Month to date" },
       { label: "Revenue YTD", value: formatCurrency(revenueYtd, "revenue_ytd"), helper: "Year to date" },
-      { label: "Gross Margin", value: formatPercent(grossMargin, 1, "gross_margin_pct"), helper: "From invoice snapshots" },
       { label: "Inventory Value", value: formatCurrency(inventoryValue, "inventory_value"), helper: "On-hand × landed cost" },
       { label: "A/R Total", value: formatCurrency(arTotal, "ar_total"), helper: "Open receivables" },
       { label: "A/R 90+", value: formatCurrency(ar90Plus, "ar_90_plus"), helper: "Severely overdue" },
@@ -165,6 +157,15 @@ export default function SalesLanding() {
             <p className="mt-1 text-xs text-muted">{stat.helper}</p>
           </div>
         ))}
+        {isLoading ? (
+          <div className="app-card p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Gross Margin</p>
+            <div className="mt-2 h-[170px] animate-pulse rounded bg-slate-200" />
+            <p className="mt-1 text-xs text-muted">From invoice snapshots</p>
+          </div>
+        ) : (
+          <GrossMarginGauge valuePercent={grossMargin} />
+        )}
       </div>
 
       <div className="app-card p-6">

@@ -1,7 +1,7 @@
 """add source columns to inventory_reservations
 
 Revision ID: 0019_inventory_reservation_source_columns
-Revises: 0018_ar_collections_activity
+Revises: 0019_expand_alembic_ver
 Create Date: 2026-02-19 00:00:00.000000
 """
 
@@ -10,14 +10,31 @@ import sqlalchemy as sa
 
 
 revision = "0019_inventory_reservation_source_columns"
-down_revision = "0018_ar_collections_activity"
+down_revision = "0019_expand_alembic_ver"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("inventory_reservations", sa.Column("source_type", sa.String(length=32), nullable=True))
-    op.add_column("inventory_reservations", sa.Column("source_id", sa.Integer(), nullable=True))
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+
+    existing_columns = {column["name"] for column in inspector.get_columns("inventory_reservations")}
+
+    # If DB is in the prior broken state (schema changes applied, version still 0018),
+    # this idempotent migration should succeed once alembic_version is widened.
+    if "source_type" not in existing_columns:
+        op.add_column("inventory_reservations", sa.Column("source_type", sa.String(length=32), nullable=True))
+    if "source_id" not in existing_columns:
+        op.add_column("inventory_reservations", sa.Column("source_id", sa.Integer(), nullable=True))
+
+    existing_indexes = {index["name"] for index in inspector.get_indexes("inventory_reservations")}
+    if "ix_inventory_reservations_item_id_released_at" not in existing_indexes:
+        op.create_index(
+            "ix_inventory_reservations_item_id_released_at",
+            "inventory_reservations",
+            ["item_id", "released_at"],
+        )
 
     op.execute(
         """
@@ -46,14 +63,17 @@ def upgrade() -> None:
         """
     )
 
-    op.create_index(
-        "ix_inventory_reservations_item_id_released_at",
-        "inventory_reservations",
-        ["item_id", "released_at"],
-    )
-
 
 def downgrade() -> None:
-    op.drop_index("ix_inventory_reservations_item_id_released_at", table_name="inventory_reservations")
-    op.drop_column("inventory_reservations", "source_id")
-    op.drop_column("inventory_reservations", "source_type")
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+
+    existing_indexes = {index["name"] for index in inspector.get_indexes("inventory_reservations")}
+    if "ix_inventory_reservations_item_id_released_at" in existing_indexes:
+        op.drop_index("ix_inventory_reservations_item_id_released_at", table_name="inventory_reservations")
+
+    existing_columns = {column["name"] for column in inspector.get_columns("inventory_reservations")}
+    if "source_id" in existing_columns:
+        op.drop_column("inventory_reservations", "source_id")
+    if "source_type" in existing_columns:
+        op.drop_column("inventory_reservations", "source_type")

@@ -15,6 +15,7 @@ from app.sales.calculations import (
     validate_payment_applications,
 )
 from app.suppliers.service import get_supplier_link
+from app.sql_expressions import days_between
 
 
 DEFAULT_MARGIN_THRESHOLD_PERCENT = Decimal("20")
@@ -83,7 +84,7 @@ def get_customer_insights(db: Session, customer_id: int) -> dict:
             func.coalesce(func.sum(PaymentApplication.applied_amount), 0).label("applied_total"),
             func.coalesce(
                 func.sum(
-                    (func.julianday(Payment.payment_date) - func.julianday(Invoice.issue_date))
+                    days_between(Payment.payment_date, Invoice.issue_date, dialect_name=db.get_bind().dialect.name)
                     * PaymentApplication.applied_amount
                 ),
                 0,

@@ -11,6 +11,7 @@ import {
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
+import SalesRequestTimeline from "../components/sales/SalesRequestTimeline";
 
 /* ---------- types ---------- */
 
@@ -172,6 +173,8 @@ export default function SalesRequestDetailPage() {
   );
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [statusError, setStatusError] = useState("");
+  const [statusDraft, setStatusDraft] = useState<SalesRequestDetail["status"] | "">("");
+  const [statusNotice, setStatusNotice] = useState("");
   const notice = (location.state as { notice?: string } | null)?.notice || "";
 
   /* --- data loading --- */
@@ -185,6 +188,7 @@ export default function SalesRequestDetailPage() {
         `/sales-requests/${id}/detail`
       );
       setDetail(data);
+      setStatusDraft(data.status);
     } catch (err) {
       setDetail(null);
       setError((err as Error).message);
@@ -344,13 +348,16 @@ export default function SalesRequestDetailPage() {
   const handleStatusTransition = async (nextStatus: SalesRequestDetail["status"]) => {
     if (!detail || !id || nextStatus === detail.status) return;
     setStatusError("");
+    setStatusNotice("");
     setStatusUpdating(true);
     try {
-      await apiFetch(`/sales-requests/${id}`, {
+      const updated = await apiFetch<SalesRequestDetail>(`/sales-requests/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: nextStatus })
+        body: JSON.stringify({ workflow_status: nextStatus })
       });
-      await loadDetail();
+      setDetail(updated);
+      setStatusDraft(updated.status);
+      setStatusNotice(`Workflow updated to ${updated.status.replace(/_/g, " ")}.`);
     } catch (err) {
       setStatusError((err as Error).message || "Unable to update status.");
     } finally {
@@ -407,6 +414,19 @@ export default function SalesRequestDetailPage() {
   const canGenerateInvoice = detail.status === "CONFIRMED";
   const hasLinkedInvoice = !!detail.linked_invoice_id;
 
+  const primaryTransitionCta: { label: string; target: SalesRequestDetail["status"] } | null =
+    detail.status === "NEW"
+      ? { label: "Mark as Quoted", target: "QUOTED" }
+      : detail.status === "QUOTED"
+        ? { label: "Confirm & Reserve Inventory", target: "CONFIRMED" }
+        : detail.status === "CONFIRMED"
+          ? { label: "Generate Invoice", target: "INVOICED" }
+          : detail.status === "INVOICED"
+            ? { label: "Mark Shipped", target: "SHIPPED" }
+            : detail.status === "SHIPPED"
+              ? { label: "Close", target: "CLOSED" }
+              : null;
+
   return (
     <section className="space-y-8">
       {/* Header */}
@@ -453,23 +473,44 @@ export default function SalesRequestDetailPage() {
       {notice ? <section className="app-card p-4 text-sm text-success">{notice}</section> : null}
 
       <section className="app-card p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-medium">Workflow status</label>
-          <select
-            className="app-select w-64"
-            value={detail.status}
-            onChange={(event) => void handleStatusTransition(event.target.value as SalesRequestDetail["status"])}
-            disabled={statusUpdating || isTerminal || detail.allowed_transitions.length === 0}
-          >
-            <option value={detail.status}>{detail.status.replace(/_/g, " ")}</option>
-            {detail.allowed_transitions.map((status) => (
-              <option key={status} value={status}>
-                {status.replace(/_/g, " ")}
-              </option>
-            ))}
-          </select>
-          {statusUpdating ? <span className="text-xs text-muted">Updating…</span> : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm font-medium">Workflow status</label>
+            <select
+              className="app-select w-64"
+              value={statusDraft}
+              onChange={(event) => setStatusDraft(event.target.value as SalesRequestDetail["status"])}
+              disabled={statusUpdating || isTerminal || detail.allowed_transitions.length === 0}
+            >
+              <option value={detail.status}>{detail.status.replace(/_/g, " ")}</option>
+              {detail.allowed_transitions.map((status) => (
+                <option key={status} value={status}>
+                  {status.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+            <button
+              className="app-button-secondary"
+              type="button"
+              disabled={statusUpdating || !statusDraft || statusDraft === detail.status}
+              onClick={() => void handleStatusTransition(statusDraft as SalesRequestDetail["status"])}
+            >
+              Update Status
+            </button>
+            {statusUpdating ? <span className="text-xs text-muted">Updating…</span> : null}
+          </div>
+          {primaryTransitionCta && detail.allowed_transitions.includes(primaryTransitionCta.target) ? (
+            <button
+              className="app-button"
+              type="button"
+              disabled={statusUpdating}
+              onClick={() => void handleStatusTransition(primaryTransitionCta.target)}
+            >
+              {primaryTransitionCta.label}
+            </button>
+          ) : null}
         </div>
+        {statusNotice ? <p className="text-sm text-success">{statusNotice}</p> : null}
         {statusError ? <p className="text-sm text-danger">{statusError}</p> : null}
       </section>
 
@@ -571,18 +612,8 @@ export default function SalesRequestDetailPage() {
         </div>
       )}
 
-      <section className="app-card p-6 space-y-4">
-        <h3 className="text-lg font-semibold">Timeline</h3>
-        <ol className="space-y-3">
-          {detail.timeline.map((entry) => (
-            <li key={entry.status} className="flex items-center justify-between border-b border-border/60 pb-2 text-sm last:border-b-0">
-              <span className={entry.current ? "font-semibold" : "text-muted"}>{entry.label}</span>
-              <span className="tabular-nums text-xs text-muted">{entry.occurred_at ? formatDate(entry.occurred_at) : "Pending"}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
-
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
+        <div className="space-y-6">
       {/* Line items with inventory + supplier selection */}
       <div className="app-card p-6 space-y-4">
         <div className="flex items-center gap-3">
@@ -724,8 +755,7 @@ export default function SalesRequestDetailPage() {
       </div>
 
       {/* Cost summary + markup */}
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <div className="app-card p-6 space-y-4">
+      <div className="app-card p-6 space-y-4">
           <p className="text-sm font-semibold">Cost & Pricing Summary</p>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm">
@@ -771,9 +801,10 @@ export default function SalesRequestDetailPage() {
             </div>
           </div>
         </div>
+        </div>
 
-        {/* Invoice generation or linked invoice */}
-        <div className="space-y-6">
+        <aside className="space-y-6">
+          <SalesRequestTimeline timeline={detail.timeline} formatDate={formatDate} />
           <CustomerInsightsPanel customerId={detail.customer_id} mode="full" />
           <div className="app-card p-6 space-y-4">
           {hasLinkedInvoice ? (
@@ -876,7 +907,7 @@ export default function SalesRequestDetailPage() {
             </>
           )}
           </div>
-        </div>
+        </aside>
       </div>
     </section>
   );

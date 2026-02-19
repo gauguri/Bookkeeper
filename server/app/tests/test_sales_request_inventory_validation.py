@@ -321,3 +321,19 @@ def test_delete_sales_request_releases_reservation(client: TestClient):
     availability = client.get("/api/inventory/available?item_id=1")
     assert availability.status_code == 200
     assert availability.json() == {"item_id": 1, "available_qty": "10.00"}
+
+
+def test_patch_sales_request_accepts_workflow_status_and_returns_timeline(client: TestClient):
+    sales_request_id = _create_sales_request(client, item_id=1, quantity=1)
+
+    response = client.patch(
+        f"/api/sales-requests/{sales_request_id}",
+        json={"workflow_status": "QUOTED"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "QUOTED"
+    quoted_step = next(entry for entry in body["timeline"] if entry["status"] == "QUOTED")
+    assert quoted_step["completed"] is True
+    assert quoted_step["occurred_at"] is not None

@@ -9,7 +9,7 @@ from app.auth import get_current_user, require_module
 from app.db import get_db
 from app.inventory.service import SOURCE_SALES_REQUEST
 from app.module_keys import ModuleKey
-from app.models import SalesRequest
+from app.models import AuditEvent, SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
     InventoryQuantityExceededError,
@@ -22,6 +22,7 @@ from app.sales_requests.service import (
     update_open_sales_request,
     update_sales_request_status,
     _sync_sales_request_reservations,
+    record_sales_request_status_transition,
 )
 
 
@@ -49,7 +50,7 @@ def _to_response(sales_request: SalesRequest) -> schemas.SalesRequestResponse:
     )
 
 
-def _build_timeline(sr: SalesRequest, linked_invoice_status: Optional[str], linked_invoice_shipped_at: Optional[datetime]):
+def _build_timeline(sr: SalesRequest, linked_invoice_status: Optional[str], linked_invoice_shipped_at: Optional[datetime], timeline_events: Optional[dict[str, datetime]] = None):
     flow = ["NEW", "QUOTED", "CONFIRMED", "INVOICED", "SHIPPED", "CLOSED"]
     labels = {
         "NEW": "New request created",
@@ -62,10 +63,11 @@ def _build_timeline(sr: SalesRequest, linked_invoice_status: Optional[str], link
         "CANCELLED": "Cancelled",
     }
 
+    timeline_events = timeline_events or {}
     current_idx = flow.index(sr.status) if sr.status in flow else -1
     entries = []
     for idx, status_key in enumerate(flow):
-        occurred_at = sr.updated_at if idx <= current_idx else None
+        occurred_at = timeline_events.get(status_key) or (sr.updated_at if idx <= current_idx else None)
         if status_key == "SHIPPED" and linked_invoice_status == "SHIPPED":
             occurred_at = linked_invoice_shipped_at or occurred_at
         entries.append(
@@ -90,6 +92,28 @@ def _build_timeline(sr: SalesRequest, linked_invoice_status: Optional[str], link
         )
 
     return entries
+
+
+def _load_status_timeline_events(db: Session, sales_request_id: int) -> dict[str, datetime]:
+    rows = (
+        db.query(AuditEvent.after_hash, AuditEvent.created_at)
+        .filter(
+            AuditEvent.entity_type == "sales_request",
+            AuditEvent.entity_id == sales_request_id,
+            AuditEvent.action == "STATUS_TRANSITION",
+        )
+        .order_by(AuditEvent.created_at.asc())
+        .all()
+    )
+
+    events: dict[str, datetime] = {}
+    for row in rows:
+        to_status = (row.after_hash or "").strip()
+        if not to_status:
+            continue
+        if to_status not in events:
+            events[to_status] = row.created_at
+    return events
 
 
 @router.get("", response_model=List[schemas.SalesRequestResponse])
@@ -172,7 +196,12 @@ def get_sales_request_detail_endpoint(sales_request_id: int, db: Session = Depen
         linked_invoice_status=result["linked_invoice_status"],
         linked_invoice_shipped_at=result["linked_invoice_shipped_at"],
         allowed_transitions=get_allowed_sales_request_status_transitions(sr),
-        timeline=_build_timeline(sr, result["linked_invoice_status"], result["linked_invoice_shipped_at"]),
+        timeline=_build_timeline(
+            sr,
+            result["linked_invoice_status"],
+            result["linked_invoice_shipped_at"],
+            timeline_events=_load_status_timeline_events(db, sr.id),
+        ),
     )
 
 
@@ -229,21 +258,34 @@ def generate_invoice_endpoint(
     }
 
 
-@router.patch("/{sales_request_id}", response_model=schemas.SalesRequestResponse)
-def patch_sales_request(sales_request_id: int, payload: schemas.SalesRequestUpdate, db: Session = Depends(get_db)):
+@router.patch("/{sales_request_id}", response_model=schemas.SalesRequestDetailResponse)
+def patch_sales_request(
+    sales_request_id: int,
+    payload: schemas.SalesRequestUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
     sales_request = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).filter(SalesRequest.id == sales_request_id).first()
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
 
-    if payload.status not in get_allowed_sales_request_status_transitions(sales_request):
-        raise HTTPException(status_code=400, detail=f"Transition {sales_request.status} -> {payload.status} is not allowed.")
+    next_status = payload.workflow_status or payload.status
+    if next_status not in get_allowed_sales_request_status_transitions(sales_request):
+        raise HTTPException(status_code=400, detail=f"Transition {sales_request.status} -> {next_status} is not allowed.")
 
-    update_sales_request_status(sales_request, payload.status)
+    previous_status = sales_request.status
+    update_sales_request_status(sales_request, next_status)
     _sync_sales_request_reservations(db, sales_request)
+    record_sales_request_status_transition(
+        db,
+        sales_request=sales_request,
+        from_status=previous_status,
+        to_status=next_status,
+        user_id=getattr(current_user, "id", None),
+    )
 
     db.commit()
-    db.refresh(sales_request)
-    return _to_response(sales_request)
+    return get_sales_request_detail_endpoint(sales_request_id, db)
 
 
 @router.delete("/{sales_request_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -62,7 +62,16 @@ class SalesRequestCreate(BaseModel):
 
 
 class SalesRequestUpdate(BaseModel):
-    status: SalesRequestStatus
+    status: Optional[SalesRequestStatus] = None
+    workflow_status: Optional[SalesRequestStatus] = None
+
+    @model_validator(mode="after")
+    def validate_status_payload(self):
+        if self.status is None and self.workflow_status is None:
+            raise ValueError("Provide status or workflow_status.")
+        if self.status is not None and self.workflow_status is not None and self.status != self.workflow_status:
+            raise ValueError("status and workflow_status must match when both are provided.")
+        return self
 
 
 class SalesRequestLineEdit(BaseModel):

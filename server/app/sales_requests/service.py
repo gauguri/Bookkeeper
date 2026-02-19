@@ -11,7 +11,7 @@ from app.inventory.service import (
     get_source_reserved_qty_map,
     sync_reservations_for_source,
 )
-from app.models import Company, Customer, Inventory, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
+from app.models import AuditEvent, Company, Customer, Inventory, Invoice, Item, SalesRequest, SalesRequestLine, SupplierItem, User
 from app.suppliers.service import get_supplier_link
 
 
@@ -260,6 +260,27 @@ def calculate_sales_request_total(sales_request: SalesRequest) -> Decimal:
 
 def update_sales_request_status(sales_request: SalesRequest, status: str):
     sales_request.status = status
+
+
+def record_sales_request_status_transition(
+    db: Session,
+    *,
+    sales_request: SalesRequest,
+    from_status: str,
+    to_status: str,
+    user_id: Optional[int] = None,
+) -> None:
+    db.add(
+        AuditEvent(
+            company_id=_get_default_company_id(db),
+            user_id=user_id,
+            entity_type="sales_request",
+            entity_id=sales_request.id,
+            action="STATUS_TRANSITION",
+            before_hash=from_status,
+            after_hash=to_status,
+        )
+    )
 
 
 def close_sales_request_if_paid(db: Session, sales_request_id: int) -> bool:

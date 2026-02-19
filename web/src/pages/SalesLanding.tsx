@@ -23,7 +23,7 @@ type CockpitShortage = {
 type OwnerCockpitResponse = {
   revenue_mtd: number;
   revenue_ytd: number;
-  gross_margin_pct: number;
+  gross_margin_pct: number | string | null;
   inventory_value: number;
   ar_total: number;
   ar_90_plus: number;
@@ -108,7 +108,19 @@ export default function SalesLanding() {
     };
   }, []);
 
-  const grossMargin = useMemo(() => normalizeGrossMargin(metrics?.gross_margin_pct), [metrics?.gross_margin_pct]);
+  const grossMargin = useMemo(() => {
+    const rawMargin = metrics?.gross_margin_pct;
+
+    if (rawMargin == null) {
+      return 0;
+    }
+
+    if (typeof rawMargin === "string") {
+      return normalizeGrossMargin(Number.parseFloat(rawMargin));
+    }
+
+    return normalizeGrossMargin(rawMargin);
+  }, [metrics?.gross_margin_pct]);
 
   const stats = useMemo(
     () => {

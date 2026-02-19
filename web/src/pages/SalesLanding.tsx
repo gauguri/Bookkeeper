@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, TrendingUp, DollarSign, Package, AlertTriangle, Clock, FileText, BarChart3, Wallet } from "lucide-react";
 import { apiFetch } from "../api";
 import GrossMarginGauge from "../components/dashboard/GrossMarginGauge";
 import InventoryValueGauge, { TARGET_DIO_DAYS } from "../components/dashboard/InventoryValueGauge";
 import { normalizeGrossMargin } from "../utils/metrics";
 
-const cards = [
-  { title: "Invoices", description: "Ship and collect faster.", to: "/sales/invoices" },
-  { title: "Backlog", description: "Resolve shortages and unblock demand.", to: "/operations/backlog" },
-  { title: "A/R Aging", description: "Prioritize collections this week.", to: "/finance/ar-aging" },
-  { title: "Cash Forecast", description: "Inspect inflows and outflows.", to: "/finance/cash-forecast" }
+const quickLinks = [
+  { title: "Invoices", description: "Ship & collect faster", to: "/sales/invoices", icon: FileText },
+  { title: "Backlog", description: "Resolve shortages", to: "/operations/backlog", icon: Package },
+  { title: "A/R Aging", description: "Prioritize collections", to: "/finance/ar-aging", icon: BarChart3 },
+  { title: "Cash Forecast", description: "Inflows & outflows", to: "/finance/cash-forecast", icon: Wallet }
 ];
 
 type CockpitShortage = {
@@ -35,40 +35,24 @@ type OwnerCockpitResponse = {
   top_shortages: CockpitShortage[];
 };
 
-const warnedFields = new Set<string>();
-const isDev = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
-
 const coerceNumber = (value: unknown): number => {
-  if (typeof value === "number") {
-    return value;
-  }
-  if (typeof value === "string") {
-    return Number(value);
-  }
-  if (value && typeof value === "object" && "toString" in value) {
-    return Number(String(value));
-  }
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value);
+  if (value && typeof value === "object" && "toString" in value) return Number(String(value));
   return Number.NaN;
 };
 
-const warnBadValue = (fieldName: string, value: unknown) => {
-  if (isDev && !warnedFields.has(fieldName)) {
-    warnedFields.add(fieldName);
-    console.warn("[SalesLanding] bad percent value", value, { fieldName });
-  }
-};
-
-const formatCurrency = (value: unknown, fieldName = "currency") => {
+const formatCurrency = (value: unknown) => {
   const num = coerceNumber(value);
-  if (!Number.isFinite(num)) {
-    warnBadValue(fieldName, value);
-    return "—";
-  }
-
+  if (!Number.isFinite(num)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
 };
 
-
+const formatQty = (value: unknown) => {
+  const num = coerceNumber(value);
+  if (!Number.isFinite(num)) return "—";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(num);
+};
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -77,15 +61,39 @@ const toSafeNumber = (value: unknown, fallback = 0): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const formatQty = (value: unknown, fieldName = "quantity") => {
-  const num = coerceNumber(value);
-  if (!Number.isFinite(num)) {
-    warnBadValue(fieldName, value);
-    return "—";
-  }
-
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(num);
+/* ---- Stat card with icon & optional accent color ---- */
+type StatDef = {
+  label: string;
+  value: string;
+  helper: string;
+  icon: React.ElementType;
+  accent: string; // tailwind text color for the icon
+  accentBg: string; // bg for icon container
 };
+
+function StatCard({ stat, isLoading }: { stat: StatDef; isLoading: boolean }) {
+  const Icon = stat.icon;
+  return (
+    <div className="app-card p-5 group">
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">{stat.label}</p>
+          <div className="mt-2">
+            {isLoading ? (
+              <div className="h-8 w-28 animate-pulse rounded-lg bg-secondary" />
+            ) : (
+              <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">{stat.value}</p>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-muted">{stat.helper}</p>
+        </div>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${stat.accentBg}`}>
+          <Icon className={`h-5 w-5 ${stat.accent}`} strokeWidth={1.8} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SalesLanding() {
   const [metrics, setMetrics] = useState<OwnerCockpitResponse | null>(null);
@@ -99,37 +107,22 @@ export default function SalesLanding() {
       setError(null);
       try {
         const data = await apiFetch<OwnerCockpitResponse>("/dashboard/owner-cockpit");
-        if (isActive) {
-          setMetrics(data);
-        }
+        if (isActive) setMetrics(data);
       } catch (err) {
         console.error(err);
-        if (isActive) {
-          setError(err instanceof Error ? err.message : "Unable to load owner cockpit.");
-        }
+        if (isActive) setError(err instanceof Error ? err.message : "Unable to load dashboard.");
       } finally {
-        if (isActive) {
-          setIsLoading(false);
-        }
+        if (isActive) setIsLoading(false);
       }
     };
     loadMetrics();
-    return () => {
-      isActive = false;
-    };
+    return () => { isActive = false; };
   }, []);
 
   const grossMargin = useMemo(() => {
     const rawMargin = metrics?.gross_margin_pct;
-
-    if (rawMargin == null) {
-      return 0;
-    }
-
-    if (typeof rawMargin === "string") {
-      return normalizeGrossMargin(Number.parseFloat(rawMargin));
-    }
-
+    if (rawMargin == null) return 0;
+    if (typeof rawMargin === "string") return normalizeGrossMargin(Number.parseFloat(rawMargin));
     return normalizeGrossMargin(rawMargin);
   }, [metrics?.gross_margin_pct]);
 
@@ -138,7 +131,6 @@ export default function SalesLanding() {
     const grossMarginRatio = clamp(normalizeGrossMargin(metrics?.gross_margin_pct) / 100, 0, 1);
     const cogs = revenueTopLine * (1 - grossMarginRatio);
     const targetInventoryValue = cogs * (TARGET_DIO_DAYS / 365);
-
     const actualInventoryValue = toSafeNumber(metrics?.inventory_value_total ?? metrics?.inventory_value, 0);
     const inventoryHealthPctRaw = targetInventoryValue > 0 ? (actualInventoryValue / targetInventoryValue) * 100 : 0;
 
@@ -150,59 +142,58 @@ export default function SalesLanding() {
     };
   }, [metrics]);
 
-  const stats = useMemo(
-    () => {
-      const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
-      const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
-      const inventoryValue = Number(metrics?.inventory_value ?? 0);
-      const arTotal = Number(metrics?.ar_total ?? 0);
-      const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
-      const cashForecast30d = Number(metrics?.cash_forecast_30d ?? 0);
-      const backlogValue = Number(metrics?.backlog_value ?? 0);
+  const stats: StatDef[] = useMemo(() => {
+    const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
+    const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
+    const arTotal = Number(metrics?.ar_total ?? 0);
+    const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
+    const cashForecast30d = Number(metrics?.cash_forecast_30d ?? 0);
+    const backlogValue = Number(metrics?.backlog_value ?? 0);
 
-      return [
-      { label: "Revenue MTD", value: formatCurrency(revenueMtd, "revenue_mtd"), helper: "Month to date" },
-      { label: "Revenue YTD", value: formatCurrency(revenueYtd, "revenue_ytd"), helper: "Year to date" },
-      { label: "Inventory Value", value: formatCurrency(inventoryValue, "inventory_value"), helper: "On-hand × landed cost" },
-      { label: "A/R Total", value: formatCurrency(arTotal, "ar_total"), helper: "Open receivables" },
-      { label: "A/R 90+", value: formatCurrency(ar90Plus, "ar_90_plus"), helper: "Severely overdue" },
-      {
-        label: "Cash Forecast 30d",
-        value: formatCurrency(cashForecast30d, "cash_forecast_30d"),
-        helper: "Net inflow / outflow"
-      },
-      { label: "Backlog Value", value: formatCurrency(backlogValue, "backlog_value"), helper: "Active commitments" }
+    return [
+      { label: "Revenue MTD", value: formatCurrency(revenueMtd), helper: "Month to date", icon: TrendingUp, accent: "text-emerald-400", accentBg: "bg-emerald-500/10" },
+      { label: "Revenue YTD", value: formatCurrency(revenueYtd), helper: "Year to date", icon: DollarSign, accent: "text-blue-400", accentBg: "bg-blue-500/10" },
+      { label: "A/R Total", value: formatCurrency(arTotal), helper: "Open receivables", icon: FileText, accent: "text-violet-400", accentBg: "bg-violet-500/10" },
+      { label: "A/R 90+", value: formatCurrency(ar90Plus), helper: "Severely overdue", icon: AlertTriangle, accent: ar90Plus > 0 ? "text-red-400" : "text-slate-500", accentBg: ar90Plus > 0 ? "bg-red-500/10" : "bg-slate-500/10" },
+      { label: "Cash Forecast 30d", value: formatCurrency(cashForecast30d), helper: "Net inflow / outflow", icon: Wallet, accent: "text-cyan-400", accentBg: "bg-cyan-500/10" },
+      { label: "Backlog Value", value: formatCurrency(backlogValue), helper: "Active commitments", icon: Clock, accent: "text-amber-400", accentBg: "bg-amber-500/10" }
     ];
-    },
-    [metrics]
-  );
+  }, [metrics]);
 
   return (
     <section className="space-y-8">
+      {/* Header */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Owner cockpit</p>
-        <h1 className="text-3xl font-semibold">Operator dashboard</h1>
-        <p className="text-muted">One place to run revenue, margin, cash, and fulfillment risk.</p>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Operator Dashboard</h1>
+        <p className="mt-1 text-sm text-muted">Revenue, margin, cash, and fulfillment at a glance.</p>
       </div>
 
-      {error ? <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</div> : null}
+      {error && (
+        <div className="mb-6 rounded-xl border border-danger/20 bg-danger/5 px-5 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {/* KPI Stats Grid */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {stats.map((stat) => (
-          <div key={stat.label} className="app-card p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">{stat.label}</p>
-            <div className="mt-2">
-              {isLoading ? <div className="h-7 w-24 animate-pulse rounded bg-slate-200" /> : <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>}
-            </div>
-            <p className="mt-1 text-xs text-muted">{stat.helper}</p>
-          </div>
+          <StatCard key={stat.label} stat={stat} isLoading={isLoading} />
         ))}
+      </div>
+
+      {/* Gauges Row */}
+      <div className="grid gap-4 sm:grid-cols-2">
         {isLoading ? (
-          <div className="app-card p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Gross Margin</p>
-            <div className="mt-2 h-[170px] animate-pulse rounded bg-slate-200" />
-            <p className="mt-1 text-xs text-muted">From invoice snapshots</p>
-          </div>
+          <>
+            <div className="app-card px-5 pt-5 pb-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Gross Margin</p>
+              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
+            </div>
+            <div className="app-card px-5 pt-5 pb-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Inventory Value</p>
+              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
+            </div>
+          </>
         ) : (
           <>
             <GrossMarginGauge value={grossMargin} />
@@ -217,54 +208,71 @@ export default function SalesLanding() {
         )}
       </div>
 
-      <div className="app-card p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Top 5 shortages</h2>
-          <Link className="app-button-secondary text-xs" to="/operations/backlog">
-            Open backlog
+      {/* Shortages Table */}
+      <div className="app-card">
+        <div className="flex items-center justify-between px-6 pt-5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-warning/10">
+              <AlertTriangle className="h-4 w-4 text-warning" strokeWidth={1.8} />
+            </div>
+            <h2 className="text-sm font-bold uppercase tracking-widest text-muted">Top 5 Shortages</h2>
+          </div>
+          <Link className="app-button-ghost text-[11px] uppercase tracking-wider" to="/operations/backlog">
+            Open backlog <ArrowUpRight className="h-3.5 w-3.5" />
           </Link>
         </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-muted">
-                <th className="pb-2 pr-4">Item</th>
-                <th className="pb-2 pr-4 text-right">Shortage Qty</th>
-                <th className="pb-2 pr-4 text-right">Backlog Qty</th>
-                <th className="pb-2 text-right">Next Inbound</th>
+              <tr className="border-t text-left">
+                <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-widest text-muted">Item</th>
+                <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-widest text-muted">Shortage</th>
+                <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-widest text-muted">Backlog</th>
+                <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-widest text-muted">Next ETA</th>
               </tr>
             </thead>
             <tbody>
               {(metrics?.top_shortages ?? []).map((row) => (
-                <tr key={row.item_id} className="border-b last:border-b-0">
-                  <td className="py-2 pr-4">{row.item_name}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.shortage_qty, "shortage_qty")}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatQty(row.backlog_qty, "backlog_qty")}</td>
-                  <td className="py-2 text-right">{row.next_inbound_eta ?? "TBD"}</td>
+                <tr key={row.item_id} className="app-table-row border-t">
+                  <td className="px-6 py-3 font-medium text-foreground">{row.item_name}</td>
+                  <td className="px-6 py-3 text-right tabular-nums text-danger font-medium">{formatQty(row.shortage_qty)}</td>
+                  <td className="px-6 py-3 text-right tabular-nums text-muted">{formatQty(row.backlog_qty)}</td>
+                  <td className="px-6 py-3 text-right text-muted">{row.next_inbound_eta ?? "TBD"}</td>
                 </tr>
               ))}
-              {!isLoading && (metrics?.top_shortages.length ?? 0) === 0 ? (
+              {!isLoading && (metrics?.top_shortages.length ?? 0) === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-3 text-center text-muted">
-                    No active shortages.
+                  <td colSpan={4} className="px-6 py-8 text-center text-muted">
+                    No active shortages — looking good.
                   </td>
                 </tr>
-              ) : null}
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {cards.map((card) => (
-          <Link key={card.to} to={card.to} className="app-card group p-6 transition hover:-translate-y-1 hover:shadow-glow">
-            <h2 className="mb-2 text-xl font-semibold">{card.title}</h2>
-            <p className="text-muted">{card.description}</p>
-            <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary">
-              Open module <ArrowUpRight className="h-4 w-4 transition group-hover:translate-x-1" />
-            </span>
-          </Link>
-        ))}
+      {/* Quick Links */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {quickLinks.map((link) => {
+          const Icon = link.icon;
+          return (
+            <Link
+              key={link.to}
+              to={link.to}
+              className="app-card flex items-center justify-between px-4 py-3.5 transition hover:shadow-soft group"
+            >
+              <div className="flex items-center gap-3">
+                <Icon className="h-5 w-5 text-muted transition group-hover:text-primary" strokeWidth={1.8} />
+                <div>
+                  <p className="text-sm font-semibold text-foreground transition group-hover:text-primary">{link.title}</p>
+                  <p className="text-[11px] text-muted">{link.description}</p>
+                </div>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-muted transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary" />
+            </Link>
+          );
+        })}
       </div>
     </section>
   );

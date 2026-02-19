@@ -24,6 +24,8 @@ const ZONE_LABEL_COLORS = {
 const TRACK_COLOR = "#E5E7EB";
 const NEEDLE_COLOR = "#1F2937";
 const VALUE_COLOR = "#111827";
+const SEGMENT_GAP_DEGREES = 3;
+const SEGMENT_COUNT = 10;
 
 const toRadians = (angleDeg: number) => (angleDeg * Math.PI) / 180;
 
@@ -47,6 +49,32 @@ const describeArc = (cx: number, cy: number, radius: number, startAngleDeg: numb
 
 const percentToAngle = (percent: number): number => 180 - (percent / 100) * 180;
 
+const getSegmentColor = (index: number): string => {
+  const rangeStart = index * 10;
+  const rangeEnd = rangeStart + 10;
+
+  if (rangeEnd <= 40) {
+    return ZONE_COLORS.red;
+  }
+
+  if (rangeStart >= 50) {
+    return ZONE_COLORS.green;
+  }
+
+  if (rangeStart >= 40 && rangeEnd <= 50) {
+    return ZONE_COLORS.amber;
+  }
+
+  const midpoint = (rangeStart + rangeEnd) / 2;
+  if (midpoint < 40) {
+    return ZONE_COLORS.red;
+  }
+  if (midpoint < 50) {
+    return ZONE_COLORS.amber;
+  }
+  return ZONE_COLORS.green;
+};
+
 export default function GrossMarginGauge({
   value,
   valuePercent,
@@ -54,23 +82,21 @@ export default function GrossMarginGauge({
   subtitle = "From invoice snapshots"
 }: GrossMarginGaugeProps) {
   const rawValue = value ?? valuePercent;
-  const normalizedPercent = normalizeGrossMargin(rawValue);
+  const coercedValue = Number(rawValue);
+  const normalizedPercent = Number.isNaN(coercedValue) ? 0 : normalizeGrossMargin(coercedValue);
   const zone = getGmZoneColor(normalizedPercent);
   const zoneLabel = getGmZoneLabel(normalizedPercent).toUpperCase();
 
   const cx = 120;
   const cy = 120;
-  const radius = 80;
-  const strokeWidth = 16;
-  const needleLength = 66;
-
-  const angleAt40 = percentToAngle(40);
-  const angleAt50 = percentToAngle(50);
+  const radius = 90;
+  const strokeWidth = 24;
+  const needleLength = 76;
 
   const needleAngle = percentToAngle(normalizedPercent);
   const needleTip = polarToCartesian(cx, cy, needleLength, needleAngle);
 
-  const ticks = [0, 40, 50, 100];
+  const segmentSweep = 180 / SEGMENT_COUNT;
 
   return (
     <div className="app-card p-5" aria-label={`${title} ${formatPercent(normalizedPercent)} in ${zoneLabel} zone`}>
@@ -79,40 +105,27 @@ export default function GrossMarginGauge({
         <svg viewBox="0 0 240 160" className="w-full max-w-[320px]" role="img" aria-hidden="true">
           <path d={describeArc(cx, cy, radius, 180, 0)} fill="none" stroke={TRACK_COLOR} strokeWidth={strokeWidth} strokeLinecap="round" />
 
-          <path d={describeArc(cx, cy, radius, 180, angleAt40)} fill="none" stroke={ZONE_COLORS.red} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <path d={describeArc(cx, cy, radius, angleAt40, angleAt50)} fill="none" stroke={ZONE_COLORS.amber} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <path d={describeArc(cx, cy, radius, angleAt50, 0)} fill="none" stroke={ZONE_COLORS.green} strokeWidth={strokeWidth} strokeLinecap="round" />
-
-          {ticks.map((tick) => {
-            const angle = percentToAngle(tick);
-            const inner = polarToCartesian(cx, cy, radius - strokeWidth / 2 - 3, angle);
-            const outer = polarToCartesian(cx, cy, radius + strokeWidth / 2 + 3, angle);
-            const labelBase = polarToCartesian(cx, cy, radius + strokeWidth / 2 + 16, angle);
-
-            const xAdjust = tick === 40 ? -6 : tick === 50 ? 6 : 0;
-            const yAdjust = tick === 0 || tick === 100 ? 5 : 1;
+          {Array.from({ length: SEGMENT_COUNT }).map((_, index) => {
+            const segmentStart = 180 - index * segmentSweep;
+            const segmentEnd = segmentStart - segmentSweep;
+            const arcStart = segmentStart - SEGMENT_GAP_DEGREES / 2;
+            const arcEnd = segmentEnd + SEGMENT_GAP_DEGREES / 2;
 
             return (
-              <g key={tick}>
-                <line x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" />
-                <text
-                  x={labelBase.x + xAdjust}
-                  y={labelBase.y + yAdjust}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize="10"
-                  fontWeight="600"
-                  fill="#6B7280"
-                >
-                  {tick}
-                </text>
-              </g>
+              <path
+                key={`segment-${index}`}
+                d={describeArc(cx, cy, radius, arcStart, arcEnd)}
+                fill="none"
+                stroke={getSegmentColor(index)}
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+              />
             );
           })}
 
           <line x1={cx} y1={cy} x2={needleTip.x} y2={needleTip.y} stroke={NEEDLE_COLOR} strokeWidth="4" strokeLinecap="round" />
-          <circle cx={cx} cy={cy} r="9" fill="#F9FAFB" stroke="#D1D5DB" strokeWidth="2" />
-          <circle cx={cx} cy={cy} r="5" fill={NEEDLE_COLOR} />
+          <circle cx={cx} cy={cy} r="10" fill={NEEDLE_COLOR} />
+          <circle cx={cx} cy={cy} r="4" fill="#F9FAFB" />
         </svg>
       </div>
 

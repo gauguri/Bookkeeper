@@ -501,11 +501,8 @@ class InventoryReservation(Base):
 
     id = Column(Integer, primary_key=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
-    source_type = Column(
-        Enum("sales_request", "invoice", name="inventory_reservation_source_type"),
-        nullable=False,
-    )
-    source_id = Column(Integer, nullable=False)
+    source_type = Column(String(32), nullable=True)
+    source_id = Column(Integer, nullable=True)
     sales_request_id = Column(Integer, ForeignKey("sales_requests.id"), nullable=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
     qty_reserved = Column(Numeric(14, 2), nullable=False)
@@ -517,6 +514,7 @@ class InventoryReservation(Base):
     __table_args__ = (
         Index("ix_inventory_reservations_item_id", "item_id"),
         Index("ix_inventory_reservations_source", "source_type", "source_id"),
+        Index("ix_inventory_reservations_item_id_released_at", "item_id", "released_at"),
     )
 
 

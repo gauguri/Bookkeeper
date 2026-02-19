@@ -45,7 +45,7 @@ type SalesRequestDetail = {
   request_number: string;
   customer_id: number | null;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
+  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
   created_at: string;
   updated_at: string;
   notes: string | null;
@@ -58,6 +58,16 @@ type SalesRequestDetail = {
   invoice_number: string | null;
   linked_invoice_status: string | null;
   linked_invoice_shipped_at: string | null;
+  allowed_transitions: Array<SalesRequestDetail["status"]>;
+  timeline: TimelineEntry[];
+};
+
+type TimelineEntry = {
+  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
+  label: string;
+  occurred_at: string | null;
+  completed: boolean;
+  current: boolean;
 };
 
 type LineSelection = {
@@ -79,11 +89,14 @@ type GenerateResult = {
 /* ---------- helpers ---------- */
 
 const statusStyles: Record<string, string> = {
-  OPEN: "border-primary/30 bg-primary/10 text-primary",
-  IN_PROGRESS: "border-warning/30 bg-warning/10 text-warning",
+  NEW: "border-slate-400/40 bg-slate-400/10 text-slate-700",
+  QUOTED: "border-warning/30 bg-warning/10 text-warning",
+  CONFIRMED: "border-primary/30 bg-primary/10 text-primary",
   INVOICED: "border-info/30 bg-info/10 text-info",
   SHIPPED: "border-primary/30 bg-primary/10 text-primary",
   CLOSED: "border-success/30 bg-success/10 text-success",
+  LOST: "border-danger/30 bg-danger/10 text-danger",
+  CANCELLED: "border-muted/30 bg-muted/10 text-muted",
 };
 
 const formatDate = (value?: string | null) => {
@@ -157,6 +170,8 @@ export default function SalesRequestDetailPage() {
   const [generateResult, setGenerateResult] = useState<GenerateResult | null>(
     null
   );
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusError, setStatusError] = useState("");
   const notice = (location.state as { notice?: string } | null)?.notice || "";
 
   /* --- data loading --- */
@@ -326,6 +341,23 @@ export default function SalesRequestDetailPage() {
     if (!invoiceIdentifier) return;
     navigate(`/invoices/${invoiceIdentifier}`);
   };
+  const handleStatusTransition = async (nextStatus: SalesRequestDetail["status"]) => {
+    if (!detail || !id || nextStatus === detail.status) return;
+    setStatusError("");
+    setStatusUpdating(true);
+    try {
+      await apiFetch(`/sales-requests/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus })
+      });
+      await loadDetail();
+    } catch (err) {
+      setStatusError((err as Error).message || "Unable to update status.");
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
 
   /* --- render states --- */
 
@@ -371,6 +403,8 @@ export default function SalesRequestDetailPage() {
   }
 
   const isClosed = detail.status === "CLOSED";
+  const isTerminal = detail.status === "CLOSED" || detail.status === "LOST" || detail.status === "CANCELLED";
+  const canGenerateInvoice = detail.status === "CONFIRMED";
   const hasLinkedInvoice = !!detail.linked_invoice_id;
 
   return (
@@ -405,7 +439,7 @@ export default function SalesRequestDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {!isClosed && !hasLinkedInvoice ? (
+          {(detail.status === "NEW" || detail.status === "QUOTED") && !hasLinkedInvoice ? (
             <button className="app-button-secondary" type="button" onClick={() => navigate(`/sales-requests/${detail.id}/edit`)}>
               Update
             </button>
@@ -417,6 +451,27 @@ export default function SalesRequestDetailPage() {
       </div>
 
       {notice ? <section className="app-card p-4 text-sm text-success">{notice}</section> : null}
+
+      <section className="app-card p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium">Workflow status</label>
+          <select
+            className="app-select w-64"
+            value={detail.status}
+            onChange={(event) => void handleStatusTransition(event.target.value as SalesRequestDetail["status"])}
+            disabled={statusUpdating || isTerminal || detail.allowed_transitions.length === 0}
+          >
+            <option value={detail.status}>{detail.status.replace(/_/g, " ")}</option>
+            {detail.allowed_transitions.map((status) => (
+              <option key={status} value={status}>
+                {status.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+          {statusUpdating ? <span className="text-xs text-muted">Updating…</span> : null}
+        </div>
+        {statusError ? <p className="text-sm text-danger">{statusError}</p> : null}
+      </section>
 
       {/* Stat cards */}
       <div className="grid gap-4 lg:grid-cols-4">
@@ -516,6 +571,18 @@ export default function SalesRequestDetailPage() {
         </div>
       )}
 
+      <section className="app-card p-6 space-y-4">
+        <h3 className="text-lg font-semibold">Timeline</h3>
+        <ol className="space-y-3">
+          {detail.timeline.map((entry) => (
+            <li key={entry.status} className="flex items-center justify-between border-b border-border/60 pb-2 text-sm last:border-b-0">
+              <span className={entry.current ? "font-semibold" : "text-muted"}>{entry.label}</span>
+              <span className="tabular-nums text-xs text-muted">{entry.occurred_at ? formatDate(entry.occurred_at) : "Pending"}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       {/* Line items with inventory + supplier selection */}
       <div className="app-card p-6 space-y-4">
         <div className="flex items-center gap-3">
@@ -549,7 +616,7 @@ export default function SalesRequestDetailPage() {
                 const markup = num(markupPercent);
                 const unitCost = sel ? num(sel.unitCost) : 0;
                 let computedSalePrice: number;
-                if (isClosed && hasLinkedInvoice && line.invoice_unit_price != null) {
+                if (isTerminal && hasLinkedInvoice && line.invoice_unit_price != null) {
                   computedSalePrice = line.invoice_unit_price;
                 } else if (
                   sel?.unitPriceOverride &&
@@ -590,7 +657,7 @@ export default function SalesRequestDetailPage() {
                           onChange={(e) =>
                             handleSupplierChange(line.id, e.target.value)
                           }
-                          disabled={isClosed}
+                          disabled={isTerminal}
                         >
                           <option value="">-- Select --</option>
                           {line.supplier_options.map((so) => (
@@ -623,7 +690,7 @@ export default function SalesRequestDetailPage() {
                       {sel?.unitCost ? currency(num(sel.unitCost)) : "\u2014"}
                     </td>
                     <td className="px-3 py-3">
-                      {!isClosed ? (
+                      {!isTerminal ? (
                         <div className="space-y-1">
                           <div className="text-sm font-medium tabular-nums">
                             {currency(computedSalePrice)}
@@ -670,7 +737,7 @@ export default function SalesRequestDetailPage() {
                 step="1"
                 value={markupPercent}
                 onChange={(e) => setMarkupPercent(e.target.value)}
-                disabled={isClosed}
+                disabled={isTerminal}
               />
             </label>
           </div>
@@ -738,6 +805,7 @@ export default function SalesRequestDetailPage() {
           ) : (
             <>
               <p className="text-sm font-semibold">Generate Invoice</p>
+              <p className="text-xs text-muted">Invoice generation is available once request is CONFIRMED.</p>
               {!detail.customer_id && (
                 <p className="text-sm text-warning">
                   Walk-in customers require a linked customer record to generate
@@ -760,7 +828,7 @@ export default function SalesRequestDetailPage() {
                         issue_date: e.target.value,
                       })
                     }
-                    disabled={isClosed}
+                    disabled={isTerminal}
                   />
                 </label>
                 <label className="space-y-1 text-sm">
@@ -775,7 +843,7 @@ export default function SalesRequestDetailPage() {
                         due_date: e.target.value,
                       })
                     }
-                    disabled={isClosed}
+                    disabled={isTerminal}
                   />
                 </label>
               </div>
@@ -786,7 +854,7 @@ export default function SalesRequestDetailPage() {
                 onChange={(e) =>
                   setInvoiceForm({ ...invoiceForm, terms: e.target.value })
                 }
-                disabled={isClosed}
+                disabled={isTerminal}
               />
               <input
                 className="app-input"
@@ -795,12 +863,12 @@ export default function SalesRequestDetailPage() {
                 onChange={(e) =>
                   setInvoiceForm({ ...invoiceForm, notes: e.target.value })
                 }
-                disabled={isClosed}
+                disabled={isTerminal}
               />
               <button
                 className="app-button w-full justify-center"
                 onClick={handleGenerateInvoice}
-                disabled={generating || isClosed || !detail.customer_id}
+                disabled={generating || !canGenerateInvoice || !detail.customer_id}
               >
                 <FileText className="h-4 w-4" />{" "}
                 {generating ? "Generating..." : "Generate Invoice"}

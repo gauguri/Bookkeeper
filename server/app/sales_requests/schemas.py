@@ -6,7 +6,24 @@ from pydantic import BaseModel, ConfigDict, Field, condecimal, model_validator
 
 
 DecimalValue = condecimal(max_digits=14, decimal_places=2)
-SalesRequestStatus = Literal["OPEN", "IN_PROGRESS", "INVOICED", "SHIPPED", "CLOSED"]
+SalesRequestStatus = Literal[
+    "NEW",
+    "QUOTED",
+    "CONFIRMED",
+    "INVOICED",
+    "SHIPPED",
+    "CLOSED",
+    "LOST",
+    "CANCELLED",
+]
+
+
+class SalesRequestTimelineEntry(BaseModel):
+    status: SalesRequestStatus
+    label: str
+    occurred_at: Optional[datetime] = None
+    completed: bool = False
+    current: bool = False
 
 
 class SalesRequestLineCreate(BaseModel):
@@ -31,7 +48,7 @@ class SalesRequestCreate(BaseModel):
     customer_name: Optional[str] = None
     notes: Optional[str] = None
     requested_fulfillment_date: Optional[date] = None
-    status: SalesRequestStatus = "OPEN"
+    status: SalesRequestStatus = "NEW"
     created_by_user_id: Optional[int] = None
     lines: List[SalesRequestLineCreate]
 
@@ -87,9 +104,6 @@ class SalesRequestResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# --- Enriched detail schemas for fulfillment workflow ---
-
-
 class SupplierOptionResponse(BaseModel):
     supplier_id: int
     supplier_name: str
@@ -139,6 +153,8 @@ class SalesRequestDetailResponse(BaseModel):
     invoice_number: Optional[str] = None
     linked_invoice_status: Optional[str] = None
     linked_invoice_shipped_at: Optional[datetime] = None
+    allowed_transitions: List[SalesRequestStatus] = Field(default_factory=list)
+    timeline: List[SalesRequestTimelineEntry] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

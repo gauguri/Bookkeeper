@@ -83,7 +83,7 @@ def test_create_sales_request_rejects_quantity_above_available(client: TestClien
         "/api/sales-requests",
         json={
             "customer_id": 1,
-            "status": "OPEN",
+            "status": "NEW",
             "lines": [{"item_id": 2, "quantity": 5, "unit_price": 3}],
         },
     )
@@ -107,7 +107,7 @@ def test_create_sales_request_ignores_nonexistent_created_by_user(client: TestCl
         "/api/sales-requests",
         json={
             "customer_id": 1,
-            "status": "OPEN",
+            "status": "NEW",
             "created_by_user_id": 1,
             "lines": [{"item_id": 1, "quantity": 2, "unit_price": 10}],
         },
@@ -127,7 +127,7 @@ def _create_sales_request(client: TestClient, *, item_id: int, quantity: int):
         "/api/sales-requests",
         json={
             "customer_id": 1,
-            "status": "OPEN",
+            "status": "NEW",
             "lines": [{"item_id": item_id, "quantity": quantity, "unit_price": 10}],
         },
     )
@@ -135,24 +135,27 @@ def _create_sales_request(client: TestClient, *, item_id: int, quantity: int):
     return response.json()["id"]
 
 
-def test_create_sales_request_reserves_inventory_without_deducting_on_hand(client: TestClient):
+def test_create_sales_request_does_not_reserve_inventory_until_confirmed(client: TestClient):
     sales_request_id = _create_sales_request(client, item_id=1, quantity=5)
 
     assert sales_request_id is not None
     availability = client.get("/api/inventory/available?item_id=1")
     assert availability.status_code == 200
-    assert availability.json() == {"item_id": 1, "available_qty": "5.00"}
+    assert availability.json() == {"item_id": 1, "available_qty": "10.00"}
 
 
-def test_updating_sales_request_replaces_reservation(client: TestClient):
+def test_confirming_sales_request_creates_reservation(client: TestClient):
     sales_request_id = _create_sales_request(client, item_id=1, quantity=4)
 
-    response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload(line_items=[{"item_id": 1, "quantity": 2, "requested_price": 11}]))
+    response = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "QUOTED"})
+    assert response.status_code == 200
+
+    response = client.patch(f"/api/sales-requests/{sales_request_id}", json={"status": "CONFIRMED"})
     assert response.status_code == 200
 
     availability = client.get("/api/inventory/available?item_id=1")
     assert availability.status_code == 200
-    assert availability.json() == {"item_id": 1, "available_qty": "8.00"}
+    assert availability.json() == {"item_id": 1, "available_qty": "6.00"}
 
 
 def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: TestClient):
@@ -160,7 +163,7 @@ def test_closing_sales_request_with_insufficient_inventory_is_atomic(client: Tes
         "/api/sales-requests",
         json={
             "customer_id": 1,
-            "status": "OPEN",
+            "status": "NEW",
             "lines": [
                 {"item_id": 1, "quantity": 2, "unit_price": 10},
                 {"item_id": 2, "quantity": 3, "unit_price": 3},
@@ -222,7 +225,7 @@ def test_update_closed_sales_request_returns_conflict(client: TestClient):
     update_response = client.put(f"/api/sales-requests/{sales_request_id}", json=_default_update_payload())
 
     assert update_response.status_code == 409
-    assert "Only OPEN sales requests can be edited" in update_response.json()["detail"]
+    assert "Only NEW or QUOTED sales requests can be edited" in update_response.json()["detail"]
 
 
 def test_update_sales_request_with_invoice_returns_conflict(client: TestClient):

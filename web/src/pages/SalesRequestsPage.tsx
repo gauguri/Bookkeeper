@@ -16,7 +16,7 @@ type SalesRequest = {
   id: number;
   request_number: string;
   customer_name: string | null;
-  status: "OPEN" | "IN_PROGRESS" | "INVOICED" | "SHIPPED" | "CLOSED";
+  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
   created_at: string;
   requested_fulfillment_date: string | null;
   notes?: string | null;
@@ -28,11 +28,14 @@ type Customer = { id: number; name: string };
 type Item = { id: number; name: string; unit_price: number };
 
 const statusStyles: Record<string, string> = {
-  OPEN: "border-primary/30 bg-primary/10 text-primary",
-  IN_PROGRESS: "border-warning/30 bg-warning/10 text-warning",
+  NEW: "border-slate-400/40 bg-slate-400/10 text-slate-700",
+  QUOTED: "border-warning/30 bg-warning/10 text-warning",
+  CONFIRMED: "border-primary/30 bg-primary/10 text-primary",
   INVOICED: "border-info/30 bg-info/10 text-info",
   SHIPPED: "border-primary/30 bg-primary/10 text-primary",
   CLOSED: "border-success/30 bg-success/10 text-success",
+  LOST: "border-danger/30 bg-danger/10 text-danger",
+  CANCELLED: "border-muted/30 bg-muted/10 text-muted",
 };
 
 const formatDate = (value?: string | null) => {
@@ -130,11 +133,14 @@ export default function SalesRequestsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <select className="app-input w-48" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">All statuses</option>
-            <option value="OPEN">Open</option>
-            <option value="IN_PROGRESS">In Progress</option>
+            <option value="NEW">New</option>
+            <option value="QUOTED">Quoted</option>
+            <option value="CONFIRMED">Confirmed</option>
             <option value="INVOICED">Invoiced</option>
             <option value="SHIPPED">Shipped</option>
             <option value="CLOSED">Closed</option>
+            <option value="LOST">Lost</option>
+            <option value="CANCELLED">Cancelled</option>
           </select>
           <input
             className="app-input w-72"
@@ -193,7 +199,7 @@ export default function SalesRequestsPage() {
                     </td>
                     <td className="px-4 py-3">{formatDate(request.created_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      {request.status === "OPEN" ? (
+                      {request.status === "NEW" || request.status === "QUOTED" ? (
                         <button
                           className="app-button-secondary"
                           type="button"

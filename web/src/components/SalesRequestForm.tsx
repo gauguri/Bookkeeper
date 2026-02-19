@@ -238,7 +238,7 @@ export default function SalesRequestForm({
             customer_name: isWalkIn ? walkInName.trim() : null,
             notes: notes.trim() || null,
             requested_fulfillment_date: requestedFulfillmentDate || null,
-            status: "OPEN",
+            status: "NEW",
             created_by_user_id: createdByUserId ?? null,
             lines: lines.map((line) => ({
               item_id: Number(line.item_id),

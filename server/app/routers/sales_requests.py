@@ -1,24 +1,27 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
-from app.db import get_db
 from app.auth import get_current_user, require_module
+from app.db import get_db
+from app.inventory.service import SOURCE_SALES_REQUEST
 from app.module_keys import ModuleKey
-from app.inventory.service import SOURCE_SALES_REQUEST, release_reservations
 from app.models import SalesRequest
 from app.sales_requests import schemas
 from app.sales_requests.service import (
-    calculate_sales_request_total,
     InventoryQuantityExceededError,
+    SalesRequestImmutableError,
+    calculate_sales_request_total,
     create_sales_request,
     generate_invoice_from_sales_request,
+    get_allowed_sales_request_status_transitions,
     get_sales_request_detail,
-    SalesRequestImmutableError,
     update_open_sales_request,
     update_sales_request_status,
+    _sync_sales_request_reservations,
 )
 
 
@@ -44,6 +47,49 @@ def _to_response(sales_request: SalesRequest) -> schemas.SalesRequestResponse:
         total_amount=Decimal(calculate_sales_request_total(sales_request)),
         lines=sales_request.lines,
     )
+
+
+def _build_timeline(sr: SalesRequest, linked_invoice_status: Optional[str], linked_invoice_shipped_at: Optional[datetime]):
+    flow = ["NEW", "QUOTED", "CONFIRMED", "INVOICED", "SHIPPED", "CLOSED"]
+    labels = {
+        "NEW": "New request created",
+        "QUOTED": "Quoted",
+        "CONFIRMED": "Confirmed (inventory reserved)",
+        "INVOICED": "Invoice generated",
+        "SHIPPED": "Shipment completed",
+        "CLOSED": "Closed",
+        "LOST": "Lost",
+        "CANCELLED": "Cancelled",
+    }
+
+    current_idx = flow.index(sr.status) if sr.status in flow else -1
+    entries = []
+    for idx, status_key in enumerate(flow):
+        occurred_at = sr.updated_at if idx <= current_idx else None
+        if status_key == "SHIPPED" and linked_invoice_status == "SHIPPED":
+            occurred_at = linked_invoice_shipped_at or occurred_at
+        entries.append(
+            schemas.SalesRequestTimelineEntry(
+                status=status_key,
+                label=labels[status_key],
+                occurred_at=occurred_at,
+                completed=idx <= current_idx,
+                current=status_key == sr.status,
+            )
+        )
+
+    if sr.status in {"LOST", "CANCELLED"}:
+        entries.append(
+            schemas.SalesRequestTimelineEntry(
+                status=sr.status,
+                label=labels[sr.status],
+                occurred_at=sr.updated_at,
+                completed=True,
+                current=True,
+            )
+        )
+
+    return entries
 
 
 @router.get("", response_model=List[schemas.SalesRequestResponse])
@@ -125,9 +171,9 @@ def get_sales_request_detail_endpoint(sales_request_id: int, db: Session = Depen
         invoice_number=result["linked_invoice_number"],
         linked_invoice_status=result["linked_invoice_status"],
         linked_invoice_shipped_at=result["linked_invoice_shipped_at"],
+        allowed_transitions=get_allowed_sales_request_status_transitions(sr),
+        timeline=_build_timeline(sr, result["linked_invoice_status"], result["linked_invoice_shipped_at"]),
     )
-
-
 
 
 @router.put("/{sales_request_id}", response_model=schemas.SalesRequestResponse)
@@ -154,10 +200,8 @@ def update_sales_request_endpoint(sales_request_id: int, payload: schemas.SalesR
     db.refresh(sales_request)
     return _to_response(sales_request)
 
-@router.post(
-    "/{sales_request_id}/generate-invoice",
-    status_code=status.HTTP_201_CREATED,
-)
+
+@router.post("/{sales_request_id}/generate-invoice", status_code=status.HTTP_201_CREATED)
 def generate_invoice_endpoint(
     sales_request_id: int,
     payload: schemas.GenerateInvoiceFromSRRequest,
@@ -190,9 +234,13 @@ def patch_sales_request(sales_request_id: int, payload: schemas.SalesRequestUpda
     sales_request = db.query(SalesRequest).options(selectinload(SalesRequest.lines)).filter(SalesRequest.id == sales_request_id).first()
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
+
+    if payload.status not in get_allowed_sales_request_status_transitions(sales_request):
+        raise HTTPException(status_code=400, detail=f"Transition {sales_request.status} -> {payload.status} is not allowed.")
+
     update_sales_request_status(sales_request, payload.status)
-    if payload.status == "CLOSED":
-        release_reservations(db, source_type=SOURCE_SALES_REQUEST, source_id=sales_request.id)
+    _sync_sales_request_reservations(db, sales_request)
+
     db.commit()
     db.refresh(sales_request)
     return _to_response(sales_request)
@@ -203,6 +251,7 @@ def delete_sales_request(sales_request_id: int, db: Session = Depends(get_db)):
     sales_request = db.query(SalesRequest).filter(SalesRequest.id == sales_request_id).first()
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
-    release_reservations(db, source_type=SOURCE_SALES_REQUEST, source_id=sales_request.id)
+    update_sales_request_status(sales_request, "CANCELLED")
+    _sync_sales_request_reservations(db, sales_request)
     db.delete(sales_request)
     db.commit()

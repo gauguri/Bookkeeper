@@ -104,7 +104,7 @@ def get_customer_insights(db: Session, customer_id: int) -> dict:
     applied_total = Decimal(payment_stats.applied_total or 0)
     weighted_days = Decimal(payment_stats.weighted_days or 0)
     if applied_total > 0:
-        average_days_to_pay = weighted_days / applied_total
+        average_days_to_pay = float(weighted_days / applied_total)
 
     last_invoices = (
         db.query(Invoice)

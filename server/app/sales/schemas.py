@@ -239,5 +239,5 @@ class CustomerInsightsResponse(BaseModel):
     ltm_revenue: DecimalValue
     gross_margin_percent: Optional[Decimal] = None
     outstanding_ar: DecimalValue
-    average_days_to_pay: Optional[Decimal] = None
+    average_days_to_pay: Optional[float] = None
     last_invoices: List[CustomerInsightInvoiceSummary]

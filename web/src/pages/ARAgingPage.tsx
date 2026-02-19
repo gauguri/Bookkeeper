@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { apiFetch } from "../api";
-import { currency } from "../utils/format";
+import { currency, formatNumber } from "../utils/format";
 
 type ARAgingRow = {
   customer_id: number;
@@ -122,7 +122,7 @@ export default function ARAgingPage() {
                 <td className="text-right tabular-nums">{currency(row["61_90"])}</td>
                 <td className="text-right tabular-nums">{currency(row["90_plus"])}</td>
                 <td className="text-right tabular-nums font-semibold">{currency(row.total)}</td>
-                <td className="text-right tabular-nums">{row.avg_days_to_pay ? row.avg_days_to_pay.toFixed(1) : "—"}</td>
+                <td className="text-right tabular-nums">{formatNumber(row.avg_days_to_pay, 1)}</td>
                 <td className="min-w-[320px] py-3">
                   <div className="space-y-2">
                     <div className="flex gap-2">

@@ -1,0 +1,52 @@
+import Gauge, { type GaugeSegment } from "./Gauge";
+
+// Collection rate: higher is better (% of invoiced revenue collected)
+const COLLECTION_SEGMENTS: GaugeSegment[] = [
+  { min: 0, max: 50, color: "#EF4444" },
+  { min: 50, max: 70, color: "#F97316" },
+  { min: 70, max: 85, color: "#EAB308" },
+  { min: 85, max: 95, color: "#84CC16" },
+  { min: 95, max: 100, color: "#22C55E" },
+];
+
+const getZone = (pct: number): { label: string; text: string; bg: string } => {
+  if (pct >= 95) return { label: "EXCELLENT", text: "#4ADE80", bg: "rgba(34, 197, 94, 0.12)" };
+  if (pct >= 85) return { label: "GOOD", text: "#4ADE80", bg: "rgba(34, 197, 94, 0.12)" };
+  if (pct >= 70) return { label: "OK", text: "#FBBF24", bg: "rgba(245, 158, 11, 0.12)" };
+  return { label: "BEHIND", text: "#F87171", bg: "rgba(239, 68, 68, 0.12)" };
+};
+
+type CollectionRateGaugeProps = { value: number };
+
+export default function CollectionRateGauge({ value }: CollectionRateGaugeProps) {
+  const safe = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
+  const zone = getZone(safe);
+
+  return (
+    <div aria-label={`A/R Collection Rate ${safe.toFixed(0)} percent`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-muted text-center mb-2">A/R Collection Rate</p>
+      <div className="px-2">
+        <Gauge
+          valuePercent={safe}
+          min={0}
+          max={100}
+          thresholds={COLLECTION_SEGMENTS}
+          label="Collection rate gauge"
+          size="sm"
+        />
+      </div>
+      <div className="-mt-2 flex flex-col items-center gap-0.5">
+        <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">
+          {safe.toFixed(1)}%
+        </p>
+        <span
+          className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+          style={{ color: zone.text, backgroundColor: zone.bg }}
+        >
+          {zone.label}
+        </span>
+      </div>
+      <p className="mt-1 text-center text-[10px] text-muted">Payments collected vs invoiced (YTD)</p>
+    </div>
+  );
+}

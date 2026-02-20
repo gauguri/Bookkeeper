@@ -4,6 +4,10 @@ import { ArrowUpRight, TrendingUp, DollarSign, Package, AlertTriangle, Clock, Fi
 import { apiFetch } from "../api";
 import GrossMarginGauge from "../components/dashboard/GrossMarginGauge";
 import InventoryValueGauge, { TARGET_DIO_DAYS } from "../components/dashboard/InventoryValueGauge";
+import DsoGauge from "../components/dashboard/DsoGauge";
+import FulfillmentRateGauge from "../components/dashboard/FulfillmentRateGauge";
+import CollectionRateGauge from "../components/dashboard/CollectionRateGauge";
+import InventoryTurnoverGauge from "../components/dashboard/InventoryTurnoverGauge";
 import { normalizeGrossMargin } from "../utils/metrics";
 
 const quickLinks = [
@@ -33,6 +37,10 @@ type OwnerCockpitResponse = {
   cash_forecast_30d: number;
   backlog_value: number;
   top_shortages: CockpitShortage[];
+  dso_days: number | string;
+  fulfillment_rate_pct: number | string;
+  collection_rate_pct: number | string;
+  inventory_turnover: number | string;
 };
 
 const coerceNumber = (value: unknown): number => {
@@ -61,36 +69,58 @@ const toSafeNumber = (value: unknown, fallback = 0): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-/* ---- Stat card with icon & optional accent color ---- */
-type StatDef = {
+/* ---- Stat header used inside each combined card ---- */
+type StatHeader = {
   label: string;
   value: string;
   helper: string;
   icon: React.ElementType;
-  accent: string; // tailwind text color for the icon
-  accentBg: string; // bg for icon container
+  accent: string;
+  accentBg: string;
 };
 
-function StatCard({ stat, isLoading }: { stat: StatDef; isLoading: boolean }) {
+function StatGaugeCard({
+  stat,
+  isLoading,
+  children,
+}: {
+  stat: StatHeader;
+  isLoading: boolean;
+  children: React.ReactNode;
+}) {
   const Icon = stat.icon;
   return (
-    <div className="app-card p-5 group">
+    <div className="app-card p-4 group">
+      {/* Stat section */}
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">{stat.label}</p>
-          <div className="mt-2">
+          <div className="mt-1">
             {isLoading ? (
-              <div className="h-8 w-28 animate-pulse rounded-lg bg-secondary" />
+              <div className="h-7 w-24 animate-pulse rounded-lg bg-secondary" />
             ) : (
-              <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">{stat.value}</p>
+              <p className="text-xl font-bold tabular-nums text-foreground tracking-tight">{stat.value}</p>
             )}
           </div>
-          <p className="mt-1 text-[11px] text-muted">{stat.helper}</p>
+          <p className="mt-0.5 text-[10px] text-muted">{stat.helper}</p>
         </div>
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${stat.accentBg}`}>
-          <Icon className={`h-5 w-5 ${stat.accent}`} strokeWidth={1.8} />
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${stat.accentBg}`}>
+          <Icon className={`h-4 w-4 ${stat.accent}`} strokeWidth={1.8} />
         </div>
       </div>
+
+      {/* Divider */}
+      <div className="my-2 border-t border-border/50" />
+
+      {/* Gauge section */}
+      {isLoading ? (
+        <div className="flex flex-col items-center gap-2 py-2">
+          <div className="h-24 w-full animate-pulse rounded-xl bg-secondary" />
+          <div className="h-4 w-16 animate-pulse rounded bg-secondary" />
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -142,26 +172,15 @@ export default function SalesLanding() {
     };
   }, [metrics]);
 
-  const stats: StatDef[] = useMemo(() => {
-    const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
-    const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
-    const arTotal = Number(metrics?.ar_total ?? 0);
-    const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
-    const cashForecast30d = Number(metrics?.cash_forecast_30d ?? 0);
-    const backlogValue = Number(metrics?.backlog_value ?? 0);
-
-    return [
-      { label: "Revenue MTD", value: formatCurrency(revenueMtd), helper: "Month to date", icon: TrendingUp, accent: "text-emerald-400", accentBg: "bg-emerald-500/10" },
-      { label: "Revenue YTD", value: formatCurrency(revenueYtd), helper: "Year to date", icon: DollarSign, accent: "text-blue-400", accentBg: "bg-blue-500/10" },
-      { label: "A/R Total", value: formatCurrency(arTotal), helper: "Open receivables", icon: FileText, accent: "text-violet-400", accentBg: "bg-violet-500/10" },
-      { label: "A/R 90+", value: formatCurrency(ar90Plus), helper: "Severely overdue", icon: AlertTriangle, accent: ar90Plus > 0 ? "text-red-400" : "text-slate-500", accentBg: ar90Plus > 0 ? "bg-red-500/10" : "bg-slate-500/10" },
-      { label: "Cash Forecast 30d", value: formatCurrency(cashForecast30d), helper: "Net inflow / outflow", icon: Wallet, accent: "text-cyan-400", accentBg: "bg-cyan-500/10" },
-      { label: "Backlog Value", value: formatCurrency(backlogValue), helper: "Active commitments", icon: Clock, accent: "text-amber-400", accentBg: "bg-amber-500/10" }
-    ];
-  }, [metrics]);
+  const revenueMtd = Number(metrics?.revenue_mtd ?? 0);
+  const revenueYtd = Number(metrics?.revenue_ytd ?? 0);
+  const arTotal = Number(metrics?.ar_total ?? 0);
+  const ar90Plus = Number(metrics?.ar_90_plus ?? 0);
+  const cashForecast30d = Number(metrics?.cash_forecast_30d ?? 0);
+  const backlogValue = Number(metrics?.backlog_value ?? 0);
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Operator Dashboard</h1>
@@ -169,43 +188,66 @@ export default function SalesLanding() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-xl border border-danger/20 bg-danger/5 px-5 py-3 text-sm text-danger">
+        <div className="mb-4 rounded-xl border border-danger/20 bg-danger/5 px-5 py-3 text-sm text-danger">
           {error}
         </div>
       )}
 
-      {/* KPI Stats Grid */}
+      {/* Combined Stat + Gauge Grid — 3 columns × 2 rows */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {stats.map((stat) => (
-          <StatCard key={stat.label} stat={stat} isLoading={isLoading} />
-        ))}
-      </div>
+        {/* 1. Revenue MTD + Gross Margin */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "Revenue MTD", value: formatCurrency(revenueMtd), helper: "Month to date", icon: TrendingUp, accent: "text-emerald-400", accentBg: "bg-emerald-500/10" }}
+        >
+          <GrossMarginGauge value={grossMargin} />
+        </StatGaugeCard>
 
-      {/* Gauges Row */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {isLoading ? (
-          <>
-            <div className="app-card px-5 pt-5 pb-4">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Gross Margin</p>
-              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
-            </div>
-            <div className="app-card px-5 pt-5 pb-4">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Inventory Value</p>
-              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
-            </div>
-          </>
-        ) : (
-          <>
-            <GrossMarginGauge value={grossMargin} />
-            <InventoryValueGauge
-              actualInventoryValue={inventoryGaugeMetrics.actualInventoryValue}
-              targetInventoryValue={inventoryGaugeMetrics.targetInventoryValue}
-              inventoryHealthPctRaw={inventoryGaugeMetrics.inventoryHealthPctRaw}
-              inventoryHealthPctDisplay={inventoryGaugeMetrics.inventoryHealthPctDisplay}
-              targetDioDays={TARGET_DIO_DAYS}
-            />
-          </>
-        )}
+        {/* 2. Revenue YTD + Fulfillment Rate */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "Revenue YTD", value: formatCurrency(revenueYtd), helper: "Year to date", icon: DollarSign, accent: "text-blue-400", accentBg: "bg-blue-500/10" }}
+        >
+          <FulfillmentRateGauge value={toSafeNumber(metrics?.fulfillment_rate_pct)} />
+        </StatGaugeCard>
+
+        {/* 3. A/R Total + Collection Rate */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "A/R Total", value: formatCurrency(arTotal), helper: "Open receivables", icon: FileText, accent: "text-violet-400", accentBg: "bg-violet-500/10" }}
+        >
+          <CollectionRateGauge value={toSafeNumber(metrics?.collection_rate_pct)} />
+        </StatGaugeCard>
+
+        {/* 4. A/R 90+ + DSO */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "A/R 90+", value: formatCurrency(ar90Plus), helper: "Severely overdue", icon: AlertTriangle, accent: ar90Plus > 0 ? "text-red-400" : "text-slate-500", accentBg: ar90Plus > 0 ? "bg-red-500/10" : "bg-slate-500/10" }}
+        >
+          <DsoGauge value={toSafeNumber(metrics?.dso_days)} />
+        </StatGaugeCard>
+
+        {/* 5. Cash Forecast + Inventory Turnover */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "Cash Forecast 30d", value: formatCurrency(cashForecast30d), helper: "Net inflow / outflow", icon: Wallet, accent: "text-cyan-400", accentBg: "bg-cyan-500/10" }}
+        >
+          <InventoryTurnoverGauge value={toSafeNumber(metrics?.inventory_turnover)} />
+        </StatGaugeCard>
+
+        {/* 6. Backlog Value + Inventory Value */}
+        <StatGaugeCard
+          isLoading={isLoading}
+          stat={{ label: "Backlog Value", value: formatCurrency(backlogValue), helper: "Active commitments", icon: Clock, accent: "text-amber-400", accentBg: "bg-amber-500/10" }}
+        >
+          <InventoryValueGauge
+            actualInventoryValue={inventoryGaugeMetrics.actualInventoryValue}
+            targetInventoryValue={inventoryGaugeMetrics.targetInventoryValue}
+            inventoryHealthPctRaw={inventoryGaugeMetrics.inventoryHealthPctRaw}
+            inventoryHealthPctDisplay={inventoryGaugeMetrics.inventoryHealthPctDisplay}
+            targetDioDays={TARGET_DIO_DAYS}
+          />
+        </StatGaugeCard>
       </div>
 
       {/* Shortages Table */}

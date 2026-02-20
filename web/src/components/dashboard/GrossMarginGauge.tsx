@@ -31,23 +31,23 @@ export default function GrossMarginGauge({ value, valuePercent }: GrossMarginGau
   const colors = ZONE_COLORS[zone];
 
   return (
-    <div className="app-card px-5 pt-5 pb-4" aria-label={`Gross Margin ${formatPercent(normalizedPercent)} in ${zoneLabel} zone`}>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Gross Margin</p>
-      <div className="mt-2 px-4">
-        <Gauge valuePercent={normalizedPercent} label="Gross Margin gauge" />
+    <div aria-label={`Gross Margin ${formatPercent(normalizedPercent)} in ${zoneLabel} zone`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-muted text-center mb-2">Gross Margin</p>
+      <div className="px-2">
+        <Gauge valuePercent={normalizedPercent} label="Gross Margin gauge" size="sm" />
       </div>
-      <div className="-mt-2 flex flex-col items-center gap-1">
-        <p className="text-3xl font-bold tabular-nums text-foreground tracking-tight">
+      <div className="-mt-2 flex flex-col items-center gap-0.5">
+        <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">
           {formatPercent(normalizedPercent, 1)}
         </p>
         <span
-          className="inline-block rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+          className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest"
           style={{ color: colors.text, backgroundColor: colors.bg }}
         >
           {zoneLabel}
         </span>
       </div>
-      <p className="mt-2 text-center text-[11px] text-muted">From invoice snapshots</p>
+      <p className="mt-1 text-center text-[10px] text-muted">From invoice snapshots</p>
     </div>
   );
 }

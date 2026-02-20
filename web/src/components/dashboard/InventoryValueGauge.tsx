@@ -59,27 +59,28 @@ export default function InventoryValueGauge({
   const label = getHealthLabel(safePctRaw);
 
   return (
-    <div className="app-card px-5 pt-5 pb-4" aria-label={`Inventory value ${safePctRaw.toFixed(0)} percent of target`}>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Inventory Value</p>
-      <div className="mt-2 px-4">
+    <div aria-label={`Inventory value ${safePctRaw.toFixed(0)} percent of target`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-muted text-center mb-2">Inventory Value</p>
+      <div className="px-2">
         <Gauge
           valuePercent={safePctDisplay}
           min={INVENTORY_GAUGE_MIN}
           max={INVENTORY_GAUGE_MAX}
           thresholds={INVENTORY_GAUGE_SEGMENTS}
           label="Inventory value gauge"
+          size="sm"
         />
       </div>
-      <div className="-mt-2 flex flex-col items-center gap-1">
-        <p className="text-3xl font-bold tabular-nums text-foreground tracking-tight">{formatCurrency(safeActual)}</p>
+      <div className="-mt-2 flex flex-col items-center gap-0.5">
+        <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">{formatCurrency(safeActual)}</p>
         <span
-          className="inline-block rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+          className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest"
           style={{ color: colors.text, backgroundColor: colors.bg }}
         >
           {label}
         </span>
       </div>
-      <p className="mt-2 text-center text-[11px] text-muted">
+      <p className="mt-1 text-center text-[10px] text-muted">
         Target: {formatCurrency(safeTarget)} ({targetDioDays} DIO) &middot; {safePctRaw.toFixed(0)}%
       </p>
     </div>

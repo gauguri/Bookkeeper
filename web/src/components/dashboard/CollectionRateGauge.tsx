@@ -23,29 +23,30 @@ export default function CollectionRateGauge({ value }: CollectionRateGaugeProps)
   const zone = getZone(safe);
 
   return (
-    <div className="app-card px-5 pt-5 pb-4" aria-label={`A/R Collection Rate ${safe.toFixed(0)} percent`}>
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">A/R Collection Rate</p>
-      <div className="mt-2 px-4">
+    <div aria-label={`A/R Collection Rate ${safe.toFixed(0)} percent`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-muted text-center mb-2">A/R Collection Rate</p>
+      <div className="px-2">
         <Gauge
           valuePercent={safe}
           min={0}
           max={100}
           thresholds={COLLECTION_SEGMENTS}
           label="Collection rate gauge"
+          size="sm"
         />
       </div>
-      <div className="-mt-2 flex flex-col items-center gap-1">
-        <p className="text-3xl font-bold tabular-nums text-foreground tracking-tight">
+      <div className="-mt-2 flex flex-col items-center gap-0.5">
+        <p className="text-2xl font-bold tabular-nums text-foreground tracking-tight">
           {safe.toFixed(1)}%
         </p>
         <span
-          className="inline-block rounded-full px-3 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+          className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest"
           style={{ color: zone.text, backgroundColor: zone.bg }}
         >
           {zone.label}
         </span>
       </div>
-      <p className="mt-2 text-center text-[11px] text-muted">Payments collected vs invoiced (YTD)</p>
+      <p className="mt-1 text-center text-[10px] text-muted">Payments collected vs invoiced (YTD)</p>
     </div>
   );
 }

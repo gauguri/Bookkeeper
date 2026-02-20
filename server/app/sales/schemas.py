@@ -215,11 +215,15 @@ class ItemPricingContextResponse(BaseModel):
     item_id: int
     customer_id: Optional[int] = None
     customer_tier: str
-    landed_unit_cost: DecimalValue
+    landed_unit_cost: Optional[DecimalValue] = None
     available_qty: DecimalValue
-    recommended_price: DecimalValue
+    last_paid_price: Optional[DecimalValue] = None
+    avg_unit_price: Optional[DecimalValue] = None
+    suggested_sell: Optional[DecimalValue] = None
+    recommended_price: Optional[DecimalValue] = None
     default_markup_percent: DecimalValue
     margin_threshold_percent: DecimalValue
+    warnings: List[str] = Field(default_factory=list)
 
 
 class CustomerInsightInvoiceSummary(BaseModel):

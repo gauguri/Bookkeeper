@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+import logging
 from typing import Iterable, List, Optional, Sequence
 
 from sqlalchemy import func, text
@@ -16,7 +17,10 @@ from app.sales.calculations import (
 )
 from app.suppliers.service import get_supplier_link
 from app.sql_expressions import days_between
+from app.utils import quantize_money
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MARGIN_THRESHOLD_PERCENT = Decimal("20")
 DEFAULT_MARKUP_BY_TIER = {
@@ -143,13 +147,60 @@ def get_item_pricing_context(db: Session, *, item_id: int, customer_id: int | No
             raise ValueError("Customer not found.")
         customer_tier = customer.tier or "STANDARD"
 
+    warnings: list[str] = []
     inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
-    landed_unit_cost = Decimal(inventory.landed_unit_cost or 0) if inventory else Decimal("0")
-    available_qty = get_available_qty(db, item_id)
-    markup_percent = get_default_markup_percent(customer_tier)
-    recommended_price = landed_unit_cost * (Decimal("1") + (markup_percent / Decimal("100")))
-    if recommended_price <= 0:
-        recommended_price = Decimal(item.unit_price or 0)
+    landed_unit_cost_raw = Decimal(inventory.landed_unit_cost) if inventory and inventory.landed_unit_cost is not None else None
+    landed_unit_cost = quantize_money(landed_unit_cost_raw)
+
+    available_qty = quantize_money(get_available_qty(db, item_id)) or Decimal("0.00")
+    markup_percent = quantize_money(get_default_markup_percent(customer_tier)) or Decimal("0.00")
+
+    history_query = (
+        db.query(InvoiceLine)
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(InvoiceLine.item_id == item_id, InvoiceLine.quantity > 0, Invoice.status != "VOID")
+    )
+
+    customer_history_lines = []
+    if customer_id is not None:
+        customer_history_lines = history_query.filter(Invoice.customer_id == customer_id).order_by(Invoice.id.desc()).all()
+
+    global_history_lines = history_query.order_by(Invoice.id.desc()).all()
+
+    history_lines = customer_history_lines or global_history_lines
+    if customer_id is not None and not customer_history_lines and global_history_lines:
+        warnings.append("Insufficient customer price history; using global median.")
+
+    history_unit_prices: list[Decimal] = []
+    for line in history_lines:
+        quantity = Decimal(line.quantity or 0)
+        if quantity <= 0:
+            continue
+        raw_unit_price = Decimal(line.line_total or 0) / quantity if line.line_total else Decimal(line.unit_price or 0)
+        if raw_unit_price > 0:
+            history_unit_prices.append(raw_unit_price)
+
+    last_paid_price = quantize_money(history_unit_prices[0]) if history_unit_prices else None
+    avg_unit_price = quantize_money(sum(history_unit_prices) / Decimal(len(history_unit_prices))) if history_unit_prices else None
+
+    suggested_sell = None
+    if landed_unit_cost is not None and landed_unit_cost > 0:
+        suggested_sell = quantize_money(landed_unit_cost * (Decimal("1") + (markup_percent / Decimal("100"))))
+    else:
+        warnings.append("No landed cost available; suggested sell not computed.")
+
+    if suggested_sell is not None and suggested_sell > 0:
+        recommended_price = suggested_sell
+    elif avg_unit_price is not None and avg_unit_price > 0:
+        recommended_price = avg_unit_price
+    elif last_paid_price is not None and last_paid_price > 0:
+        recommended_price = last_paid_price
+    else:
+        recommended_price = quantize_money(item.unit_price)
+        warnings.append("No invoice price history found; using item list price.")
+
+    if warnings:
+        logger.info("Pricing context warnings for item_id=%s customer_id=%s: %s", item_id, customer_id, warnings)
 
     return {
         "item_id": item_id,
@@ -157,9 +208,13 @@ def get_item_pricing_context(db: Session, *, item_id: int, customer_id: int | No
         "customer_tier": customer_tier.upper(),
         "landed_unit_cost": landed_unit_cost,
         "available_qty": available_qty,
-        "recommended_price": recommended_price,
+        "last_paid_price": last_paid_price,
+        "avg_unit_price": avg_unit_price,
+        "suggested_sell": suggested_sell,
+        "recommended_price": quantize_money(recommended_price),
         "default_markup_percent": markup_percent,
-        "margin_threshold_percent": DEFAULT_MARGIN_THRESHOLD_PERCENT,
+        "margin_threshold_percent": quantize_money(DEFAULT_MARGIN_THRESHOLD_PERCENT) or Decimal("0.00"),
+        "warnings": warnings,
     }
 
 

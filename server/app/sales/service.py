@@ -148,6 +148,7 @@ def get_item_pricing_context(db: Session, *, item_id: int, customer_id: int | No
     available_qty = get_available_qty(db, item_id)
     markup_percent = get_default_markup_percent(customer_tier)
     recommended_price = landed_unit_cost * (Decimal("1") + (markup_percent / Decimal("100")))
+    recommended_price = recommended_price.quantize(Decimal("0.01"))
     if recommended_price <= 0:
         recommended_price = Decimal(item.unit_price or 0)
 

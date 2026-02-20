@@ -859,7 +859,7 @@ export default function SalesRequestDetailPage() {
                         issue_date: e.target.value,
                       })
                     }
-                    disabled={isTerminal}
+                    disabled={!canGenerateInvoice}
                   />
                 </label>
                 <label className="space-y-1 text-sm">
@@ -874,7 +874,7 @@ export default function SalesRequestDetailPage() {
                         due_date: e.target.value,
                       })
                     }
-                    disabled={isTerminal}
+                    disabled={!canGenerateInvoice}
                   />
                 </label>
               </div>
@@ -885,7 +885,7 @@ export default function SalesRequestDetailPage() {
                 onChange={(e) =>
                   setInvoiceForm({ ...invoiceForm, terms: e.target.value })
                 }
-                disabled={isTerminal}
+                disabled={!canGenerateInvoice}
               />
               <input
                 className="app-input"
@@ -894,7 +894,7 @@ export default function SalesRequestDetailPage() {
                 onChange={(e) =>
                   setInvoiceForm({ ...invoiceForm, notes: e.target.value })
                 }
-                disabled={isTerminal}
+                disabled={!canGenerateInvoice}
               />
               <button
                 className="app-button w-full justify-center"

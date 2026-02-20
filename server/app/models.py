@@ -443,6 +443,9 @@ class SalesRequestLine(Base):
     quantity = Column(Numeric(14, 2), nullable=False)
     unit_price = Column(Numeric(14, 2), nullable=False)
     line_total = Column(Numeric(14, 2), nullable=False)
+    mwb_unit_price = Column(Numeric(14, 2), nullable=True)
+    mwb_explanation = Column(Text, nullable=True)
+    mwb_computed_at = Column(DateTime, nullable=True)
 
     sales_request = relationship("SalesRequest", back_populates="lines")
     item = relationship("Item")

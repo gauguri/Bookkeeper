@@ -43,5 +43,9 @@ class OwnerCockpitResponse(BaseModel):
     cash_forecast_30d: DecimalValue
     backlog_value: DecimalValue
     top_shortages: List[OwnerCockpitShortage]
+    dso_days: Decimal = Decimal("0")
+    fulfillment_rate_pct: Decimal = Decimal("0")
+    collection_rate_pct: Decimal = Decimal("0")
+    inventory_turnover: Decimal = Decimal("0")
 
     model_config = ConfigDict(from_attributes=True)

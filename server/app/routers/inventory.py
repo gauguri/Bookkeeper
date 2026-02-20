@@ -11,7 +11,7 @@ from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory import schemas
 from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map, get_reserved_qty_map
-from app.models import Company, Inventory, Item
+from app.models import Company, Inventory, InventoryReservation, Item, SalesRequest
 
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_module(ModuleKey.INVENTORY.value))])
@@ -193,3 +193,43 @@ def create_inventory_adjustment(payload: schemas.InventoryAdjustmentCreate, db: 
     db.commit()
     db.refresh(transaction)
     return transaction
+
+
+@router.get("/reservations/{item_id}", response_model=List[schemas.ReservationDetailResponse])
+def list_item_reservations(item_id: int, db: Session = Depends(get_db)):
+    """Return active reservations for an item, grouped by source."""
+    rows = (
+        db.query(
+            InventoryReservation.source_type,
+            InventoryReservation.source_id,
+            InventoryReservation.qty_reserved,
+            SalesRequest.request_number,
+        )
+        .outerjoin(
+            SalesRequest,
+            (InventoryReservation.source_type == "sales_request")
+            & (InventoryReservation.source_id == SalesRequest.id),
+        )
+        .filter(
+            InventoryReservation.item_id == item_id,
+            InventoryReservation.released_at.is_(None),
+        )
+        .order_by(InventoryReservation.created_at.asc())
+        .all()
+    )
+
+    results: list[schemas.ReservationDetailResponse] = []
+    for source_type, source_id, qty, sr_number in rows:
+        if source_type == "sales_request" and sr_number:
+            label = sr_number
+        else:
+            label = f"{source_type or 'unknown'} #{source_id}"
+        results.append(
+            schemas.ReservationDetailResponse(
+                source_type=source_type or "unknown",
+                source_id=source_id or 0,
+                source_label=label,
+                qty_reserved=qty,
+            )
+        )
+    return results

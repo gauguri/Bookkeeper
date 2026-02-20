@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
@@ -274,7 +274,41 @@ def patch_sales_request(
         raise HTTPException(status_code=400, detail=f"Transition {sales_request.status} -> {next_status} is not allowed.")
 
     previous_status = sales_request.status
-    update_sales_request_status(sales_request, next_status)
+
+    # When transitioning CONFIRMED → INVOICED, auto-generate the invoice
+    # so the sales request is properly linked to a real invoice record.
+    if previous_status == "CONFIRMED" and next_status == "INVOICED":
+        if not sales_request.customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot generate invoice for a walk-in customer without a linked customer record.",
+            )
+        today = datetime.utcnow().date()
+        auto_payload = {
+            "issue_date": today.isoformat(),
+            "due_date": (today + timedelta(days=30)).isoformat(),
+            "notes": None,
+            "terms": "Net 30",
+            "markup_percent": 0,
+            "line_selections": [
+                {
+                    "sales_request_line_id": line.id,
+                    "supplier_id": None,
+                    "unit_cost": None,
+                    "unit_price": float(line.unit_price),
+                    "discount": 0,
+                    "tax_rate": 0,
+                }
+                for line in sales_request.lines
+            ],
+        }
+        try:
+            generate_invoice_from_sales_request(db, sales_request, auto_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        update_sales_request_status(sales_request, next_status)
+
     _sync_sales_request_reservations(db, sales_request)
     record_sales_request_status_transition(
         db,

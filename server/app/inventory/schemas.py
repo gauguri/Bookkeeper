@@ -63,6 +63,13 @@ class InventoryRecordUpdate(BaseModel):
     landed_unit_cost: DecimalValue = Field(..., ge=0)
 
 
+class ReservationDetailResponse(BaseModel):
+    source_type: str
+    source_id: int
+    source_label: str
+    qty_reserved: DecimalValue
+
+
 class InventoryRecordResponse(BaseModel):
     id: int
     item_id: int

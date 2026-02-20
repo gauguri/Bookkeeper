@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
 
 type InventoryRow = {
@@ -19,6 +20,13 @@ type InventoryItem = {
   available_qty: number;
 };
 
+type ReservationDetail = {
+  source_type: string;
+  source_id: number;
+  source_label: string;
+  qty_reserved: number;
+};
+
 type InventoryForm = {
   item_id: string;
   quantity_on_hand: string;
@@ -30,6 +38,94 @@ const emptyForm: InventoryForm = {
   quantity_on_hand: "0",
   landed_unit_cost: "0"
 };
+
+/* ---------- Reservation popover ---------- */
+
+function ReservedCell({ itemId, reservedQty }: { itemId: number; reservedQty: number }) {
+  const [open, setOpen] = useState(false);
+  const [reservations, setReservations] = useState<ReservationDetail[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLTableCellElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleClick = async () => {
+    if (reservedQty <= 0) return;
+    setOpen((prev) => !prev);
+    if (reservations !== null) return; // already loaded
+    setLoading(true);
+    try {
+      const data = await apiFetch<ReservationDetail[]>(`/inventory/reservations/${itemId}`);
+      setReservations(data);
+    } catch {
+      setReservations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sourceUrl = (r: ReservationDetail) => {
+    if (r.source_type === "sales_request") return `/sales-requests/${r.source_id}`;
+    if (r.source_type === "invoice") return `/invoices/${r.source_id}`;
+    return null;
+  };
+
+  return (
+    <td className="px-4 py-3 relative" ref={ref}>
+      {reservedQty > 0 ? (
+        <button
+          type="button"
+          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+          onClick={handleClick}
+        >
+          {reservedQty.toFixed(2)}
+        </button>
+      ) : (
+        <span>{reservedQty.toFixed(2)}</span>
+      )}
+
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border bg-white shadow-lg">
+          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted border-b">
+            Reservations
+          </div>
+          {loading ? (
+            <div className="px-3 py-3 text-xs text-muted">Loading…</div>
+          ) : !reservations || reservations.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-muted">No active reservations</div>
+          ) : (
+            <ul className="divide-y">
+              {reservations.map((r, i) => {
+                const url = sourceUrl(r);
+                return (
+                  <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                    {url ? (
+                      <Link to={url} className="font-medium text-primary hover:underline">
+                        {r.source_label}
+                      </Link>
+                    ) : (
+                      <span className="font-medium">{r.source_label}</span>
+                    )}
+                    <span className="tabular-nums text-muted">{Number(r.qty_reserved).toFixed(2)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </td>
+  );
+}
+
+/* ---------- Main component ---------- */
 
 export default function InventoryPage() {
   const [rows, setRows] = useState<InventoryRow[]>([]);
@@ -197,23 +293,27 @@ export default function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-t border-muted/20">
-                <td className="px-4 py-3 font-medium">{row.item_name}</td>
-                <td className="px-4 py-3">{Number(row.quantity_on_hand).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(items.find((item) => item.id === row.item_id)?.reserved_qty ?? 0).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(items.find((item) => item.id === row.item_id)?.available_qty ?? row.quantity_on_hand).toFixed(2)}</td>
-                <td className="px-4 py-3">${Number(row.landed_unit_cost).toFixed(2)}</td>
-                <td className="px-4 py-3">${Number(row.total_value).toFixed(2)}</td>
-                <td className="px-4 py-3">{new Date(row.last_updated_at).toLocaleString()}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <button className="app-button-secondary" onClick={() => openEdit(row)}>Edit</button>
-                    <button className="app-button-secondary" onClick={() => remove(row)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const matchedItem = items.find((item) => item.id === row.item_id);
+              const reservedQty = Number(matchedItem?.reserved_qty ?? 0);
+              return (
+                <tr key={row.id} className="border-t border-muted/20">
+                  <td className="px-4 py-3 font-medium">{row.item_name}</td>
+                  <td className="px-4 py-3">{Number(row.quantity_on_hand).toFixed(2)}</td>
+                  <ReservedCell itemId={row.item_id} reservedQty={reservedQty} />
+                  <td className="px-4 py-3">{Number(matchedItem?.available_qty ?? row.quantity_on_hand).toFixed(2)}</td>
+                  <td className="px-4 py-3">${Number(row.landed_unit_cost).toFixed(2)}</td>
+                  <td className="px-4 py-3">${Number(row.total_value).toFixed(2)}</td>
+                  <td className="px-4 py-3">{new Date(row.last_updated_at).toLocaleString()}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <button className="app-button-secondary" onClick={() => openEdit(row)}>Edit</button>
+                      <button className="app-button-secondary" onClick={() => remove(row)}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>

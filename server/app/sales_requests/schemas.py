@@ -39,6 +39,9 @@ class SalesRequestLineResponse(BaseModel):
     quantity: DecimalValue
     unit_price: DecimalValue
     line_total: DecimalValue
+    mwb_unit_price: Optional[DecimalValue] = None
+    mwb_explanation: Optional[str] = None
+    mwb_computed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -133,6 +136,9 @@ class SalesRequestLineDetailResponse(BaseModel):
     quantity: DecimalValue
     unit_price: DecimalValue
     line_total: DecimalValue
+    mwb_unit_price: Optional[DecimalValue] = None
+    mwb_explanation: Optional[str] = None
+    mwb_computed_at: Optional[datetime] = None
     invoice_unit_price: Optional[DecimalValue] = None
     invoice_line_total: Optional[DecimalValue] = None
     on_hand_qty: DecimalValue
@@ -184,3 +190,28 @@ class GenerateInvoiceFromSRRequest(BaseModel):
     terms: Optional[str] = None
     markup_percent: DecimalValue = Field(..., ge=0)
     line_selections: List[LineSelectionCreate]
+
+
+class MWBPricingResponse(BaseModel):
+    unit_price: DecimalValue
+    currency: str = "USD"
+    source_level: str
+    confidence: str
+    explanation: dict
+    computed_at: datetime
+
+
+class ApplyMWBRequest(BaseModel):
+    qty: Optional[DecimalValue] = Field(None, gt=0)
+
+
+class ApplyMWBResponse(BaseModel):
+    line_id: int
+    sales_request_id: int
+    quoted_unit_price: DecimalValue
+    line_total: DecimalValue
+    mwb_unit_price: DecimalValue
+    source_level: str
+    confidence: str
+    explanation: dict
+    computed_at: datetime

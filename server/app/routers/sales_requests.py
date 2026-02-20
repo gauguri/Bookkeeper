@@ -9,7 +9,8 @@ from app.auth import get_current_user, require_module
 from app.db import get_db
 from app.inventory.service import SOURCE_SALES_REQUEST
 from app.module_keys import ModuleKey
-from app.models import AuditEvent, SalesRequest
+from app.pricing.mwb import compute_mwb_price, serialize_explanation
+from app.models import AuditEvent, SalesRequest, SalesRequestLine
 from app.sales_requests import schemas
 from app.sales_requests.service import (
     InventoryQuantityExceededError,
@@ -320,6 +321,82 @@ def patch_sales_request(
 
     db.commit()
     return get_sales_request_detail_endpoint(sales_request_id, db)
+
+
+@router.post("/{sales_request_id}/line-items/{line_id}/apply-mwb", response_model=schemas.ApplyMWBResponse)
+def apply_mwb_to_line_item(
+    sales_request_id: int,
+    line_id: int,
+    payload: schemas.ApplyMWBRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    sales_request = db.query(SalesRequest).filter(SalesRequest.id == sales_request_id).first()
+    if not sales_request:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    if not sales_request.customer_id:
+        raise HTTPException(status_code=400, detail="MWB requires a linked customer.")
+
+    line = (
+        db.query(SalesRequestLine)
+        .filter(SalesRequestLine.id == line_id, SalesRequestLine.sales_request_id == sales_request_id)
+        .first()
+    )
+    if not line:
+        raise HTTPException(status_code=404, detail="Sales request line not found.")
+
+    qty = payload.qty if payload.qty is not None else Decimal(line.quantity or 0)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="qty must be greater than 0.")
+
+    result = compute_mwb_price(
+        db,
+        customer_id=sales_request.customer_id,
+        item_id=line.item_id,
+        qty=Decimal(str(qty)),
+        current_quoted_price=Decimal(line.unit_price or 0),
+    )
+
+    now = datetime.utcnow()
+    line.unit_price = result.mwb_unit_price
+    line.line_total = Decimal(line.quantity or 0) * Decimal(result.mwb_unit_price)
+    line.mwb_unit_price = result.mwb_unit_price
+    line.mwb_explanation = serialize_explanation(result.explanation)
+    line.mwb_computed_at = now
+
+    db.add(
+        AuditEvent(
+            company_id=getattr(current_user, "company_id", 1),
+            user_id=getattr(current_user, "id", None),
+            entity_type="sales_request_line",
+            entity_id=line.id,
+            action="MWB_APPLIED",
+            event_metadata=serialize_explanation(
+                {
+                    "sales_request_id": sales_request.id,
+                    "mwb_unit_price": str(result.mwb_unit_price),
+                    "source_level": result.source_level,
+                    "confidence": result.confidence,
+                    "warnings": result.explanation.get("warnings", []),
+                }
+            ),
+        )
+    )
+
+    db.commit()
+    db.refresh(line)
+
+    return schemas.ApplyMWBResponse(
+        line_id=line.id,
+        sales_request_id=sales_request.id,
+        quoted_unit_price=Decimal(line.unit_price),
+        line_total=Decimal(line.line_total),
+        mwb_unit_price=Decimal(result.mwb_unit_price),
+        source_level=result.source_level,
+        confidence=result.confidence,
+        explanation=result.explanation,
+        computed_at=now,
+    )
 
 
 @router.delete("/{sales_request_id}", status_code=status.HTTP_204_NO_CONTENT)

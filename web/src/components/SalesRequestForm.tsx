@@ -11,6 +11,26 @@ type PricingContextResponse = {
   available_qty: number;
   recommended_price: number;
   margin_threshold_percent: number;
+  mwb_price: number | null;
+  mwb_source_level?: string;
+  mwb_confidence?: string;
+  mwb_explanation?: MWBExplanation;
+  mwb_loading?: boolean;
+};
+
+type MWBExplanation = {
+  source_level?: string;
+  observation_count?: number;
+  quantiles?: Record<string, string>;
+  candidates?: Array<{ unit_price: string; acceptance_probability: number; expected_revenue: string }>;
+  warnings?: string[];
+};
+
+type MWBResponse = {
+  unit_price: number | string;
+  source_level: string;
+  confidence: string;
+  explanation: MWBExplanation;
 };
 
 type LineItemForm = {
@@ -23,6 +43,11 @@ type LineItemForm = {
   landed_unit_cost: number | null;
   recommended_price: number | null;
   margin_threshold_percent: number;
+  mwb_price: number | null;
+  mwb_source_level?: string;
+  mwb_confidence?: string;
+  mwb_explanation?: MWBExplanation;
+  mwb_loading?: boolean;
 };
 
 type InitialValues = {
@@ -54,7 +79,8 @@ const emptyLine: LineItemForm = {
   availability_loading: false,
   landed_unit_cost: null,
   recommended_price: null,
-  margin_threshold_percent: 20
+  margin_threshold_percent: 20,
+  mwb_price: null
 };
 
 const getQuantityValidationError = (quantity: string, availableQty: number | null) => {
@@ -77,7 +103,8 @@ const mapInitialLine = (line: InitialValues["lines"][number]): LineItemForm => (
   availability_loading: false,
   landed_unit_cost: null,
   recommended_price: null,
-  margin_threshold_percent: 20
+  margin_threshold_percent: 20,
+  mwb_price: null
 });
 
 export default function SalesRequestForm({
@@ -105,6 +132,9 @@ export default function SalesRequestForm({
   );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [mwbDrawerOpen, setMwbDrawerOpen] = useState(false);
+  const [activeMwb, setActiveMwb] = useState<{ lineIndex: number; price: number; sourceLevel: string; confidence: string; explanation: MWBExplanation } | null>(null);
+  const [mwbNotice, setMwbNotice] = useState("");
 
   const isWalkIn = customerId === "WALK_IN";
   const isEdit = mode === "edit";
@@ -163,6 +193,43 @@ export default function SalesRequestForm({
       });
     } catch {
       setError("Unable to load landed-cost pricing context for the selected item.");
+    }
+  };
+
+  const fetchMWBForLine = async (index: number, apply = true) => {
+    const line = lines[index];
+    if (!line || !selectedCustomerId || typeof line.item_id !== "number" || Number(line.quantity) <= 0) {
+      return;
+    }
+
+    updateLine(index, { mwb_loading: true });
+    try {
+      const response = await apiFetch<MWBResponse>(`/pricing/mwb?customer_id=${selectedCustomerId}&item_id=${line.item_id}&qty=${Number(line.quantity)}`);
+      const mwbPrice = Number(response.unit_price);
+      updateLine(index, {
+        mwb_loading: false,
+        mwb_price: Number.isFinite(mwbPrice) ? mwbPrice : null,
+        mwb_source_level: response.source_level,
+        mwb_confidence: response.confidence,
+        mwb_explanation: response.explanation
+      });
+      if (apply && Number.isFinite(mwbPrice)) {
+        updateLine(index, { unit_price: String(mwbPrice) });
+        setMwbNotice(`MWB applied: $${mwbPrice.toFixed(2)}. Click to view calculation.`);
+      }
+      if (Number.isFinite(mwbPrice)) {
+        setActiveMwb({
+          lineIndex: index,
+          price: mwbPrice,
+          sourceLevel: response.source_level,
+          confidence: response.confidence,
+          explanation: response.explanation
+        });
+        setMwbDrawerOpen(true);
+      }
+    } catch {
+      updateLine(index, { mwb_loading: false });
+      setError("Unable to load MWB pricing for this line item.");
     }
   };
 
@@ -270,6 +337,7 @@ export default function SalesRequestForm({
         <span className="app-badge border-primary/30 bg-primary/10 text-primary">Internal entry</span>
       </div>
       {error ? <p className="text-sm text-danger">{error}</p> : null}
+      {mwbNotice ? <p className="text-sm text-success">{mwbNotice}</p> : null}
       <div className="grid gap-4 md:grid-cols-2">
         <select className="app-input" value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
           <option value="">Select customer *</option>
@@ -354,6 +422,28 @@ export default function SalesRequestForm({
               onChange={(event) => updateLine(index, { unit_price: event.target.value })}
               placeholder="Unit price"
             />
+            <div className="flex items-center gap-2">
+              {selectedCustomerId && typeof line.item_id === "number" && Number(line.quantity) > 0 ? (
+                <button
+                  className="text-xs text-primary underline"
+                  type="button"
+                  onClick={() => void fetchMWBForLine(index, true)}
+                  disabled={line.mwb_loading}
+                >
+                  {line.mwb_loading ? "Calculating MWB..." : `MWB${line.mwb_price ? `: $${line.mwb_price.toFixed(2)}` : ""}`}
+                </button>
+              ) : (
+                <span className="text-xs text-muted">MWB available after customer + item + qty</span>
+              )}
+              {line.mwb_price ? (
+                <button className="text-xs text-muted underline" type="button" onClick={() => {
+                  setActiveMwb({ lineIndex: index, price: line.mwb_price as number, sourceLevel: line.mwb_source_level || "", confidence: line.mwb_confidence || "Low", explanation: line.mwb_explanation || {} });
+                  setMwbDrawerOpen(true);
+                }}>
+                  How calculated
+                </button>
+              ) : null}
+            </div>
             <button
               className="app-button-ghost text-danger"
               type="button"
@@ -407,6 +497,31 @@ export default function SalesRequestForm({
       </div>
       </section>
       <CustomerInsightsPanel customerId={selectedCustomerId} />
+
+      {mwbDrawerOpen && activeMwb ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
+          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl dark:bg-slate-900">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">MWB Calculation</h3>
+              <button className="app-button-ghost" type="button" onClick={() => setMwbDrawerOpen(false)}>Close</button>
+            </div>
+            <p className="text-sm">MWB price: <strong>${activeMwb.price.toFixed(2)}</strong></p>
+            <p className="text-xs text-muted">Source: {activeMwb.sourceLevel} · Confidence: {activeMwb.confidence}</p>
+            <div className="mt-4 space-y-2 text-sm">
+              <p className="font-medium">Quantiles</p>
+              <pre className="overflow-x-auto rounded bg-surface p-3 text-xs">{JSON.stringify(activeMwb.explanation.quantiles ?? {}, null, 2)}</pre>
+              <p className="font-medium">Candidates</p>
+              <pre className="overflow-x-auto rounded bg-surface p-3 text-xs">{JSON.stringify(activeMwb.explanation.candidates ?? [], null, 2)}</pre>
+              {(activeMwb.explanation.warnings?.length ?? 0) > 0 ? (
+                <div>
+                  <p className="font-medium">Warnings</p>
+                  <ul className="list-disc pl-5 text-xs text-warning">{activeMwb.explanation.warnings?.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

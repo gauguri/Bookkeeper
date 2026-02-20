@@ -33,6 +33,9 @@ type SalesRequestLineDetail = {
   quantity: number;
   unit_price: number;
   line_total: number;
+  mwb_unit_price: number | null;
+  mwb_explanation: string | null;
+  mwb_computed_at: string | null;
   invoice_unit_price: number | null;
   invoice_line_total: number | null;
   on_hand_qty: number;
@@ -639,6 +642,7 @@ export default function SalesRequestDetailPage() {
                 <th className="px-3 py-3">Supplier</th>
                 <th className="px-3 py-3">Landed Cost</th>
                 <th className="px-3 py-3">Sale Price</th>
+                <th className="px-3 py-3">MWB</th>
               </tr>
             </thead>
             <tbody>
@@ -746,6 +750,7 @@ export default function SalesRequestDetailPage() {
                         </span>
                       )}
                     </td>
+                    <td className="px-3 py-3 text-xs tabular-nums">{line.mwb_unit_price != null ? currency(line.mwb_unit_price) : "—"}</td>
                   </tr>
                 );
               })}

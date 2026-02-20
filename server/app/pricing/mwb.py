@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.models import Invoice, InvoiceLine, Item, SalesRequestLine, SupplierItem
+from app.utils import quantize_money
 
 
 EPSILON = 0.0001
@@ -107,9 +108,9 @@ def _clamp01(value: float) -> float:
 
 def _round_to_increment(value: Decimal, increment: Decimal) -> Decimal:
     if increment <= 0:
-        return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return quantize_money(value) or Decimal("0.00")
     rounded = (value / increment).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * increment
-    return rounded.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return quantize_money(rounded) or Decimal("0.00")
 
 
 def _infer_rounding_increment(item: Item | None) -> Decimal:
@@ -196,7 +197,7 @@ def _compute_floor_price(db: Session, item_id: int, min_markup: Decimal) -> Deci
     )
     if supplier_cost is None:
         return None
-    return (_to_decimal(supplier_cost) * min_markup).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return quantize_money(_to_decimal(supplier_cost) * min_markup) or Decimal("0.00")
 
 
 def _compute_quantity_discount(target_qty: Decimal, historical_quantities: Iterable[Decimal], alpha: Decimal = Decimal("0.1")) -> Decimal:
@@ -242,7 +243,7 @@ def compute_mwb_price(
             "observation_count": 0,
             "time_window_months": DEFAULT_LOOKBACK_MONTHS,
             "warnings": warnings + ["No invoice history found. Returned item list price fallback."],
-            "selected_mwb": str(fallback_price.quantize(Decimal("0.01"))),
+            "selected_mwb": str(quantize_money(fallback_price) or Decimal("0.00")),
             "candidates": [],
         }
         return MWBResult(mwb_unit_price=fallback_price, source_level=source_level, explanation=explanation, confidence="Low")

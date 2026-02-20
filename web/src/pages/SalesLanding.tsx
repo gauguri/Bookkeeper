@@ -4,6 +4,10 @@ import { ArrowUpRight, TrendingUp, DollarSign, Package, AlertTriangle, Clock, Fi
 import { apiFetch } from "../api";
 import GrossMarginGauge from "../components/dashboard/GrossMarginGauge";
 import InventoryValueGauge, { TARGET_DIO_DAYS } from "../components/dashboard/InventoryValueGauge";
+import DsoGauge from "../components/dashboard/DsoGauge";
+import FulfillmentRateGauge from "../components/dashboard/FulfillmentRateGauge";
+import CollectionRateGauge from "../components/dashboard/CollectionRateGauge";
+import InventoryTurnoverGauge from "../components/dashboard/InventoryTurnoverGauge";
 import { normalizeGrossMargin } from "../utils/metrics";
 
 const quickLinks = [
@@ -33,6 +37,10 @@ type OwnerCockpitResponse = {
   cash_forecast_30d: number;
   backlog_value: number;
   top_shortages: CockpitShortage[];
+  dso_days: number | string;
+  fulfillment_rate_pct: number | string;
+  collection_rate_pct: number | string;
+  inventory_turnover: number | string;
 };
 
 const coerceNumber = (value: unknown): number => {
@@ -181,18 +189,16 @@ export default function SalesLanding() {
         ))}
       </div>
 
-      {/* Gauges Row */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* Gauges Grid */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {isLoading ? (
           <>
-            <div className="app-card px-5 pt-5 pb-4">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Gross Margin</p>
-              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
-            </div>
-            <div className="app-card px-5 pt-5 pb-4">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted">Inventory Value</p>
-              <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
-            </div>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="app-card px-5 pt-5 pb-4">
+                <div className="h-3 w-28 animate-pulse rounded bg-secondary" />
+                <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />
+              </div>
+            ))}
           </>
         ) : (
           <>
@@ -204,6 +210,10 @@ export default function SalesLanding() {
               inventoryHealthPctDisplay={inventoryGaugeMetrics.inventoryHealthPctDisplay}
               targetDioDays={TARGET_DIO_DAYS}
             />
+            <DsoGauge value={toSafeNumber(metrics?.dso_days)} />
+            <FulfillmentRateGauge value={toSafeNumber(metrics?.fulfillment_rate_pct)} />
+            <CollectionRateGauge value={toSafeNumber(metrics?.collection_rate_pct)} />
+            <InventoryTurnoverGauge value={toSafeNumber(metrics?.inventory_turnover)} />
           </>
         )}
       </div>

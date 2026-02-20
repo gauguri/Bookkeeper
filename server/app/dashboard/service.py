@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.ar.service import get_cash_forecast
 from app.backlog.service import get_backlog_items, get_backlog_summary
-from app.models import Invoice, InvoiceLine, Inventory, Payment
+from app.models import Invoice, InvoiceLine, Inventory, Payment, SalesRequest
 
 OPEN_STATUSES = ("SENT", "SHIPPED", "PARTIALLY_PAID")
 REVENUE_STATUSES = ("SENT", "PAID")
@@ -210,6 +210,65 @@ def get_owner_cockpit_metrics(db: Session, as_of: Optional[date] = None) -> dict
         if row.shortage_qty > 0
     ][:5]
 
+    # --- DSO (Days Sales Outstanding) ---
+    # Average days between invoice issue_date and payment_date for paid invoices YTD.
+    paid_invoices = (
+        db.query(Invoice.issue_date, func.min(Payment.payment_date).label("paid_date"))
+        .join(Payment, Payment.invoice_id == Invoice.id)
+        .filter(Invoice.status == "PAID")
+        .filter(Invoice.issue_date >= year_start, Invoice.issue_date <= today)
+        .group_by(Invoice.id, Invoice.issue_date)
+        .all()
+    )
+    if paid_invoices:
+        total_days = sum((row.paid_date - row.issue_date).days for row in paid_invoices)
+        dso_days = Decimal(total_days) / Decimal(len(paid_invoices))
+    else:
+        dso_days = Decimal("0")
+
+    # --- Order Fulfillment Rate ---
+    # % of sales requests created YTD that reached INVOICED or beyond.
+    fulfilled_statuses = {"INVOICED", "SHIPPED", "CLOSED"}
+    total_srs_ytd = (
+        db.query(func.count(SalesRequest.id))
+        .filter(SalesRequest.created_at >= datetime.combine(year_start, datetime.min.time()))
+        .scalar()
+    ) or 0
+    fulfilled_srs_ytd = (
+        db.query(func.count(SalesRequest.id))
+        .filter(SalesRequest.created_at >= datetime.combine(year_start, datetime.min.time()))
+        .filter(SalesRequest.status.in_(fulfilled_statuses))
+        .scalar()
+    ) or 0
+    fulfillment_rate_pct = (
+        (Decimal(fulfilled_srs_ytd) / Decimal(total_srs_ytd) * Decimal("100"))
+        if total_srs_ytd > 0
+        else Decimal("0")
+    )
+
+    # --- A/R Collection Rate ---
+    # Total payments collected YTD / Total revenue invoiced YTD.
+    payments_collected_ytd = (
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(Payment.payment_date >= year_start, Payment.payment_date <= today)
+        .scalar()
+    )
+    revenue_ytd_decimal = Decimal(revenue_ytd or 0)
+    collection_rate_pct = (
+        (Decimal(payments_collected_ytd or 0) / revenue_ytd_decimal * Decimal("100"))
+        if revenue_ytd_decimal > 0
+        else Decimal("0")
+    )
+
+    # --- Inventory Turnover ---
+    # COGS YTD / Average inventory value.  Higher = faster turnover.
+    avg_inventory = Decimal(inventory_value or 0)
+    inventory_turnover = (
+        (margin_cost / avg_inventory)
+        if avg_inventory > 0
+        else Decimal("0")
+    )
+
     return {
         "revenue": Decimal(revenue_ytd or 0),
         "revenue_mtd": Decimal(revenue_mtd or 0),
@@ -222,4 +281,8 @@ def get_owner_cockpit_metrics(db: Session, as_of: Optional[date] = None) -> dict
         "cash_forecast_30d": cash_forecast_30_days.quantize(Decimal("0.01")),
         "backlog_value": backlog_summary.total_backlog_value,
         "top_shortages": top_shortages,
+        "dso_days": dso_days.quantize(Decimal("0.1")),
+        "fulfillment_rate_pct": fulfillment_rate_pct.quantize(Decimal("0.1")),
+        "collection_rate_pct": min(collection_rate_pct, Decimal("100")).quantize(Decimal("0.1")),
+        "inventory_turnover": inventory_turnover.quantize(Decimal("0.1")),
     }

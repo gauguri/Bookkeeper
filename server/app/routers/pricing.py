@@ -34,6 +34,7 @@ def get_mwb_pricing(
         currency="USD",
         source_level=result.source_level,
         confidence=result.confidence,
+        confidence_score=result.confidence_score,
         explanation=result.explanation,
         computed_at=datetime.utcnow(),
     )

@@ -34,6 +34,8 @@ type SalesRequestLineDetail = {
   unit_price: number;
   line_total: number;
   mwb_unit_price: number | null;
+  mwb_confidence: string | null;
+  mwb_confidence_score: number | null;
   mwb_explanation: string | null;
   mwb_computed_at: string | null;
   invoice_unit_price: number | null;
@@ -750,7 +752,44 @@ export default function SalesRequestDetailPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-xs tabular-nums">{line.mwb_unit_price != null ? currency(line.mwb_unit_price) : "—"}</td>
+                    <td className="px-3 py-3">
+                      {line.mwb_unit_price != null ? (
+                        <div className="space-y-1">
+                          <button
+                            type="button"
+                            className="text-xs font-medium tabular-nums text-primary underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:no-underline"
+                            onClick={() => {
+                              updateSelection(line.id, { unitPriceOverride: String(line.mwb_unit_price) });
+                            }}
+                            disabled={isTerminal}
+                            title={`Click to apply MWB price. Confidence: ${line.mwb_confidence ?? "—"}`}
+                          >
+                            {currency(line.mwb_unit_price)}
+                          </button>
+                          <span className={`ml-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                            line.mwb_confidence === "High"
+                              ? "bg-emerald-500/15 text-emerald-600"
+                              : line.mwb_confidence === "Medium"
+                                ? "bg-amber-500/15 text-amber-600"
+                                : "bg-red-500/15 text-red-600"
+                          }`}>
+                            {line.mwb_confidence ?? "?"}
+                          </span>
+                          {(() => {
+                            const uplift = line.mwb_unit_price! - computedSalePrice;
+                            if (Math.abs(uplift) < 0.01) return null;
+                            const pct = computedSalePrice > 0 ? ((uplift / computedSalePrice) * 100).toFixed(1) : "0.0";
+                            return (
+                              <div className={`text-[10px] ${uplift > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {uplift > 0 ? "+" : ""}{currency(uplift)} ({uplift > 0 ? "+" : ""}{pct}%)
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

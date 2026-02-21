@@ -422,27 +422,39 @@ export default function SalesRequestForm({
               onChange={(event) => updateLine(index, { unit_price: event.target.value })}
               placeholder="Unit price"
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               {selectedCustomerId && typeof line.item_id === "number" && Number(line.quantity) > 0 ? (
-                <button
-                  className="text-xs text-primary underline"
-                  type="button"
-                  onClick={() => void fetchMWBForLine(index, true)}
-                  disabled={line.mwb_loading}
-                >
-                  {line.mwb_loading ? "Calculating MWB..." : `MWB${line.mwb_price ? `: $${line.mwb_price.toFixed(2)}` : ""}`}
-                </button>
+                <>
+                  <button
+                    className="text-xs text-primary underline"
+                    type="button"
+                    onClick={() => void fetchMWBForLine(index, true)}
+                    disabled={line.mwb_loading}
+                  >
+                    {line.mwb_loading ? "Calculating..." : "Get MWB"}
+                  </button>
+                  {line.mwb_price != null && (
+                    <>
+                      <span className="text-xs font-medium tabular-nums">${line.mwb_price.toFixed(2)}</span>
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        line.mwb_confidence === "High" ? "bg-emerald-500/15 text-emerald-600"
+                        : line.mwb_confidence === "Medium" ? "bg-amber-500/15 text-amber-600"
+                        : "bg-red-500/15 text-red-600"
+                      }`}>
+                        {line.mwb_confidence ?? "?"}
+                      </span>
+                      <button className="text-[10px] text-muted underline" type="button" onClick={() => {
+                        setActiveMwb({ lineIndex: index, price: line.mwb_price as number, sourceLevel: line.mwb_source_level || "", confidence: line.mwb_confidence || "Low", explanation: line.mwb_explanation || {} });
+                        setMwbDrawerOpen(true);
+                      }}>
+                        Details
+                      </button>
+                    </>
+                  )}
+                </>
               ) : (
-                <span className="text-xs text-muted">MWB available after customer + item + qty</span>
+                <span className="text-xs text-muted">MWB: select customer + item + qty</span>
               )}
-              {line.mwb_price ? (
-                <button className="text-xs text-muted underline" type="button" onClick={() => {
-                  setActiveMwb({ lineIndex: index, price: line.mwb_price as number, sourceLevel: line.mwb_source_level || "", confidence: line.mwb_confidence || "Low", explanation: line.mwb_explanation || {} });
-                  setMwbDrawerOpen(true);
-                }}>
-                  How calculated
-                </button>
-              ) : null}
             </div>
             <button
               className="app-button-ghost text-danger"
@@ -499,26 +511,111 @@ export default function SalesRequestForm({
       <CustomerInsightsPanel customerId={selectedCustomerId} />
 
       {mwbDrawerOpen && activeMwb ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
-          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={() => setMwbDrawerOpen(false)}>
+          <div className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">MWB Calculation</h3>
+              <h3 className="text-lg font-semibold">MWB Price Analysis</h3>
               <button className="app-button-ghost" type="button" onClick={() => setMwbDrawerOpen(false)}>Close</button>
             </div>
-            <p className="text-sm">MWB price: <strong>${activeMwb.price.toFixed(2)}</strong></p>
-            <p className="text-xs text-muted">Source: {activeMwb.sourceLevel} · Confidence: {activeMwb.confidence}</p>
-            <div className="mt-4 space-y-2 text-sm">
-              <p className="font-medium">Quantiles</p>
-              <pre className="overflow-x-auto rounded bg-surface p-3 text-xs">{JSON.stringify(activeMwb.explanation.quantiles ?? {}, null, 2)}</pre>
-              <p className="font-medium">Candidates</p>
-              <pre className="overflow-x-auto rounded bg-surface p-3 text-xs">{JSON.stringify(activeMwb.explanation.candidates ?? [], null, 2)}</pre>
-              {(activeMwb.explanation.warnings?.length ?? 0) > 0 ? (
-                <div>
-                  <p className="font-medium">Warnings</p>
-                  <ul className="list-disc pl-5 text-xs text-warning">{activeMwb.explanation.warnings?.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                </div>
-              ) : null}
+
+            {/* Recommended price card */}
+            <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4 mb-4">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted">Recommended Price</p>
+              <p className="mt-1 text-3xl font-bold tabular-nums">${activeMwb.price.toFixed(2)}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${
+                  activeMwb.confidence === "High" ? "bg-emerald-500/15 text-emerald-600"
+                  : activeMwb.confidence === "Medium" ? "bg-amber-500/15 text-amber-600"
+                  : "bg-red-500/15 text-red-600"
+                }`}>{activeMwb.confidence} confidence</span>
+                <span className="text-xs text-muted">Source: {activeMwb.sourceLevel.replace(/_/g, " ")}</span>
+              </div>
+              {activeMwb.explanation.observation_count != null && (
+                <p className="mt-1 text-xs text-muted">
+                  Based on {activeMwb.explanation.observation_count} historical transactions
+                  {(activeMwb.explanation as Record<string, unknown>).customer_tier ? ` · Tier: ${(activeMwb.explanation as Record<string, unknown>).customer_tier}` : ""}
+                </p>
+              )}
             </div>
+
+            {/* Quantile distribution bars */}
+            {activeMwb.explanation.quantiles && (() => {
+              const q = activeMwb.explanation.quantiles!;
+              const entries = Object.entries(q).sort((a, b) => Number(a[1]) - Number(b[1]));
+              const minVal = Number(entries[0]?.[1] ?? 0);
+              const maxVal = Number(entries[entries.length - 1]?.[1] ?? 100);
+              const range = maxVal - minVal || 1;
+              return (
+                <div className="mb-4">
+                  <p className="text-sm font-semibold mb-2">Price Distribution</p>
+                  <div className="space-y-1.5">
+                    {entries.map(([label, value]) => {
+                      const pct = ((Number(value) - minVal) / range) * 100;
+                      const isRecommended = Math.abs(Number(value) - activeMwb.price) < 1;
+                      return (
+                        <div key={label} className="flex items-center gap-2 text-xs">
+                          <span className="w-8 text-right font-medium text-muted">{label.toUpperCase()}</span>
+                          <div className="flex-1 rounded-full bg-slate-100 dark:bg-slate-800 h-4 relative">
+                            <div
+                              className={`h-full rounded-full transition-all ${isRecommended ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+                              style={{ width: `${Math.max(4, pct)}%` }}
+                            />
+                          </div>
+                          <span className={`w-20 text-right tabular-nums ${isRecommended ? "font-bold text-primary" : "text-muted"}`}>
+                            ${Number(value).toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Candidate analysis table */}
+            {activeMwb.explanation.candidates && activeMwb.explanation.candidates.length > 0 && (
+              <div className="mb-4">
+                <p className="text-sm font-semibold mb-2">Candidate Prices (by expected revenue)</p>
+                <table className="w-full text-xs">
+                  <thead className="text-left text-[10px] uppercase tracking-widest text-muted">
+                    <tr>
+                      <th className="pb-1.5">Price</th>
+                      <th className="pb-1.5">Accept %</th>
+                      <th className="pb-1.5 text-right">Exp. Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeMwb.explanation.candidates.slice(0, 8).map((c, i) => {
+                      const isSelected = Math.abs(Number(c.unit_price) - activeMwb.price) < 1;
+                      return (
+                        <tr key={i} className={isSelected ? "font-bold text-primary" : "text-foreground"}>
+                          <td className="py-1 tabular-nums">${Number(c.unit_price).toFixed(2)}</td>
+                          <td className="py-1">
+                            <div className="flex items-center gap-1.5">
+                              <div className="h-2.5 w-20 rounded-full bg-slate-100 dark:bg-slate-800">
+                                <div className={`h-full rounded-full ${isSelected ? "bg-primary" : "bg-slate-400"}`} style={{ width: `${(c.acceptance_probability * 100)}%` }} />
+                              </div>
+                              <span className="tabular-nums">{(c.acceptance_probability * 100).toFixed(0)}%</span>
+                            </div>
+                          </td>
+                          <td className="py-1 text-right tabular-nums">${Number(c.expected_revenue).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Warnings */}
+            {(activeMwb.explanation.warnings?.length ?? 0) > 0 && (
+              <div className="rounded-lg border border-amber-300/40 bg-amber-50 dark:bg-amber-900/10 p-3">
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1">Warnings</p>
+                <ul className="list-disc pl-4 text-xs text-amber-600 dark:text-amber-400/80 space-y-0.5">
+                  {activeMwb.explanation.warnings?.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

@@ -361,6 +361,8 @@ def apply_mwb_to_line_item(
     line.unit_price = result.mwb_unit_price
     line.line_total = Decimal(line.quantity or 0) * Decimal(result.mwb_unit_price)
     line.mwb_unit_price = result.mwb_unit_price
+    line.mwb_confidence = result.confidence
+    line.mwb_confidence_score = result.confidence_score
     line.mwb_explanation = serialize_explanation(result.explanation)
     line.mwb_computed_at = now
 
@@ -394,6 +396,7 @@ def apply_mwb_to_line_item(
         mwb_unit_price=Decimal(result.mwb_unit_price),
         source_level=result.source_level,
         confidence=result.confidence,
+        confidence_score=result.confidence_score,
         explanation=result.explanation,
         computed_at=now,
     )

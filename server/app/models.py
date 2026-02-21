@@ -444,6 +444,8 @@ class SalesRequestLine(Base):
     unit_price = Column(Numeric(14, 2), nullable=False)
     line_total = Column(Numeric(14, 2), nullable=False)
     mwb_unit_price = Column(Numeric(14, 2), nullable=True)
+    mwb_confidence = Column(String(10), nullable=True)
+    mwb_confidence_score = Column(Numeric(5, 3), nullable=True)
     mwb_explanation = Column(Text, nullable=True)
     mwb_computed_at = Column(DateTime, nullable=True)
 

@@ -137,6 +137,8 @@ class SalesRequestLineDetailResponse(BaseModel):
     unit_price: DecimalValue
     line_total: DecimalValue
     mwb_unit_price: Optional[DecimalValue] = None
+    mwb_confidence: Optional[str] = None
+    mwb_confidence_score: Optional[float] = None
     mwb_explanation: Optional[str] = None
     mwb_computed_at: Optional[datetime] = None
     invoice_unit_price: Optional[DecimalValue] = None
@@ -197,6 +199,7 @@ class MWBPricingResponse(BaseModel):
     currency: str = "USD"
     source_level: str
     confidence: str
+    confidence_score: float = 0.0
     explanation: dict
     computed_at: datetime
 
@@ -213,5 +216,6 @@ class ApplyMWBResponse(BaseModel):
     mwb_unit_price: DecimalValue
     source_level: str
     confidence: str
+    confidence_score: float = 0.0
     explanation: dict
     computed_at: datetime

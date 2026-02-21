@@ -367,6 +367,8 @@ def get_sales_request_detail(db: Session, sales_request_id: int) -> Optional[dic
             "unit_price": line.unit_price,
             "line_total": line.line_total,
             "mwb_unit_price": line.mwb_unit_price,
+            "mwb_confidence": line.mwb_confidence,
+            "mwb_confidence_score": float(line.mwb_confidence_score) if line.mwb_confidence_score is not None else None,
             "mwb_explanation": line.mwb_explanation,
             "mwb_computed_at": line.mwb_computed_at,
             "invoice_unit_price": matched_invoice_line.unit_price if matched_invoice_line else None,

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -565,3 +566,71 @@ class PurchaseOrderSendLog(Base):
 
     purchase_order = relationship("PurchaseOrder")
     supplier = relationship("Supplier")
+
+
+# ---------------------------------------------------------------------------
+# Analytics Models
+# ---------------------------------------------------------------------------
+
+
+class AnalyticsSnapshot(Base):
+    __tablename__ = "analytics_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    kpi_key = Column(String(100), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    granularity = Column(String(20), nullable=False)
+    value = Column(Numeric(18, 4), nullable=True)
+    previous_value = Column(Numeric(18, 4), nullable=True)
+    target_value = Column(Numeric(18, 4), nullable=True)
+    metadata_json = Column(JSONB, nullable=True)
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("kpi_key", "period_start", "granularity", name="uq_analytics_snapshot"),
+        Index("ix_analytics_snapshots_kpi_key", "kpi_key"),
+    )
+
+
+class BudgetTarget(Base):
+    __tablename__ = "budget_targets"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    target_amount = Column(Numeric(18, 4), nullable=False)
+    target_type = Column(String(20), nullable=False, default="budget")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class DashboardConfig(Base):
+    __tablename__ = "dashboard_configs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    layout = Column(JSONB, nullable=False, default=dict)
+    pinned_kpis = Column(JSONB, nullable=True, default=list)
+    default_period = Column(String(30), nullable=False, default="current_month")
+    theme = Column(String(20), nullable=False, default="light")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = relationship("User")
+
+
+class KpiAlert(Base):
+    __tablename__ = "kpi_alerts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    kpi_key = Column(String(100), nullable=False)
+    condition = Column(String(20), nullable=False)
+    threshold = Column(Numeric(18, 4), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_triggered_at = Column(DateTime, nullable=True)
+    notification_method = Column(String(20), nullable=False, default="in_app")
+
+    user = relationship("User")

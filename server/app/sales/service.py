@@ -7,7 +7,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import SOURCE_INVOICE, get_available_qty, reserve_inventory_record
-from app.models import Customer, Inventory, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SupplierItem
+from app.models import ARCollectionActivity, Customer, Inventory, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SalesRequest, SupplierItem
 from app.sales.calculations import (
     InvoiceLineInput,
     PaymentApplicationInput,
@@ -607,3 +607,390 @@ def customer_revenue(db: Session, start_date: date, end_date: date) -> List[dict
         {"customer_id": customer_id, "customer_name": name, "total_revenue": total}
         for customer_id, name, total in rows
     ]
+
+
+# ── Customer 360 ────────────────────────────────────────────────
+
+
+def _payment_score(avg_days: Optional[float], overdue: Decimal) -> str:
+    """Return a payment behaviour label: good / average / slow / at-risk."""
+    if avg_days is None:
+        return "good"
+    if overdue > 0 and avg_days > 60:
+        return "at-risk"
+    if avg_days > 45:
+        return "slow"
+    if avg_days > 30:
+        return "average"
+    return "good"
+
+
+def get_customer_360(db: Session, customer_id: int) -> dict:
+    """Full Customer-360 payload: profile, KPIs, aging, trend, activity, top items."""
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise ValueError("Customer not found.")
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+    ltm_start = today - timedelta(days=365)
+    active_filter = (Invoice.customer_id == customer_id, Invoice.status != "VOID")
+
+    # ── KPIs ────────────────────────────────────────────────
+    lifetime_revenue = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(*active_filter)
+        .scalar() or 0
+    )
+    ytd_revenue = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(*active_filter, Invoice.issue_date >= ytd_start)
+        .scalar() or 0
+    )
+    outstanding_ar = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(*active_filter, Invoice.amount_due > 0)
+        .scalar() or 0
+    )
+    total_invoices = db.query(func.count(Invoice.id)).filter(*active_filter).scalar() or 0
+    total_payments = (
+        db.query(func.count(Payment.id))
+        .filter(Payment.customer_id == customer_id)
+        .scalar() or 0
+    )
+
+    # Gross margin (LTM)
+    margin_data = (
+        db.query(
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.landed_unit_cost * InvoiceLine.quantity), 0).label("cost"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter, Invoice.issue_date >= ltm_start,
+                InvoiceLine.landed_unit_cost.isnot(None), InvoiceLine.landed_unit_cost > 0)
+        .one()
+    )
+    rev = Decimal(margin_data.revenue or 0)
+    cost = Decimal(margin_data.cost or 0)
+    gross_margin_percent = float((rev - cost) / rev * 100) if rev > 0 else None
+
+    # Average days-to-pay (LTM)
+    from app.sql_expressions import days_between
+    ps = (
+        db.query(
+            func.coalesce(func.sum(PaymentApplication.applied_amount), 0).label("applied"),
+            func.coalesce(
+                func.sum(
+                    days_between(Payment.payment_date, Invoice.issue_date, dialect_name=db.get_bind().dialect.name)
+                    * PaymentApplication.applied_amount
+                ), 0
+            ).label("weighted"),
+        )
+        .join(Payment, Payment.id == PaymentApplication.payment_id)
+        .join(Invoice, Invoice.id == PaymentApplication.invoice_id)
+        .filter(Invoice.customer_id == customer_id, Invoice.status != "VOID", Payment.payment_date >= ltm_start)
+        .one()
+    )
+    applied = Decimal(ps.applied or 0)
+    weighted = Decimal(ps.weighted or 0)
+    avg_days_to_pay = float(weighted / applied) if applied > 0 else None
+
+    # Overdue
+    overdue_amount = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(*active_filter, Invoice.amount_due > 0, Invoice.due_date < today)
+        .scalar() or 0
+    )
+
+    score = _payment_score(avg_days_to_pay, overdue_amount)
+
+    kpis = {
+        "lifetime_revenue": lifetime_revenue,
+        "ytd_revenue": ytd_revenue,
+        "outstanding_ar": outstanding_ar,
+        "avg_days_to_pay": avg_days_to_pay,
+        "gross_margin_percent": gross_margin_percent,
+        "total_invoices": total_invoices,
+        "total_payments": total_payments,
+        "overdue_amount": overdue_amount,
+        "payment_score": score,
+    }
+
+    # ── Aging buckets ───────────────────────────────────────
+    open_invoices = (
+        db.query(Invoice)
+        .filter(*active_filter, Invoice.amount_due > 0)
+        .all()
+    )
+    aging = {"current": Decimal(0), "days_1_30": Decimal(0), "days_31_60": Decimal(0),
+             "days_61_90": Decimal(0), "days_90_plus": Decimal(0)}
+    for inv in open_invoices:
+        days_past = max((today - inv.due_date).days, 0) if inv.due_date <= today else -1
+        amt = Decimal(inv.amount_due or 0)
+        if days_past < 0:
+            aging["current"] += amt
+        elif days_past <= 30:
+            aging["days_1_30"] += amt
+        elif days_past <= 60:
+            aging["days_31_60"] += amt
+        elif days_past <= 90:
+            aging["days_61_90"] += amt
+        else:
+            aging["days_90_plus"] += amt
+
+    # ── Revenue trend (last 12 months) ──────────────────────
+    revenue_trend: List[dict] = []
+    for i in range(11, -1, -1):
+        m_start = date(today.year, today.month, 1) - timedelta(days=i * 30)
+        m_start = date(m_start.year, m_start.month, 1)
+        if m_start.month == 12:
+            m_end = date(m_start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            m_end = date(m_start.year, m_start.month + 1, 1) - timedelta(days=1)
+        period_label = m_start.strftime("%Y-%m")
+
+        rev_val = Decimal(
+            db.query(func.coalesce(func.sum(Invoice.total), 0))
+            .filter(*active_filter, Invoice.issue_date >= m_start, Invoice.issue_date <= m_end)
+            .scalar() or 0
+        )
+        pay_val = Decimal(
+            db.query(func.coalesce(func.sum(Payment.amount), 0))
+            .filter(Payment.customer_id == customer_id, Payment.payment_date >= m_start, Payment.payment_date <= m_end)
+            .scalar() or 0
+        )
+        revenue_trend.append({"period": period_label, "revenue": rev_val, "payments": pay_val})
+
+    # ── Activity timeline (last 50 events) ──────────────────
+    activity: List[dict] = []
+    # Invoices
+    invoices = (
+        db.query(Invoice).filter(*active_filter)
+        .order_by(Invoice.created_at.desc()).limit(20).all()
+    )
+    for inv in invoices:
+        activity.append({
+            "id": f"inv-{inv.id}",
+            "type": "invoice_created",
+            "title": f"Invoice {inv.invoice_number}",
+            "description": f"Created for {currency_fmt(inv.total)} — {inv.status}",
+            "amount": inv.total,
+            "reference": inv.invoice_number,
+            "date": inv.created_at,
+            "icon": "invoice",
+        })
+        if inv.shipped_at:
+            activity.append({
+                "id": f"ship-{inv.id}",
+                "type": "invoice_shipped",
+                "title": f"Shipped {inv.invoice_number}",
+                "description": f"Invoice shipped",
+                "amount": inv.total,
+                "reference": inv.invoice_number,
+                "date": inv.shipped_at,
+                "icon": "shipped",
+            })
+    # Payments
+    payments = (
+        db.query(Payment).filter(Payment.customer_id == customer_id)
+        .order_by(Payment.created_at.desc()).limit(20).all()
+    )
+    for pmt in payments:
+        inv_num = pmt.invoice.invoice_number if pmt.invoice else "N/A"
+        activity.append({
+            "id": f"pmt-{pmt.id}",
+            "type": "payment_received",
+            "title": f"Payment received",
+            "description": f"{currency_fmt(pmt.amount)} applied to {inv_num}" + (f" via {pmt.method}" if pmt.method else ""),
+            "amount": pmt.amount,
+            "reference": pmt.reference,
+            "date": pmt.created_at,
+            "icon": "payment",
+        })
+    # AR collection activities (notes/reminders)
+    ar_acts = (
+        db.query(ARCollectionActivity).filter(ARCollectionActivity.customer_id == customer_id)
+        .order_by(ARCollectionActivity.created_at.desc()).limit(10).all()
+    )
+    for act in ar_acts:
+        activity.append({
+            "id": f"ar-{act.id}",
+            "type": act.activity_type.lower(),
+            "title": act.activity_type.replace("_", " ").title(),
+            "description": act.note or "",
+            "amount": None,
+            "reference": None,
+            "date": act.created_at,
+            "icon": "reminder" if "reminder" in act.activity_type.lower() else "note",
+        })
+    activity.sort(key=lambda x: x["date"], reverse=True)
+    activity = activity[:50]
+
+    # ── Top items purchased ─────────────────────────────────
+    top_items_rows = (
+        db.query(
+            InvoiceLine.description,
+            func.sum(InvoiceLine.quantity).label("qty"),
+            func.sum(InvoiceLine.line_total).label("revenue"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter)
+        .group_by(InvoiceLine.description)
+        .order_by(func.sum(InvoiceLine.line_total).desc())
+        .limit(10)
+        .all()
+    )
+    top_items = [
+        {"item_name": row.description or "Untitled", "quantity": float(row.qty or 0), "revenue": float(row.revenue or 0)}
+        for row in top_items_rows
+    ]
+
+    return {
+        "customer": customer,
+        "kpis": kpis,
+        "aging": aging,
+        "revenue_trend": revenue_trend,
+        "recent_activity": activity,
+        "top_items": top_items,
+    }
+
+
+def currency_fmt(v) -> str:
+    """Tiny helper to format a decimal as $X,XXX.XX for activity descriptions."""
+    try:
+        return f"${Decimal(v):,.2f}"
+    except Exception:
+        return str(v)
+
+
+def get_customers_enriched(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    tier: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
+) -> List[dict]:
+    """Return enriched customer list with revenue, AR, payment behaviour."""
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+
+    query = (
+        db.query(
+            Customer,
+            func.coalesce(func.sum(Invoice.total).filter(Invoice.status != "VOID", Invoice.issue_date >= ytd_start), 0).label("total_revenue"),
+            func.coalesce(func.sum(Invoice.amount_due).filter(Invoice.status != "VOID", Invoice.amount_due > 0), 0).label("outstanding_ar"),
+            func.count(Invoice.id.distinct()).filter(Invoice.status != "VOID").label("invoice_count"),
+            func.max(Invoice.issue_date).filter(Invoice.status != "VOID").label("last_invoice_date"),
+        )
+        .outerjoin(Invoice, Invoice.customer_id == Customer.id)
+        .group_by(Customer.id)
+    )
+
+    if search:
+        like = f"%{search.lower()}%"
+        query = query.filter(
+            func.lower(Customer.name).like(like)
+            | func.lower(Customer.email).like(like)
+        )
+    if tier:
+        query = query.filter(Customer.tier == tier.upper())
+    if is_active is not None:
+        query = query.filter(Customer.is_active == is_active)
+
+    # Sorting
+    sort_map = {
+        "name": Customer.name,
+        "total_revenue": "total_revenue",
+        "outstanding_ar": "outstanding_ar",
+        "invoice_count": "invoice_count",
+        "created_at": Customer.created_at,
+    }
+    sort_col = sort_map.get(sort_by, Customer.name)
+    if isinstance(sort_col, str):
+        sort_expr = text(sort_col)
+    else:
+        sort_expr = sort_col
+    if sort_dir == "desc":
+        sort_expr = sort_expr.desc() if hasattr(sort_expr, "desc") else text(f"{sort_col} DESC")
+    query = query.order_by(sort_expr)
+
+    rows = query.all()
+    result = []
+    for row in rows:
+        cust = row[0]
+        total_rev = Decimal(row[1] or 0)
+        outstanding = Decimal(row[2] or 0)
+        inv_count = row[3] or 0
+        last_inv = row[4]
+
+        # Quick payment score approximation
+        overdue_amt = Decimal(
+            db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+            .filter(Invoice.customer_id == cust.id, Invoice.status != "VOID",
+                    Invoice.amount_due > 0, Invoice.due_date < today)
+            .scalar() or 0
+        )
+        score = "good"
+        if overdue_amt > 0:
+            overdue_ratio = float(overdue_amt / outstanding) if outstanding > 0 else 1.0
+            if overdue_ratio > 0.5:
+                score = "at-risk"
+            elif overdue_ratio > 0.2:
+                score = "slow"
+            else:
+                score = "average"
+
+        result.append({
+            "id": cust.id,
+            "name": cust.name,
+            "email": cust.email,
+            "phone": cust.phone,
+            "tier": cust.tier or "STANDARD",
+            "is_active": cust.is_active,
+            "created_at": cust.created_at,
+            "total_revenue": total_rev,
+            "outstanding_ar": outstanding,
+            "invoice_count": inv_count,
+            "last_invoice_date": last_inv,
+            "avg_days_to_pay": None,  # omitted from list for performance
+            "payment_score": score,
+        })
+    return result
+
+
+def get_customers_summary(db: Session) -> dict:
+    """Aggregate KPIs for the customer list header."""
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+
+    total = db.query(func.count(Customer.id)).scalar() or 0
+    active = db.query(func.count(Customer.id)).filter(Customer.is_active == True).scalar() or 0
+
+    rev_ytd = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(Invoice.status != "VOID", Invoice.issue_date >= ytd_start)
+        .scalar() or 0
+    )
+    total_ar = Decimal(
+        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        .filter(Invoice.status != "VOID", Invoice.amount_due > 0)
+        .scalar() or 0
+    )
+
+    # Count customers with significant overdue
+    overdue_customers = (
+        db.query(func.count(func.distinct(Invoice.customer_id)))
+        .filter(Invoice.status != "VOID", Invoice.amount_due > 0, Invoice.due_date < today)
+        .scalar() or 0
+    )
+
+    return {
+        "total_customers": total,
+        "active_customers": active,
+        "total_revenue_ytd": rev_ytd,
+        "total_outstanding_ar": total_ar,
+        "avg_days_to_pay": None,
+        "customers_at_risk": overdue_customers,
+    }

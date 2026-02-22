@@ -5,105 +5,26 @@ import {
   CheckCircle,
   ClipboardList,
   FileText,
-  Package,
-  Truck,
+  ShoppingCart,
 } from "lucide-react";
 import { apiFetch } from "../api";
-import { currency } from "../utils/format";
+import { formatCurrency } from "../utils/formatters";
 import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
-import SalesRequestTimeline from "../components/sales/SalesRequestTimeline";
-
-/* ---------- types ---------- */
-
-type SupplierOption = {
-  supplier_id: number;
-  supplier_name: string;
-  supplier_cost: number;
-  freight_cost: number;
-  tariff_cost: number;
-  landed_cost: number;
-  is_preferred: boolean;
-  lead_time_days: number | null;
-};
-
-type SalesRequestLineDetail = {
-  id: number;
-  item_id: number;
-  item_name: string;
-  quantity: number;
-  unit_price: number;
-  line_total: number;
-  mwb_unit_price: number | null;
-  mwb_confidence: string | null;
-  mwb_confidence_score: number | null;
-  mwb_explanation: string | null;
-  mwb_computed_at: string | null;
-  invoice_unit_price: number | null;
-  invoice_line_total: number | null;
-  on_hand_qty: number;
-  reserved_qty: number;
-  available_qty: number;
-  supplier_options: SupplierOption[];
-};
-
-type SalesRequestDetail = {
-  id: number;
-  request_number: string;
-  customer_id: number | null;
-  customer_name: string | null;
-  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
-  created_at: string;
-  updated_at: string;
-  notes: string | null;
-  requested_fulfillment_date: string | null;
-  total_amount: number;
-  lines: SalesRequestLineDetail[];
-  linked_invoice_id: number | null;
-  linked_invoice_number: string | null;
-  invoice_id: number | null;
-  invoice_number: string | null;
-  linked_invoice_status: string | null;
-  linked_invoice_shipped_at: string | null;
-  allowed_transitions: Array<SalesRequestDetail["status"]>;
-  timeline: TimelineEntry[];
-};
-
-type TimelineEntry = {
-  status: "NEW" | "QUOTED" | "CONFIRMED" | "INVOICED" | "SHIPPED" | "CLOSED" | "LOST" | "CANCELLED";
-  label: string;
-  occurred_at: string | null;
-  completed: boolean;
-  current: boolean;
-};
-
-type LineSelection = {
-  lineId: number;
-  supplierId: number | null;
-  unitCost: string;
-  unitPriceOverride: string;
-  discount: string;
-  taxRate: string;
-};
-
-type GenerateResult = {
-  invoice_id: number;
-  invoice_number: string;
-  total: string;
-  status: string;
-};
+import SalesOrderStatusBadge from "../components/sales-orders/SalesOrderStatusBadge";
+import SalesOrderKpiRow from "../components/sales-orders/SalesOrderKpiRow";
+import SalesOrderLineItemsTable, {
+  type LineSelection,
+} from "../components/sales-orders/SalesOrderLineItemsTable";
+import SalesOrderPricingSummary from "../components/sales-orders/SalesOrderPricingSummary";
+import SalesOrderFulfillmentCard from "../components/sales-orders/SalesOrderFulfillmentCard";
+import SalesOrderActivityTimeline from "../components/sales-orders/SalesOrderActivityTimeline";
+import {
+  useSalesRequest360,
+  type SalesRequest360Data,
+  type SalesRequestDetail,
+} from "../hooks/useSalesRequests";
 
 /* ---------- helpers ---------- */
-
-const statusStyles: Record<string, string> = {
-  NEW: "border-slate-400/40 bg-slate-400/10 text-slate-700",
-  QUOTED: "border-warning/30 bg-warning/10 text-warning",
-  CONFIRMED: "border-primary/30 bg-primary/10 text-primary",
-  INVOICED: "border-info/30 bg-info/10 text-info",
-  SHIPPED: "border-primary/30 bg-primary/10 text-primary",
-  CLOSED: "border-success/30 bg-success/10 text-success",
-  LOST: "border-danger/30 bg-danger/10 text-danger",
-  CANCELLED: "border-muted/30 bg-muted/10 text-muted",
-};
 
 const formatDate = (value?: string | null) => {
   if (!value) return "\u2014";
@@ -112,41 +33,28 @@ const formatDate = (value?: string | null) => {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
 };
 
-const formatDateForInput = (date: Date) => {
-  const tz = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+const formatDateForInput = (d: Date) => {
+  const tz = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return tz.toISOString().slice(0, 10);
 };
 
 const num = (v: string) => (v === "" ? 0 : Number(v));
 
-/* ---------- availability badge ---------- */
+type Tab = "overview" | "line-items" | "pricing" | "fulfillment" | "activity";
 
-const AvailabilityBadge = ({
-  available,
-  needed,
-}: {
-  available: number;
-  needed: number;
-}) => {
-  if (available >= needed) {
-    return (
-      <span className="app-badge border-success/30 bg-success/10 text-success">
-        {available} avail
-      </span>
-    );
-  }
-  if (available > 0) {
-    return (
-      <span className="app-badge border-warning/30 bg-warning/10 text-warning">
-        {available} avail (need {needed})
-      </span>
-    );
-  }
-  return (
-    <span className="app-badge border-danger/30 bg-danger/10 text-danger">
-      Out of stock
-    </span>
-  );
+const TABS: { key: Tab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "line-items", label: "Line Items" },
+  { key: "pricing", label: "Pricing & Margins" },
+  { key: "fulfillment", label: "Fulfillment" },
+  { key: "activity", label: "Activity" },
+];
+
+type GenerateResult = {
+  invoice_id: number;
+  invoice_number: string;
+  total: string;
+  status: string;
 };
 
 /* ---------- main component ---------- */
@@ -155,16 +63,22 @@ export default function SalesRequestDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const salesRequestId = id ? Number(id) : undefined;
 
-  const [detail, setDetail] = useState<SalesRequestDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: detail,
+    isLoading: loading,
+    error: fetchError,
+    refetch,
+  } = useSalesRequest360(salesRequestId);
 
-  // Per-line supplier/pricing selections
+  const [tab, setTab] = useState<Tab>("overview");
+
+  // Local mutable state for interactivity
   const [lineSelections, setLineSelections] = useState<LineSelection[]>([]);
-
-  // Markup and invoice form
   const [markupPercent, setMarkupPercent] = useState("20");
+
+  // Invoice form
   const [invoiceForm, setInvoiceForm] = useState({
     issue_date: formatDateForInput(new Date()),
     due_date: "",
@@ -176,44 +90,22 @@ export default function SalesRequestDetailPage() {
   const [generateResult, setGenerateResult] = useState<GenerateResult | null>(
     null
   );
+
+  // Status transition
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [statusError, setStatusError] = useState("");
   const [statusDraft, setStatusDraft] = useState<SalesRequestDetail["status"] | "">("");
   const [statusNotice, setStatusNotice] = useState("");
+
   const notice = (location.state as { notice?: string } | null)?.notice || "";
 
-  /* --- data loading --- */
-
-  const loadDetail = async () => {
-    if (!id) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await apiFetch<SalesRequestDetail>(
-        `/sales-requests/${id}/detail`
-      );
-      setDetail(data);
-      setStatusDraft(data.status);
-    } catch (err) {
-      setDetail(null);
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-
+  // Clear location state notice on mount
   useEffect(() => {
     if (!location.state?.notice) return;
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
 
-  // Initialize line selections once detail loads
+  // Init line selections when detail loads
   useEffect(() => {
     if (!detail) return;
     setLineSelections(
@@ -222,16 +114,17 @@ export default function SalesRequestDetailPage() {
         return {
           lineId: line.id,
           supplierId: preferred?.supplier_id ?? null,
-          unitCost: preferred ? String(preferred.landed_cost) : "",
+          unitCost: preferred ? String(Number(preferred.landed_cost)) : "",
           unitPriceOverride: "",
           discount: "0",
           taxRate: "0",
         };
       })
     );
+    setStatusDraft(detail.status);
   }, [detail]);
 
-  /* --- selection handlers --- */
+  /* ── selection handlers ── */
 
   const updateSelection = (lineId: number, patch: Partial<LineSelection>) => {
     setLineSelections((prev) =>
@@ -248,15 +141,16 @@ export default function SalesRequestDetailPage() {
       : null;
     updateSelection(lineId, {
       supplierId: sid,
-      unitCost: supplier ? String(supplier.landed_cost) : "",
+      unitCost: supplier ? String(Number(supplier.landed_cost)) : "",
     });
   };
 
-  /* --- computed totals --- */
+  /* ── computed totals ── */
 
   const totals = useMemo(() => {
     if (!detail) return { totalCost: 0, totalSales: 0, profit: 0 };
-    const useInvoiceTotals = detail.status === "CLOSED" && !!detail.linked_invoice_id;
+    const useInvoiceTotals =
+      detail.status === "CLOSED" && !!detail.linked_invoice_id;
     const markup = num(markupPercent);
     let totalCost = 0;
     let totalSales = 0;
@@ -264,18 +158,17 @@ export default function SalesRequestDetailPage() {
     for (const line of detail.lines) {
       const sel = lineSelections.find((s) => s.lineId === line.id);
       const unitCost = sel ? num(sel.unitCost) : 0;
-      const lineCost = unitCost * line.quantity;
-      totalCost += lineCost;
+      totalCost += unitCost * Number(line.quantity);
 
       let lineSalePrice: number;
       if (useInvoiceTotals && line.invoice_line_total != null) {
-        lineSalePrice = line.invoice_line_total;
+        lineSalePrice = Number(line.invoice_line_total);
       } else if (sel?.unitPriceOverride && num(sel.unitPriceOverride) > 0) {
-        lineSalePrice = num(sel.unitPriceOverride) * line.quantity;
+        lineSalePrice = num(sel.unitPriceOverride) * Number(line.quantity);
       } else if (unitCost > 0) {
-        lineSalePrice = unitCost * (1 + markup / 100) * line.quantity;
+        lineSalePrice = unitCost * (1 + markup / 100) * Number(line.quantity);
       } else {
-        lineSalePrice = line.unit_price * line.quantity;
+        lineSalePrice = Number(line.unit_price) * Number(line.quantity);
       }
       const discount = sel ? num(sel.discount) : 0;
       const taxRate = sel ? num(sel.taxRate) : 0;
@@ -284,7 +177,9 @@ export default function SalesRequestDetailPage() {
       totalSales += afterTax;
     }
 
-    const finalTotalSales = useInvoiceTotals ? detail.total_amount : totalSales;
+    const finalTotalSales = useInvoiceTotals
+      ? Number(detail.total_amount)
+      : totalSales;
 
     return {
       totalCost,
@@ -293,7 +188,34 @@ export default function SalesRequestDetailPage() {
     };
   }, [detail, lineSelections, markupPercent]);
 
-  /* --- generate invoice --- */
+  /* ── status transition ── */
+
+  const handleStatusTransition = async (
+    nextStatus: SalesRequestDetail["status"]
+  ) => {
+    if (!detail || !id || nextStatus === detail.status) return;
+    setStatusError("");
+    setStatusNotice("");
+    setStatusUpdating(true);
+    try {
+      await apiFetch(`/sales-requests/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ workflow_status: nextStatus }),
+      });
+      await refetch();
+      setStatusNotice(
+        `Workflow updated to ${nextStatus.replace(/_/g, " ")}.`
+      );
+    } catch (err) {
+      setStatusError(
+        (err as Error).message || "Unable to update status."
+      );
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  /* ── generate invoice ── */
 
   const handleGenerateInvoice = async () => {
     if (!detail || !id) return;
@@ -335,43 +257,17 @@ export default function SalesRequestDetailPage() {
         }
       );
       setGenerateResult(result);
-      // Reload detail to reflect CLOSED status and linked invoice
-      await loadDetail();
+      await refetch();
     } catch (err) {
-      setGenerateError((err as Error).message || "Failed to generate invoice.");
+      setGenerateError(
+        (err as Error).message || "Failed to generate invoice."
+      );
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleViewInvoice = () => {
-    if (!detail) return;
-    const invoiceIdentifier = detail.invoice_id ?? detail.invoice_number;
-    if (!invoiceIdentifier) return;
-    navigate(`/invoices/${invoiceIdentifier}`);
-  };
-  const handleStatusTransition = async (nextStatus: SalesRequestDetail["status"]) => {
-    if (!detail || !id || nextStatus === detail.status) return;
-    setStatusError("");
-    setStatusNotice("");
-    setStatusUpdating(true);
-    try {
-      const updated = await apiFetch<SalesRequestDetail>(`/sales-requests/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ workflow_status: nextStatus })
-      });
-      setDetail(updated);
-      setStatusDraft(updated.status);
-      setStatusNotice(`Workflow updated to ${updated.status.replace(/_/g, " ")}.`);
-    } catch (err) {
-      setStatusError((err as Error).message || "Unable to update status.");
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
-
-
-  /* --- render states --- */
+  /* ── render states ── */
 
   if (loading) {
     return (
@@ -381,32 +277,35 @@ export default function SalesRequestDetailPage() {
           <div className="app-skeleton h-8 w-64" />
           <div className="app-skeleton h-4 w-56" />
         </div>
-        <div className="grid gap-4 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="app-card p-5">
-              <div className="app-skeleton h-4 w-24" />
-              <div className="mt-4 app-skeleton h-6 w-32" />
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="app-card p-4">
+              <div className="app-skeleton h-4 w-20" />
+              <div className="mt-3 app-skeleton h-6 w-28" />
             </div>
           ))}
         </div>
+        <div className="app-skeleton h-64 rounded-xl" />
       </section>
     );
   }
 
-  if (!detail || error) {
+  if (!detail || fetchError) {
     return (
       <section className="space-y-6">
         <div className="app-card p-6">
-          <h1 className="text-xl font-semibold">Sales request not found</h1>
+          <h1 className="text-xl font-semibold">Sales order not found</h1>
           <p className="mt-2 text-sm text-muted">
-            {error || "Unable to load this sales request."}
+            {fetchError
+              ? (fetchError as Error).message
+              : "Unable to load this sales order."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
-            <button className="app-button" onClick={loadDetail}>
+            <button className="app-button" onClick={() => refetch()}>
               Retry
             </button>
             <Link className="app-button-ghost" to="/sales-requests">
-              Back to sales requests
+              Back to sales orders
             </Link>
           </div>
         </div>
@@ -414,12 +313,16 @@ export default function SalesRequestDetailPage() {
     );
   }
 
-  const isClosed = detail.status === "CLOSED";
-  const isTerminal = detail.status === "CLOSED" || detail.status === "LOST" || detail.status === "CANCELLED";
+  const isTerminal =
+    detail.status === "CLOSED" ||
+    detail.status === "LOST" ||
+    detail.status === "CANCELLED";
   const canGenerateInvoice = detail.status === "CONFIRMED";
   const hasLinkedInvoice = !!detail.linked_invoice_id;
 
-  const primaryTransitionCta: { label: string; target: SalesRequestDetail["status"] } | null =
+  const primaryTransitionCta:
+    | { label: string; target: SalesRequestDetail["status"] }
+    | null =
     detail.status === "NEW"
       ? { label: "Mark as Quoted", target: "QUOTED" }
       : detail.status === "QUOTED"
@@ -433,125 +336,134 @@ export default function SalesRequestDetailPage() {
               : null;
 
   return (
-    <section className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <nav className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            <Link to="/sales" className="hover:text-foreground">
-              Sales
-            </Link>{" "}
-            /{" "}
-            <Link to="/sales-requests" className="hover:text-foreground">
-              Sales Requests
-            </Link>{" "}
-            /{" "}
-            <span className="text-foreground">{detail.request_number}</span>
-          </nav>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold">{detail.request_number}</h1>
-            <span
-              className={`app-badge ${statusStyles[detail.status] ?? "border-border bg-secondary"}`}
-            >
+    <section className="space-y-6">
+      {/* Back link */}
+      <Link
+        to="/sales-requests"
+        className="inline-flex items-center gap-1 text-sm text-muted hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> Back to Sales Orders
+      </Link>
+
+      {/* Header Card */}
+      <div className="app-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <ShoppingCart className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl font-bold">
+                  {detail.request_number}
+                </h1>
+                <SalesOrderStatusBadge status={detail.status} size="md" />
+              </div>
+              <p className="text-sm text-muted">
+                {detail.customer_id ? (
+                  <Link
+                    to={`/sales/customers/${detail.customer_id}`}
+                    className="text-primary hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {detail.customer_name}
+                  </Link>
+                ) : (
+                  detail.customer_name ?? "Walk-in customer"
+                )}
+                {detail.requested_fulfillment_date &&
+                  ` \u00B7 Fulfillment: ${detail.requested_fulfillment_date}`}
+                {" \u00B7 Created: "}
+                {formatDate(detail.created_at)}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {(detail.status === "NEW" || detail.status === "QUOTED") &&
+              !hasLinkedInvoice && (
+                <button
+                  className="app-button-secondary"
+                  onClick={() =>
+                    navigate(`/sales-requests/${detail.id}/edit`)
+                  }
+                >
+                  Edit
+                </button>
+              )}
+          </div>
+        </div>
+
+        {/* Workflow controls */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/60 pt-4">
+          <select
+            className="app-select w-56"
+            value={statusDraft}
+            onChange={(e) =>
+              setStatusDraft(
+                e.target.value as SalesRequestDetail["status"]
+              )
+            }
+            disabled={
+              statusUpdating ||
+              isTerminal ||
+              detail.allowed_transitions.length === 0
+            }
+          >
+            <option value={detail.status}>
               {detail.status.replace(/_/g, " ")}
-            </span>
-          </div>
-          <p className="text-muted">
-            {detail.customer_name ?? "Walk-in customer"}
-            {detail.requested_fulfillment_date
-              ? ` \u00B7 Fulfillment: ${detail.requested_fulfillment_date}`
-              : ""}
-          </p>
+            </option>
+            {detail.allowed_transitions.map((st) => (
+              <option key={st} value={st}>
+                {st.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+          <button
+            className="app-button-secondary"
+            disabled={
+              statusUpdating ||
+              !statusDraft ||
+              statusDraft === detail.status
+            }
+            onClick={() =>
+              handleStatusTransition(
+                statusDraft as SalesRequestDetail["status"]
+              )
+            }
+          >
+            Update Status
+          </button>
+          {primaryTransitionCta &&
+            detail.allowed_transitions.includes(
+              primaryTransitionCta.target
+            ) && (
+              <button
+                className="app-button"
+                disabled={statusUpdating}
+                onClick={() =>
+                  handleStatusTransition(primaryTransitionCta.target)
+                }
+              >
+                {primaryTransitionCta.label}
+              </button>
+            )}
+          {statusUpdating && (
+            <span className="text-xs text-muted">Updating\u2026</span>
+          )}
         </div>
-        <div className="flex gap-2">
-          {(detail.status === "NEW" || detail.status === "QUOTED") && !hasLinkedInvoice ? (
-            <button className="app-button-secondary" type="button" onClick={() => navigate(`/sales-requests/${detail.id}/edit`)}>
-              Update
-            </button>
-          ) : null}
-          <Link className="app-button-ghost" to="/sales-requests">
-            <ArrowLeft className="h-4 w-4" /> Back
-          </Link>
-        </div>
+        {statusNotice && (
+          <p className="mt-2 text-sm text-success">{statusNotice}</p>
+        )}
+        {statusError && (
+          <p className="mt-2 text-sm text-danger">{statusError}</p>
+        )}
       </div>
 
-      {notice ? <section className="app-card p-4 text-sm text-success">{notice}</section> : null}
-
-      <section className="app-card p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-sm font-medium">Workflow status</label>
-            <select
-              className="app-select w-64"
-              value={statusDraft}
-              onChange={(event) => setStatusDraft(event.target.value as SalesRequestDetail["status"])}
-              disabled={statusUpdating || isTerminal || detail.allowed_transitions.length === 0}
-            >
-              <option value={detail.status}>{detail.status.replace(/_/g, " ")}</option>
-              {detail.allowed_transitions.map((status) => (
-                <option key={status} value={status}>
-                  {status.replace(/_/g, " ")}
-                </option>
-              ))}
-            </select>
-            <button
-              className="app-button-secondary"
-              type="button"
-              disabled={statusUpdating || !statusDraft || statusDraft === detail.status}
-              onClick={() => void handleStatusTransition(statusDraft as SalesRequestDetail["status"])}
-            >
-              Update Status
-            </button>
-            {statusUpdating ? <span className="text-xs text-muted">Updating…</span> : null}
-          </div>
-          {primaryTransitionCta && detail.allowed_transitions.includes(primaryTransitionCta.target) ? (
-            <button
-              className="app-button"
-              type="button"
-              disabled={statusUpdating}
-              onClick={() => void handleStatusTransition(primaryTransitionCta.target)}
-            >
-              {primaryTransitionCta.label}
-            </button>
-          ) : null}
-        </div>
-        {statusNotice ? <p className="text-sm text-success">{statusNotice}</p> : null}
-        {statusError ? <p className="text-sm text-danger">{statusError}</p> : null}
-      </section>
-
-      {/* Stat cards */}
-      <div className="grid gap-4 lg:grid-cols-4">
-        <div className="app-card p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            Requested Total
-          </p>
-          <p className="mt-3 text-2xl font-semibold tabular-nums">
-            {currency(detail.total_amount)}
-          </p>
-        </div>
-        <div className="app-card p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            Line Items
-          </p>
-          <p className="mt-3 text-2xl font-semibold">{detail.lines.length}</p>
-        </div>
-        <div className="app-card p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            Status
-          </p>
-          <p className="mt-3 text-2xl font-semibold">
-            {detail.status.replace(/_/g, " ")}
-          </p>
-        </div>
-        <div className="app-card p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            Customer
-          </p>
-          <p className="mt-3 text-lg font-semibold">
-            {detail.customer_name ?? "Walk-in"}
-          </p>
-        </div>
-      </div>
+      {notice && (
+        <section className="app-card p-4 text-sm text-success">
+          {notice}
+        </section>
+      )}
 
       {/* Notes */}
       {detail.notes && (
@@ -571,22 +483,16 @@ export default function SalesRequestDetailPage() {
                 <p className="font-semibold">Invoice generated</p>
                 <p className="text-sm text-muted">
                   {detail.linked_invoice_number}
+                  {detail.linked_invoice_status &&
+                    ` \u00B7 ${detail.linked_invoice_status.replace(/_/g, " ")}`}
                 </p>
-                {detail.linked_invoice_status && (
-                  <p className="mt-1 text-xs text-muted">
-                    Invoice status: {detail.linked_invoice_status.replace(/_/g, " ")}
-                    {detail.linked_invoice_shipped_at
-                      ? ` · Shipped ${formatDate(detail.linked_invoice_shipped_at)}`
-                      : ""}
-                  </p>
-                )}
               </div>
             </div>
             <button
               className="app-button"
-              type="button"
-              onClick={handleViewInvoice}
-              disabled={!detail.invoice_id && !detail.invoice_number}
+              onClick={() =>
+                navigate(`/invoices/${detail.invoice_id ?? detail.invoice_number}`)
+              }
             >
               <FileText className="h-4 w-4" /> View Invoice
             </button>
@@ -603,7 +509,7 @@ export default function SalesRequestDetailPage() {
                 <p className="font-semibold">Invoice created</p>
                 <p className="text-sm text-muted">
                   {generateResult.invoice_number} &mdash; Total:{" "}
-                  {currency(Number(generateResult.total))}
+                  {formatCurrency(Number(generateResult.total), true)}
                 </p>
               </div>
             </div>
@@ -617,339 +523,503 @@ export default function SalesRequestDetailPage() {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
-        <div className="space-y-6">
-      {/* Line items with inventory + supplier selection */}
-      <div className="app-card p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <ClipboardList className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold">Order lines</p>
-            <p className="text-xs text-muted">
-              Inventory availability and supplier pricing
-            </p>
-          </div>
-        </div>
+      {/* KPI Row */}
+      {detail.kpis && <SalesOrderKpiRow kpis={detail.kpis} />}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-widest text-muted">
-              <tr>
-                <th className="px-3 py-3">Item</th>
-                <th className="px-3 py-3">Qty</th>
-                <th className="px-3 py-3">Req. Price</th>
-                <th className="px-3 py-3">Inventory</th>
-                <th className="px-3 py-3">Supplier</th>
-                <th className="px-3 py-3">Landed Cost</th>
-                <th className="px-3 py-3">Sale Price</th>
-                <th className="px-3 py-3">MWB</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.lines.map((line) => {
-                const sel = lineSelections.find((s) => s.lineId === line.id);
-                const markup = num(markupPercent);
-                const unitCost = sel ? num(sel.unitCost) : 0;
-                let computedSalePrice: number;
-                if (isTerminal && hasLinkedInvoice && line.invoice_unit_price != null) {
-                  computedSalePrice = line.invoice_unit_price;
-                } else if (
-                  sel?.unitPriceOverride &&
-                  num(sel.unitPriceOverride) > 0
-                ) {
-                  computedSalePrice = num(sel.unitPriceOverride);
-                } else if (unitCost > 0) {
-                  computedSalePrice = unitCost * (1 + markup / 100);
-                } else {
-                  computedSalePrice = line.unit_price;
-                }
-
-                return (
-                  <tr key={line.id} className="border-t">
-                    <td className="px-3 py-3 font-medium">{line.item_name}</td>
-                    <td className="px-3 py-3 tabular-nums">{line.quantity}</td>
-                    <td className="px-3 py-3 tabular-nums">
-                      {currency(line.unit_price)}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="space-y-1">
-                        <AvailabilityBadge
-                          available={line.available_qty}
-                          needed={line.quantity}
-                        />
-                        <div className="text-xs text-muted">
-                          <Package className="mr-1 inline h-3 w-3" />
-                          On hand: {line.on_hand_qty} | Reserved:{" "}
-                          {line.reserved_qty}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      {line.supplier_options.length > 0 ? (
-                        <select
-                          className="app-select text-sm"
-                          value={sel?.supplierId ?? ""}
-                          onChange={(e) =>
-                            handleSupplierChange(line.id, e.target.value)
-                          }
-                          disabled={isTerminal}
-                        >
-                          <option value="">-- Select --</option>
-                          {line.supplier_options.map((so) => (
-                            <option
-                              key={so.supplier_id}
-                              value={so.supplier_id}
-                            >
-                              {so.supplier_name} ({currency(so.landed_cost)})
-                              {so.is_preferred ? " *" : ""}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="text-xs text-muted">
-                          No suppliers
-                        </span>
-                      )}
-                      {sel?.supplierId && (
-                        <div className="mt-1 text-xs text-muted">
-                          <Truck className="mr-1 inline h-3 w-3" />
-                          Lead:{" "}
-                          {line.supplier_options.find(
-                            (s) => s.supplier_id === sel.supplierId
-                          )?.lead_time_days ?? "\u2014"}{" "}
-                          days
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 tabular-nums">
-                      {sel?.unitCost ? currency(num(sel.unitCost)) : "\u2014"}
-                    </td>
-                    <td className="px-3 py-3">
-                      {!isTerminal ? (
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium tabular-nums">
-                            {currency(computedSalePrice)}
-                          </div>
-                          <input
-                            className="app-input w-24 text-xs"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="Override"
-                            value={sel?.unitPriceOverride ?? ""}
-                            onChange={(e) =>
-                              updateSelection(line.id, {
-                                unitPriceOverride: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      ) : (
-                        <span className="tabular-nums">
-                          {currency(computedSalePrice)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      {line.mwb_unit_price != null ? (
-                        <div className="space-y-1">
-                          <button
-                            type="button"
-                            className="text-xs font-medium tabular-nums text-primary underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:no-underline"
-                            onClick={() => {
-                              updateSelection(line.id, { unitPriceOverride: String(line.mwb_unit_price) });
-                            }}
-                            disabled={isTerminal}
-                            title={`Click to apply MWB price. Confidence: ${line.mwb_confidence ?? "—"}`}
-                          >
-                            {currency(line.mwb_unit_price)}
-                          </button>
-                          <span className={`ml-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                            line.mwb_confidence === "High"
-                              ? "bg-emerald-500/15 text-emerald-600"
-                              : line.mwb_confidence === "Medium"
-                                ? "bg-amber-500/15 text-amber-600"
-                                : "bg-red-500/15 text-red-600"
-                          }`}>
-                            {line.mwb_confidence ?? "?"}
-                          </span>
-                          {(() => {
-                            const uplift = line.mwb_unit_price! - computedSalePrice;
-                            if (Math.abs(uplift) < 0.01) return null;
-                            const pct = computedSalePrice > 0 ? ((uplift / computedSalePrice) * 100).toFixed(1) : "0.0";
-                            return (
-                              <div className={`text-[10px] ${uplift > 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                {uplift > 0 ? "+" : ""}{currency(uplift)} ({uplift > 0 ? "+" : ""}{pct}%)
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      {/* Tab Bar */}
+      <div className="flex gap-1 border-b border-border">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === t.key
+                ? "border-primary text-primary"
+                : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* Cost summary + markup */}
-      <div className="app-card p-6 space-y-4">
-          <p className="text-sm font-semibold">Cost & Pricing Summary</p>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1 text-sm">
-              <span className="font-medium text-muted">Markup %</span>
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="1"
-                value={markupPercent}
-                onChange={(e) => setMarkupPercent(e.target.value)}
-                disabled={isTerminal}
-              />
-            </label>
-          </div>
-          <div className="space-y-2 rounded-xl border bg-surface p-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted">Total Landed Cost</span>
-              <span className="font-semibold tabular-nums">
-                {currency(totals.totalCost)}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted">
-                Total Sales Price (with {markupPercent}% markup)
-              </span>
-              <span className="font-semibold tabular-nums">
-                {currency(totals.totalSales)}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm border-t pt-2">
-              <span className="text-muted">Profit</span>
-              <span
-                className={`font-semibold tabular-nums ${totals.profit >= 0 ? "text-success" : "text-danger"}`}
-              >
-                {currency(totals.profit)}
-                {totals.totalCost > 0 && (
-                  <span className="ml-1 text-xs text-muted">
-                    ({((totals.profit / totals.totalSales) * 100).toFixed(1)}%)
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
-        </div>
-        </div>
-
-        <aside className="space-y-6">
-          <SalesRequestTimeline timeline={detail.timeline} formatDate={formatDate} />
-          <CustomerInsightsPanel customerId={detail.customer_id} mode="full" />
-          <div className="app-card p-6 space-y-4">
-          {hasLinkedInvoice ? (
+      {/* Main layout: content + sidebar */}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
+        <div className="space-y-6">
+          {/* ── Overview Tab ── */}
+          {tab === "overview" && (
             <>
-              <p className="text-sm font-semibold">Invoice</p>
-              <div className="flex items-center gap-3 rounded-xl border bg-surface p-4">
-                <CheckCircle className="h-5 w-5 text-success" />
+              {/* Quick summary */}
+              <div className="app-card p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                    <ClipboardList className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Order Summary</p>
+                    <p className="text-xs text-muted">
+                      {detail.lines.length} line items \u00B7{" "}
+                      {formatCurrency(Number(detail.total_amount), true)} total
+                    </p>
+                  </div>
+                </div>
+
+                {/* Preview first 5 lines */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                      <tr>
+                        <th className="px-3 py-2">Item</th>
+                        <th className="px-3 py-2">Qty</th>
+                        <th className="px-3 py-2">Unit Price</th>
+                        <th className="px-3 py-2">Line Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.lines.slice(0, 5).map((line) => (
+                        <tr
+                          key={line.id}
+                          className="border-t border-border/60"
+                        >
+                          <td className="px-3 py-2 font-medium">
+                            {line.item_name}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {Number(line.quantity)}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {formatCurrency(Number(line.unit_price), true)}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums font-medium">
+                            {formatCurrency(Number(line.line_total), true)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {detail.lines.length > 5 && (
+                    <button
+                      className="mt-2 text-xs text-primary hover:underline"
+                      onClick={() => setTab("line-items")}
+                    >
+                      View all {detail.lines.length} line items \u2192
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Cost summary */}
+              <SalesOrderPricingSummary
+                totals={totals}
+                markupPercent={markupPercent}
+                onMarkupChange={setMarkupPercent}
+                isTerminal={isTerminal}
+              />
+            </>
+          )}
+
+          {/* ── Line Items Tab ── */}
+          {tab === "line-items" && (
+            <div className="app-card p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <ClipboardList className="h-5 w-5" />
+                </div>
                 <div>
-                  <p className="font-semibold">
-                    {detail.linked_invoice_number}
-                  </p>
+                  <p className="text-sm font-semibold">Order Lines</p>
                   <p className="text-xs text-muted">
-                    Invoice: {detail.linked_invoice_status?.replace(/_/g, " ") ?? "Created"}
-                    {detail.linked_invoice_shipped_at
-                      ? ` · Shipped ${formatDate(detail.linked_invoice_shipped_at)}`
-                      : ""}
+                    Inventory availability and supplier pricing
                   </p>
                 </div>
               </div>
-              <button
-                className="app-button w-full justify-center"
-                type="button"
-                onClick={handleViewInvoice}
-                disabled={!detail.invoice_id && !detail.invoice_number}
-              >
-                <FileText className="h-4 w-4" /> View Invoice
-              </button>
-            </>
-          ) : (
+              <SalesOrderLineItemsTable
+                lines={detail.lines}
+                lineSelections={lineSelections}
+                markupPercent={markupPercent}
+                isTerminal={isTerminal}
+                hasLinkedInvoice={hasLinkedInvoice}
+                onSupplierChange={handleSupplierChange}
+                onSelectionUpdate={updateSelection}
+              />
+            </div>
+          )}
+
+          {/* ── Pricing & Margins Tab ── */}
+          {tab === "pricing" && (
             <>
-              <p className="text-sm font-semibold">Generate Invoice</p>
-              <p className="text-xs text-muted">Invoice generation is available once request is CONFIRMED.</p>
-              {!detail.customer_id && (
-                <p className="text-sm text-warning">
-                  Walk-in customers require a linked customer record to generate
-                  an invoice.
-                </p>
-              )}
-              {generateError && (
-                <p className="text-sm text-danger">{generateError}</p>
-              )}
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium text-muted">Issue Date</span>
-                  <input
-                    className="app-input"
-                    type="date"
-                    value={invoiceForm.issue_date}
-                    onChange={(e) =>
-                      setInvoiceForm({
-                        ...invoiceForm,
-                        issue_date: e.target.value,
-                      })
-                    }
-                    disabled={!canGenerateInvoice}
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium text-muted">Due Date</span>
-                  <input
-                    className="app-input"
-                    type="date"
-                    value={invoiceForm.due_date}
-                    onChange={(e) =>
-                      setInvoiceForm({
-                        ...invoiceForm,
-                        due_date: e.target.value,
-                      })
-                    }
-                    disabled={!canGenerateInvoice}
-                  />
-                </label>
+              <SalesOrderPricingSummary
+                totals={totals}
+                markupPercent={markupPercent}
+                onMarkupChange={setMarkupPercent}
+                isTerminal={isTerminal}
+              />
+              {/* Per-line margin breakdown */}
+              <div className="app-card p-6 space-y-4">
+                <p className="text-sm font-semibold">Per-Line Margin Breakdown</p>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                      <tr>
+                        <th className="px-3 py-2">Item</th>
+                        <th className="px-3 py-2">Landed Cost</th>
+                        <th className="px-3 py-2">Sale Price</th>
+                        <th className="px-3 py-2">Qty</th>
+                        <th className="px-3 py-2">Line Cost</th>
+                        <th className="px-3 py-2">Line Revenue</th>
+                        <th className="px-3 py-2">Margin</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.lines.map((line) => {
+                        const sel = lineSelections.find(
+                          (s) => s.lineId === line.id
+                        );
+                        const unitCost = sel ? num(sel.unitCost) : 0;
+                        const markup = num(markupPercent);
+                        let salePrice: number;
+                        if (
+                          isTerminal &&
+                          hasLinkedInvoice &&
+                          line.invoice_unit_price != null
+                        ) {
+                          salePrice = Number(line.invoice_unit_price);
+                        } else if (
+                          sel?.unitPriceOverride &&
+                          num(sel.unitPriceOverride) > 0
+                        ) {
+                          salePrice = num(sel.unitPriceOverride);
+                        } else if (unitCost > 0) {
+                          salePrice = unitCost * (1 + markup / 100);
+                        } else {
+                          salePrice = Number(line.unit_price);
+                        }
+                        const qty = Number(line.quantity);
+                        const lineCost = unitCost * qty;
+                        const lineRev = salePrice * qty;
+                        const marginPct =
+                          lineRev > 0
+                            ? ((lineRev - lineCost) / lineRev) * 100
+                            : null;
+                        return (
+                          <tr
+                            key={line.id}
+                            className="border-t border-border/60"
+                          >
+                            <td className="px-3 py-2 font-medium">
+                              {line.item_name}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {unitCost > 0
+                                ? formatCurrency(unitCost, true)
+                                : "\u2014"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {formatCurrency(salePrice, true)}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{qty}</td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {unitCost > 0
+                                ? formatCurrency(lineCost, true)
+                                : "\u2014"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums font-medium">
+                              {formatCurrency(lineRev, true)}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {marginPct != null ? (
+                                <span
+                                  className={`font-semibold ${
+                                    marginPct >= 0
+                                      ? "text-emerald-600"
+                                      : "text-red-600"
+                                  }`}
+                                >
+                                  {marginPct.toFixed(1)}%
+                                </span>
+                              ) : (
+                                <span className="text-muted">{"\u2014"}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <input
-                className="app-input"
-                placeholder="Terms (e.g. Net 30)"
-                value={invoiceForm.terms}
-                onChange={(e) =>
-                  setInvoiceForm({ ...invoiceForm, terms: e.target.value })
-                }
-                disabled={!canGenerateInvoice}
-              />
-              <input
-                className="app-input"
-                placeholder="Notes"
-                value={invoiceForm.notes}
-                onChange={(e) =>
-                  setInvoiceForm({ ...invoiceForm, notes: e.target.value })
-                }
-                disabled={!canGenerateInvoice}
-              />
-              <button
-                className="app-button w-full justify-center"
-                onClick={handleGenerateInvoice}
-                disabled={generating || !canGenerateInvoice || !detail.customer_id}
-              >
-                <FileText className="h-4 w-4" />{" "}
-                {generating ? "Generating..." : "Generate Invoice"}
-              </button>
+
+              {/* MWB comparison */}
+              {detail.lines.some((l) => l.mwb_unit_price != null) && (
+                <div className="app-card p-6 space-y-4">
+                  <p className="text-sm font-semibold">
+                    MWB Price Comparison
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="text-left text-xs uppercase tracking-widest text-muted">
+                        <tr>
+                          <th className="px-3 py-2">Item</th>
+                          <th className="px-3 py-2">Quoted Price</th>
+                          <th className="px-3 py-2">MWB Price</th>
+                          <th className="px-3 py-2">Confidence</th>
+                          <th className="px-3 py-2">Difference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.lines
+                          .filter((l) => l.mwb_unit_price != null)
+                          .map((line) => {
+                            const diff =
+                              Number(line.mwb_unit_price!) -
+                              Number(line.unit_price);
+                            const pct =
+                              Number(line.unit_price) > 0
+                                ? (diff / Number(line.unit_price)) * 100
+                                : 0;
+                            return (
+                              <tr
+                                key={line.id}
+                                className="border-t border-border/60"
+                              >
+                                <td className="px-3 py-2 font-medium">
+                                  {line.item_name}
+                                </td>
+                                <td className="px-3 py-2 tabular-nums">
+                                  {formatCurrency(
+                                    Number(line.unit_price),
+                                    true
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 tabular-nums font-medium">
+                                  {formatCurrency(
+                                    Number(line.mwb_unit_price),
+                                    true
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span
+                                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                      line.mwb_confidence === "High"
+                                        ? "bg-emerald-500/15 text-emerald-600"
+                                        : line.mwb_confidence === "Medium"
+                                          ? "bg-amber-500/15 text-amber-600"
+                                          : "bg-red-500/15 text-red-600"
+                                    }`}
+                                  >
+                                    {line.mwb_confidence}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 tabular-nums">
+                                  <span
+                                    className={
+                                      diff > 0
+                                        ? "text-emerald-600"
+                                        : diff < 0
+                                          ? "text-red-600"
+                                          : "text-muted"
+                                    }
+                                  >
+                                    {diff > 0 ? "+" : ""}
+                                    {formatCurrency(diff, true)} (
+                                    {pct.toFixed(1)}%)
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           )}
+
+          {/* ── Fulfillment Tab ── */}
+          {tab === "fulfillment" && (
+            <SalesOrderFulfillmentCard
+              lines={detail.lines}
+              fulfillmentDate={detail.requested_fulfillment_date}
+              linkedInvoiceId={detail.linked_invoice_id}
+              linkedInvoiceNumber={detail.linked_invoice_number}
+              linkedInvoiceStatus={detail.linked_invoice_status}
+              linkedInvoiceShippedAt={detail.linked_invoice_shipped_at}
+              status={detail.status}
+            />
+          )}
+
+          {/* ── Activity Tab ── */}
+          {tab === "activity" && (
+            <SalesOrderActivityTimeline
+              timeline={detail.timeline}
+              formatDate={formatDate}
+            />
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <aside className="space-y-6">
+          {/* Timeline (compact, always visible) */}
+          {tab !== "activity" && (
+            <SalesOrderActivityTimeline
+              timeline={detail.timeline}
+              formatDate={formatDate}
+            />
+          )}
+
+          {/* Customer insights */}
+          <CustomerInsightsPanel
+            customerId={detail.customer_id}
+            mode="full"
+          />
+
+          {/* Customer's recent orders */}
+          {detail.customer_recent_orders &&
+            detail.customer_recent_orders.length > 0 && (
+              <div className="app-card p-5 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+                  Recent Orders from Customer
+                </p>
+                <div className="space-y-2">
+                  {detail.customer_recent_orders.map((o) => (
+                    <Link
+                      key={o.id}
+                      to={`/sales-requests/${o.id}`}
+                      className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2 text-sm hover:bg-secondary/60 transition-colors"
+                    >
+                      <div>
+                        <span className="font-medium text-primary">
+                          {o.request_number}
+                        </span>
+                        <SalesOrderStatusBadge
+                          status={o.status}
+                          size="sm"
+                        />
+                      </div>
+                      <span className="tabular-nums text-muted">
+                        {formatCurrency(Number(o.total_amount), true)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          {/* Invoice panel */}
+          <div className="app-card p-6 space-y-4">
+            {hasLinkedInvoice ? (
+              <>
+                <p className="text-sm font-semibold">Invoice</p>
+                <div className="flex items-center gap-3 rounded-xl border bg-surface p-4">
+                  <CheckCircle className="h-5 w-5 text-success" />
+                  <div>
+                    <p className="font-semibold">
+                      {detail.linked_invoice_number}
+                    </p>
+                    <p className="text-xs text-muted">
+                      Invoice:{" "}
+                      {detail.linked_invoice_status?.replace(/_/g, " ") ??
+                        "Created"}
+                      {detail.linked_invoice_shipped_at &&
+                        ` \u00B7 Shipped ${formatDate(detail.linked_invoice_shipped_at)}`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  className="app-button w-full justify-center"
+                  onClick={() =>
+                    navigate(
+                      `/invoices/${detail.invoice_id ?? detail.invoice_number}`
+                    )
+                  }
+                >
+                  <FileText className="h-4 w-4" /> View Invoice
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold">Generate Invoice</p>
+                <p className="text-xs text-muted">
+                  Available once request is CONFIRMED.
+                </p>
+                {!detail.customer_id && (
+                  <p className="text-sm text-warning">
+                    Walk-in customers require a linked customer record.
+                  </p>
+                )}
+                {generateError && (
+                  <p className="text-sm text-danger">{generateError}</p>
+                )}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-sm">
+                    <span className="font-medium text-muted">Issue Date</span>
+                    <input
+                      className="app-input"
+                      type="date"
+                      value={invoiceForm.issue_date}
+                      onChange={(e) =>
+                        setInvoiceForm({
+                          ...invoiceForm,
+                          issue_date: e.target.value,
+                        })
+                      }
+                      disabled={!canGenerateInvoice}
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm">
+                    <span className="font-medium text-muted">Due Date</span>
+                    <input
+                      className="app-input"
+                      type="date"
+                      value={invoiceForm.due_date}
+                      onChange={(e) =>
+                        setInvoiceForm({
+                          ...invoiceForm,
+                          due_date: e.target.value,
+                        })
+                      }
+                      disabled={!canGenerateInvoice}
+                    />
+                  </label>
+                </div>
+                <input
+                  className="app-input"
+                  placeholder="Terms (e.g. Net 30)"
+                  value={invoiceForm.terms}
+                  onChange={(e) =>
+                    setInvoiceForm({
+                      ...invoiceForm,
+                      terms: e.target.value,
+                    })
+                  }
+                  disabled={!canGenerateInvoice}
+                />
+                <input
+                  className="app-input"
+                  placeholder="Notes"
+                  value={invoiceForm.notes}
+                  onChange={(e) =>
+                    setInvoiceForm({
+                      ...invoiceForm,
+                      notes: e.target.value,
+                    })
+                  }
+                  disabled={!canGenerateInvoice}
+                />
+                <button
+                  className="app-button w-full justify-center"
+                  onClick={handleGenerateInvoice}
+                  disabled={
+                    generating ||
+                    !canGenerateInvoice ||
+                    !detail.customer_id
+                  }
+                >
+                  <FileText className="h-4 w-4" />{" "}
+                  {generating ? "Generating..." : "Generate Invoice"}
+                </button>
+              </>
+            )}
           </div>
         </aside>
       </div>

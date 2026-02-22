@@ -960,6 +960,429 @@ def get_customers_enriched(
     return result
 
 
+def _stock_status(on_hand: Decimal, reserved: Decimal, reorder: Decimal | None) -> str:
+    """Return stock status: in_stock, low_stock, out_of_stock, overstocked."""
+    available = on_hand - reserved
+    if available <= 0:
+        return "out_of_stock"
+    if reorder is not None and reorder > 0:
+        if available <= reorder:
+            return "low_stock"
+        if available > reorder * 5:
+            return "overstocked"
+    return "in_stock"
+
+
+# ── Item 360 ────────────────────────────────────────────────
+
+
+def get_item_360(db: Session, item_id: int) -> dict:
+    """Full Item-360 payload: detail, KPIs, sales trend, top customers, suppliers, movements."""
+    from app.models import Inventory, InventoryMovement, SupplierItem, Supplier
+
+    item = (
+        db.query(Item)
+        .options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
+        .filter(Item.id == item_id)
+        .first()
+    )
+    if not item:
+        raise ValueError("Item not found.")
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+    active_filter = (InvoiceLine.item_id == item_id, Invoice.status != "VOID")
+
+    # ── Inventory ──────────────────────────────────────────
+    inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
+    on_hand = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal(item.on_hand_qty or 0)
+    reserved = Decimal(item.reserved_qty or 0)
+    available = on_hand - reserved
+    inv_value = Decimal(inventory.total_value or 0) if inventory else Decimal(0)
+    reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
+
+    # ── Sales KPIs ─────────────────────────────────────────
+    total_revenue = Decimal(
+        db.query(func.coalesce(func.sum(InvoiceLine.line_total), 0))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter)
+        .scalar() or 0
+    )
+    ytd_revenue = Decimal(
+        db.query(func.coalesce(func.sum(InvoiceLine.line_total), 0))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter, Invoice.issue_date >= ytd_start)
+        .scalar() or 0
+    )
+    units_sold_total = Decimal(
+        db.query(func.coalesce(func.sum(InvoiceLine.quantity), 0))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter)
+        .scalar() or 0
+    )
+    units_sold_ytd = Decimal(
+        db.query(func.coalesce(func.sum(InvoiceLine.quantity), 0))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter, Invoice.issue_date >= ytd_start)
+        .scalar() or 0
+    )
+
+    avg_selling_price = None
+    if units_sold_total > 0:
+        avg_selling_price = total_revenue / units_sold_total
+
+    # Gross margin
+    margin_data = (
+        db.query(
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.landed_unit_cost * InvoiceLine.quantity), 0).label("cost"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(*active_filter, InvoiceLine.landed_unit_cost.isnot(None), InvoiceLine.landed_unit_cost > 0)
+        .one()
+    )
+    rev = Decimal(margin_data.revenue or 0)
+    cost = Decimal(margin_data.cost or 0)
+    gross_margin_percent = float((rev - cost) / rev * 100) if rev > 0 else None
+
+    unique_customers = (
+        db.query(func.count(func.distinct(Invoice.customer_id)))
+        .join(InvoiceLine, InvoiceLine.invoice_id == Invoice.id)
+        .filter(*active_filter)
+        .scalar() or 0
+    )
+    total_invoices = (
+        db.query(func.count(func.distinct(Invoice.id)))
+        .join(InvoiceLine, InvoiceLine.invoice_id == Invoice.id)
+        .filter(*active_filter)
+        .scalar() or 0
+    )
+
+    stock_status = _stock_status(on_hand, reserved, reorder)
+
+    kpis = {
+        "total_revenue": total_revenue,
+        "ytd_revenue": ytd_revenue,
+        "units_sold_ytd": units_sold_ytd,
+        "units_sold_total": units_sold_total,
+        "avg_selling_price": avg_selling_price,
+        "gross_margin_percent": gross_margin_percent,
+        "on_hand_qty": on_hand,
+        "reserved_qty": reserved,
+        "available_qty": available,
+        "inventory_value": inv_value,
+        "unique_customers": unique_customers,
+        "total_invoices": total_invoices,
+        "stock_status": stock_status,
+    }
+
+    # ── Sales trend (last 12 months) ───────────────────────
+    sales_trend: List[dict] = []
+    for i in range(11, -1, -1):
+        m_start = date(today.year, today.month, 1) - timedelta(days=i * 30)
+        m_start = date(m_start.year, m_start.month, 1)
+        if m_start.month == 12:
+            m_end = date(m_start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            m_end = date(m_start.year, m_start.month + 1, 1) - timedelta(days=1)
+        period_label = m_start.strftime("%Y-%m")
+
+        rev_val = Decimal(
+            db.query(func.coalesce(func.sum(InvoiceLine.line_total), 0))
+            .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+            .filter(*active_filter, Invoice.issue_date >= m_start, Invoice.issue_date <= m_end)
+            .scalar() or 0
+        )
+        units_val = Decimal(
+            db.query(func.coalesce(func.sum(InvoiceLine.quantity), 0))
+            .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+            .filter(*active_filter, Invoice.issue_date >= m_start, Invoice.issue_date <= m_end)
+            .scalar() or 0
+        )
+        sales_trend.append({"period": period_label, "revenue": rev_val, "units": units_val})
+
+    # ── Top customers ──────────────────────────────────────
+    top_customers_rows = (
+        db.query(
+            Invoice.customer_id,
+            Customer.name.label("customer_name"),
+            func.sum(InvoiceLine.quantity).label("units"),
+            func.sum(InvoiceLine.line_total).label("revenue"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .join(Customer, Customer.id == Invoice.customer_id)
+        .filter(*active_filter)
+        .group_by(Invoice.customer_id, Customer.name)
+        .order_by(func.sum(InvoiceLine.line_total).desc())
+        .limit(10)
+        .all()
+    )
+    top_customers = [
+        {
+            "customer_id": row.customer_id,
+            "customer_name": row.customer_name,
+            "units": Decimal(row.units or 0),
+            "revenue": Decimal(row.revenue or 0),
+        }
+        for row in top_customers_rows
+    ]
+
+    # ── Suppliers ──────────────────────────────────────────
+    suppliers_list = []
+    for link in item.supplier_items:
+        suppliers_list.append({
+            "supplier_id": link.supplier_id,
+            "supplier_name": link.supplier.name if link.supplier else "Unknown",
+            "supplier_cost": Decimal(link.supplier_cost or 0),
+            "freight_cost": Decimal(link.freight_cost or 0),
+            "tariff_cost": Decimal(link.tariff_cost or 0),
+            "landed_cost": link.landed_cost,
+            "is_preferred": link.is_preferred,
+            "lead_time_days": link.lead_time_days,
+            "min_order_qty": Decimal(link.min_order_qty or 0) if link.min_order_qty else None,
+        })
+
+    # ── Recent inventory movements ─────────────────────────
+    movements_rows = (
+        db.query(InventoryMovement)
+        .filter(InventoryMovement.item_id == item_id)
+        .order_by(InventoryMovement.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    recent_movements = [
+        {
+            "id": m.id,
+            "date": m.created_at,
+            "reason": m.reason,
+            "qty_delta": Decimal(m.qty_delta or 0),
+            "ref_type": m.ref_type,
+            "ref_id": m.ref_id,
+        }
+        for m in movements_rows
+    ]
+
+    # ── Item detail response ───────────────────────────────
+    item_detail = {
+        "id": item.id,
+        "sku": item.sku,
+        "name": item.name,
+        "description": item.description,
+        "unit_price": Decimal(item.unit_price or 0),
+        "income_account_id": item.income_account_id,
+        "is_active": item.is_active,
+        "created_at": item.created_at,
+        "preferred_supplier_id": item.preferred_supplier_id,
+        "preferred_supplier_name": item.preferred_supplier_name,
+        "preferred_landed_cost": item.preferred_landed_cost,
+        "on_hand_qty": on_hand,
+        "reserved_qty": reserved,
+        "reorder_point": item.reorder_point,
+    }
+
+    return {
+        "item": item_detail,
+        "kpis": kpis,
+        "sales_trend": sales_trend,
+        "top_customers": top_customers,
+        "suppliers": suppliers_list,
+        "recent_movements": recent_movements,
+    }
+
+
+def get_items_enriched(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    stock_status: Optional[str] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
+) -> List[dict]:
+    """Return enriched item list with inventory, revenue, margin data."""
+    from app.models import Inventory, SupplierItem, Supplier
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+
+    items_all = (
+        db.query(Item)
+        .options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
+        .all()
+    )
+
+    if search:
+        like = search.lower()
+        items_all = [i for i in items_all if like in (i.name or "").lower() or like in (i.sku or "").lower()]
+    if is_active is not None:
+        items_all = [i for i in items_all if i.is_active == is_active]
+
+    # Batch-fetch inventory data
+    item_ids = [i.id for i in items_all]
+    inv_map: dict = {}
+    if item_ids:
+        inv_rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+        inv_map = {row.item_id: row for row in inv_rows}
+
+    # Batch-fetch YTD revenue + units
+    ytd_data: dict = {}
+    if item_ids:
+        ytd_rows = (
+            db.query(
+                InvoiceLine.item_id,
+                func.sum(InvoiceLine.line_total).label("revenue"),
+                func.sum(InvoiceLine.quantity).label("units"),
+                func.count(func.distinct(Invoice.customer_id)).label("unique_cust"),
+            )
+            .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+            .filter(
+                InvoiceLine.item_id.in_(item_ids),
+                Invoice.status != "VOID",
+                Invoice.issue_date >= ytd_start,
+            )
+            .group_by(InvoiceLine.item_id)
+            .all()
+        )
+        for row in ytd_rows:
+            ytd_data[row.item_id] = {
+                "revenue": Decimal(row.revenue or 0),
+                "units": Decimal(row.units or 0),
+                "unique_cust": row.unique_cust or 0,
+            }
+
+    # Batch-fetch margin data
+    margin_data: dict = {}
+    if item_ids:
+        margin_rows = (
+            db.query(
+                InvoiceLine.item_id,
+                func.sum(InvoiceLine.line_total).label("revenue"),
+                func.sum(InvoiceLine.landed_unit_cost * InvoiceLine.quantity).label("cost"),
+            )
+            .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+            .filter(
+                InvoiceLine.item_id.in_(item_ids),
+                Invoice.status != "VOID",
+                Invoice.issue_date >= ytd_start,
+                InvoiceLine.landed_unit_cost.isnot(None),
+                InvoiceLine.landed_unit_cost > 0,
+            )
+            .group_by(InvoiceLine.item_id)
+            .all()
+        )
+        for row in margin_rows:
+            rev = Decimal(row.revenue or 0)
+            cst = Decimal(row.cost or 0)
+            margin_data[row.item_id] = float((rev - cst) / rev * 100) if rev > 0 else None
+
+    result = []
+    for item in items_all:
+        inv = inv_map.get(item.id)
+        on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
+        reserved = Decimal(item.reserved_qty or 0)
+        available = on_hand - reserved
+        inv_value = Decimal(inv.total_value or 0) if inv else Decimal(0)
+        reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
+        status = _stock_status(on_hand, reserved, reorder)
+
+        ytd = ytd_data.get(item.id, {"revenue": Decimal(0), "units": Decimal(0), "unique_cust": 0})
+        margin = margin_data.get(item.id)
+
+        pref_name = item.preferred_supplier_name
+        pref_cost = item.preferred_landed_cost
+
+        result.append({
+            "id": item.id,
+            "name": item.name,
+            "sku": item.sku,
+            "unit_price": Decimal(item.unit_price or 0),
+            "is_active": item.is_active,
+            "created_at": item.created_at,
+            "on_hand_qty": on_hand,
+            "available_qty": available,
+            "inventory_value": inv_value,
+            "total_revenue_ytd": ytd["revenue"],
+            "units_sold_ytd": ytd["units"],
+            "gross_margin_percent": margin,
+            "preferred_supplier_name": pref_name,
+            "preferred_landed_cost": pref_cost,
+            "stock_status": status,
+            "unique_customers": ytd["unique_cust"],
+        })
+
+    # Filter by stock status
+    if stock_status:
+        result = [r for r in result if r["stock_status"] == stock_status]
+
+    # Sorting
+    sort_key_map = {
+        "name": lambda r: (r["name"] or "").lower(),
+        "unit_price": lambda r: r["unit_price"],
+        "on_hand_qty": lambda r: r["on_hand_qty"],
+        "available_qty": lambda r: r["available_qty"],
+        "inventory_value": lambda r: r["inventory_value"],
+        "total_revenue_ytd": lambda r: r["total_revenue_ytd"],
+        "units_sold_ytd": lambda r: r["units_sold_ytd"],
+        "gross_margin_percent": lambda r: r["gross_margin_percent"] if r["gross_margin_percent"] is not None else -999,
+        "created_at": lambda r: r["created_at"],
+    }
+    key_fn = sort_key_map.get(sort_by, sort_key_map["name"])
+    result.sort(key=key_fn, reverse=(sort_dir == "desc"))
+
+    return result
+
+
+def get_items_summary(db: Session) -> dict:
+    """Aggregate KPIs for the items list header."""
+    from app.models import Inventory
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+
+    total = db.query(func.count(Item.id)).scalar() or 0
+    active = db.query(func.count(Item.id)).filter(Item.is_active == True).scalar() or 0
+
+    total_inv_value = Decimal(
+        db.query(func.coalesce(func.sum(Inventory.total_value), 0)).scalar() or 0
+    )
+    rev_ytd = Decimal(
+        db.query(func.coalesce(func.sum(InvoiceLine.line_total), 0))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(Invoice.status != "VOID", Invoice.issue_date >= ytd_start)
+        .scalar() or 0
+    )
+
+    # Count low/out of stock
+    all_items = db.query(Item).filter(Item.is_active == True).all()
+    inv_map = {}
+    item_ids = [i.id for i in all_items]
+    if item_ids:
+        rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+        inv_map = {r.item_id: r for r in rows}
+
+    low_stock = 0
+    out_of_stock = 0
+    for item in all_items:
+        inv = inv_map.get(item.id)
+        on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
+        reserved = Decimal(item.reserved_qty or 0)
+        reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
+        status = _stock_status(on_hand, reserved, reorder)
+        if status == "low_stock":
+            low_stock += 1
+        elif status == "out_of_stock":
+            out_of_stock += 1
+
+    return {
+        "total_items": total,
+        "active_items": active,
+        "total_inventory_value": total_inv_value,
+        "total_revenue_ytd": rev_ytd,
+        "low_stock_items": low_stock,
+        "out_of_stock_items": out_of_stock,
+    }
+
+
 def get_customers_summary(db: Session) -> dict:
     """Aggregate KPIs for the customer list header."""
     today = date.today()

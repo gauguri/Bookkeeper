@@ -319,3 +319,100 @@ class CustomersSummaryResponse(BaseModel):
     total_outstanding_ar: Decimal = Decimal("0")
     avg_days_to_pay: Optional[float] = None
     customers_at_risk: int = 0
+
+
+# ── Item 360 ────────────────────────────────────────────────
+
+
+class ItemSupplierInfo(BaseModel):
+    supplier_id: int
+    supplier_name: str
+    supplier_cost: Decimal = Decimal("0")
+    freight_cost: Decimal = Decimal("0")
+    tariff_cost: Decimal = Decimal("0")
+    landed_cost: Decimal = Decimal("0")
+    is_preferred: bool = False
+    lead_time_days: Optional[int] = None
+    min_order_qty: Optional[Decimal] = None
+
+
+class ItemKpis(BaseModel):
+    total_revenue: Decimal = Decimal("0")
+    ytd_revenue: Decimal = Decimal("0")
+    units_sold_ytd: Decimal = Decimal("0")
+    units_sold_total: Decimal = Decimal("0")
+    avg_selling_price: Optional[Decimal] = None
+    gross_margin_percent: Optional[float] = None
+    on_hand_qty: Decimal = Decimal("0")
+    reserved_qty: Decimal = Decimal("0")
+    available_qty: Decimal = Decimal("0")
+    inventory_value: Decimal = Decimal("0")
+    unique_customers: int = 0
+    total_invoices: int = 0
+    stock_status: str = "in_stock"  # in_stock, low_stock, out_of_stock, overstocked
+
+
+class ItemSalesTrendPoint(BaseModel):
+    period: str
+    revenue: Decimal = Decimal("0")
+    units: Decimal = Decimal("0")
+
+
+class ItemTopCustomer(BaseModel):
+    customer_id: int
+    customer_name: str
+    units: Decimal = Decimal("0")
+    revenue: Decimal = Decimal("0")
+
+
+class ItemMovement(BaseModel):
+    id: int
+    date: datetime
+    reason: str
+    qty_delta: Decimal
+    ref_type: Optional[str] = None
+    ref_id: Optional[int] = None
+
+
+class ItemDetailResponse(ItemResponse):
+    description: Optional[str] = None
+    on_hand_qty: Decimal = Decimal("0")
+    reserved_qty: Decimal = Decimal("0")
+    reorder_point: Optional[Decimal] = None
+
+
+class Item360Response(BaseModel):
+    item: ItemDetailResponse
+    kpis: ItemKpis
+    sales_trend: List[ItemSalesTrendPoint]
+    top_customers: List[ItemTopCustomer]
+    suppliers: List[ItemSupplierInfo]
+    recent_movements: List[ItemMovement]
+
+
+class ItemListEnriched(BaseModel):
+    id: int
+    name: str
+    sku: Optional[str] = None
+    unit_price: Decimal
+    is_active: bool = True
+    created_at: datetime
+    on_hand_qty: Decimal = Decimal("0")
+    available_qty: Decimal = Decimal("0")
+    inventory_value: Decimal = Decimal("0")
+    total_revenue_ytd: Decimal = Decimal("0")
+    units_sold_ytd: Decimal = Decimal("0")
+    gross_margin_percent: Optional[float] = None
+    preferred_supplier_name: Optional[str] = None
+    preferred_landed_cost: Optional[Decimal] = None
+    stock_status: str = "in_stock"
+    unique_customers: int = 0
+
+
+class ItemsSummaryResponse(BaseModel):
+    total_items: int = 0
+    active_items: int = 0
+    total_inventory_value: Decimal = Decimal("0")
+    total_revenue_ytd: Decimal = Decimal("0")
+    low_stock_items: int = 0
+    out_of_stock_items: int = 0

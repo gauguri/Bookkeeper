@@ -32,6 +32,9 @@ from app.sales.service import (
     get_customer_360,
     get_customers_enriched,
     get_customers_summary,
+    get_item_360,
+    get_items_enriched,
+    get_items_summary,
 )
 
 router = APIRouter(prefix="/api", tags=["sales"])
@@ -132,6 +135,42 @@ def get_customer_360_endpoint(
 ):
     try:
         return get_customer_360(db, customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/items-summary", response_model=schemas.ItemsSummaryResponse)
+def get_items_summary_endpoint(
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.ITEMS.value)),
+):
+    return get_items_summary(db)
+
+
+@router.get("/items-enriched", response_model=List[schemas.ItemListEnriched])
+def get_items_enriched_endpoint(
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    stock_status: Optional[str] = None,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.ITEMS.value)),
+):
+    return get_items_enriched(
+        db, search=search, is_active=is_active, stock_status=stock_status,
+        sort_by=sort_by, sort_dir=sort_dir,
+    )
+
+
+@router.get("/items/{item_id}/360", response_model=schemas.Item360Response)
+def get_item_360_endpoint(
+    item_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.ITEMS.value)),
+):
+    try:
+        return get_item_360(db, item_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

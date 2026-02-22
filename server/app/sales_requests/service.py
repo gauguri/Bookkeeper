@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.inventory.service import (
@@ -487,3 +488,448 @@ def generate_invoice_from_sales_request(
     update_sales_request_status(sales_request, "INVOICED")
 
     return invoice
+
+
+# ── Enriched / 360 service functions ─────────────────────────
+
+
+def get_sales_requests_summary(db: Session) -> dict:
+    """Aggregate pipeline KPIs for the sales-orders list page header."""
+    today = date.today()
+
+    total_orders = db.query(func.count(SalesRequest.id)).scalar() or 0
+
+    # Pipeline value: sum of line totals for non-terminal statuses
+    pipeline_value = (
+        db.query(func.coalesce(func.sum(SalesRequestLine.line_total), 0))
+        .join(SalesRequest, SalesRequest.id == SalesRequestLine.sales_request_id)
+        .filter(SalesRequest.status.notin_(list(SALES_REQUEST_TERMINAL_STATUSES)))
+        .scalar()
+    ) or Decimal("0")
+
+    # Terminal counts for conversion rate
+    closed = db.query(func.count(SalesRequest.id)).filter(SalesRequest.status == "CLOSED").scalar() or 0
+    lost = db.query(func.count(SalesRequest.id)).filter(SalesRequest.status == "LOST").scalar() or 0
+    cancelled = db.query(func.count(SalesRequest.id)).filter(SalesRequest.status == "CANCELLED").scalar() or 0
+    terminal_total = closed + lost + cancelled
+    conversion_rate = round((closed / terminal_total) * 100, 1) if terminal_total > 0 else None
+
+    # Average deal size (across all orders that have line items)
+    sr_totals = (
+        db.query(func.sum(SalesRequestLine.line_total))
+        .group_by(SalesRequestLine.sales_request_id)
+        .all()
+    )
+    if sr_totals:
+        deal_values = [Decimal(row[0] or 0) for row in sr_totals]
+        avg_deal_size = sum(deal_values) / len(deal_values) if deal_values else None
+    else:
+        avg_deal_size = None
+
+    # Overdue: past fulfillment date and non-terminal
+    overdue = (
+        db.query(func.count(SalesRequest.id))
+        .filter(
+            SalesRequest.requested_fulfillment_date < today,
+            SalesRequest.requested_fulfillment_date.isnot(None),
+            SalesRequest.status.notin_(list(SALES_REQUEST_TERMINAL_STATUSES)),
+        )
+        .scalar()
+    ) or 0
+
+    # Average cycle time: avg days from created_at to CLOSED transition
+    closed_srs = (
+        db.query(SalesRequest.id, SalesRequest.created_at)
+        .filter(SalesRequest.status == "CLOSED")
+        .all()
+    )
+    cycle_times: list[float] = []
+    for sr_id, created_at in closed_srs:
+        closed_event = (
+            db.query(AuditEvent.created_at)
+            .filter(
+                AuditEvent.entity_type == "sales_request",
+                AuditEvent.entity_id == sr_id,
+                AuditEvent.action == "STATUS_TRANSITION",
+                AuditEvent.event_metadata.like("%->CLOSED"),
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .first()
+        )
+        if closed_event and created_at:
+            delta = (closed_event[0] - created_at).total_seconds() / 86400
+            cycle_times.append(delta)
+    avg_cycle_time_days = round(sum(cycle_times) / len(cycle_times), 1) if cycle_times else None
+
+    # Orders by status
+    status_rows = (
+        db.query(SalesRequest.status, func.count(SalesRequest.id))
+        .group_by(SalesRequest.status)
+        .all()
+    )
+    orders_by_status = {row[0]: row[1] for row in status_rows}
+
+    return {
+        "total_orders": total_orders,
+        "pipeline_value": Decimal(str(pipeline_value)),
+        "conversion_rate": conversion_rate,
+        "avg_deal_size": avg_deal_size,
+        "overdue_orders": overdue,
+        "avg_cycle_time_days": avg_cycle_time_days,
+        "orders_by_status": orders_by_status,
+    }
+
+
+def get_sales_requests_view_summary(db: Session, view: str) -> dict:
+    """Compute view-specific KPIs for the Salesforce-style list page tabs."""
+    today = date.today()
+
+    if view == "active_pipeline":
+        active_statuses = ["NEW", "QUOTED", "CONFIRMED"]
+        orders = (
+            db.query(SalesRequest)
+            .options(selectinload(SalesRequest.lines))
+            .filter(SalesRequest.status.in_(active_statuses))
+            .all()
+        )
+        pipeline_value = Decimal("0")
+        total_days = 0
+        stage_counts: dict[str, int] = {s: 0 for s in active_statuses}
+        for sr in orders:
+            sr_total = sum(Decimal(str(line.line_total or 0)) for line in sr.lines)
+            pipeline_value += sr_total
+            total_days += (today - sr.created_at.date()).days if sr.created_at else 0
+            if sr.status in stage_counts:
+                stage_counts[sr.status] += 1
+
+        count = len(orders)
+        return {
+            "pipeline_value": pipeline_value,
+            "avg_deal_size": pipeline_value / count if count > 0 else None,
+            "orders_by_stage": stage_counts,
+            "avg_days_open": round(total_days / count, 1) if count > 0 else None,
+            "order_count": count,
+        }
+
+    elif view == "fulfillment":
+        fulfillment_statuses = ["INVOICED", "SHIPPED"]
+        orders = (
+            db.query(SalesRequest)
+            .filter(SalesRequest.status.in_(fulfillment_statuses))
+            .all()
+        )
+        to_ship = sum(1 for o in orders if o.status == "INVOICED")
+        overdue = sum(
+            1 for o in orders
+            if o.requested_fulfillment_date and o.requested_fulfillment_date < today
+        )
+        return {
+            "order_count": len(orders),
+            "orders_to_ship": to_ship,
+            "overdue_shipments": overdue,
+        }
+
+    elif view == "closed":
+        closed_orders = (
+            db.query(SalesRequest)
+            .options(selectinload(SalesRequest.lines))
+            .filter(SalesRequest.status == "CLOSED")
+            .all()
+        )
+        total_value = Decimal("0")
+        for sr in closed_orders:
+            total_value += sum(Decimal(str(line.line_total or 0)) for line in sr.lines)
+
+        closed_count = len(closed_orders)
+        lost = db.query(func.count(SalesRequest.id)).filter(SalesRequest.status == "LOST").scalar() or 0
+        cancelled = db.query(func.count(SalesRequest.id)).filter(SalesRequest.status == "CANCELLED").scalar() or 0
+        terminal_total = closed_count + lost + cancelled
+        conversion_rate = round((closed_count / terminal_total) * 100, 1) if terminal_total > 0 else None
+
+        # Avg cycle time for closed orders
+        cycle_times: list[float] = []
+        for sr in closed_orders:
+            closed_event = (
+                db.query(AuditEvent.created_at)
+                .filter(
+                    AuditEvent.entity_type == "sales_request",
+                    AuditEvent.entity_id == sr.id,
+                    AuditEvent.action == "STATUS_TRANSITION",
+                    AuditEvent.event_metadata.like("%->%CLOSED%"),
+                )
+                .order_by(AuditEvent.created_at.desc())
+                .first()
+            )
+            if closed_event and sr.created_at:
+                delta = (closed_event[0] - sr.created_at).total_seconds() / 86400
+                cycle_times.append(delta)
+
+        avg_cycle = round(sum(cycle_times) / len(cycle_times), 1) if cycle_times else None
+
+        return {
+            "order_count": closed_count,
+            "total_closed_value": total_value,
+            "avg_cycle_time_days": avg_cycle,
+            "conversion_rate": conversion_rate,
+        }
+
+    else:
+        # "all" or "needs_attention" — return the full summary
+        return get_sales_requests_summary(db)
+
+
+def get_sales_requests_enriched(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    status_filter: Optional[List[str]] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    needs_attention: bool = False,
+    limit: int = 25,
+    offset: int = 0,
+) -> dict:
+    """Return enriched sales request list with computed fields."""
+    today = date.today()
+
+    # Base query: SR + aggregated line info
+    query = (
+        db.query(
+            SalesRequest,
+            func.count(SalesRequestLine.id).label("line_count"),
+            func.coalesce(func.sum(SalesRequestLine.line_total), 0).label("total_amount"),
+        )
+        .outerjoin(SalesRequestLine, SalesRequestLine.sales_request_id == SalesRequest.id)
+        .group_by(SalesRequest.id)
+    )
+
+    # Filters
+    if search:
+        like = f"%{search.lower()}%"
+        query = query.filter(
+            func.lower(SalesRequest.request_number).like(like)
+            | func.lower(SalesRequest.customer_name).like(like)
+        )
+    if status_filter:
+        query = query.filter(SalesRequest.status.in_(status_filter))
+    if needs_attention:
+        # Override: non-terminal orders that are overdue OR open > 14 days
+        query = query.filter(
+            SalesRequest.status.notin_(list(SALES_REQUEST_TERMINAL_STATUSES))
+        )
+        today_val = date.today()
+        fourteen_days_ago = today_val - timedelta(days=14)
+        from sqlalchemy import or_, and_
+        query = query.filter(
+            or_(
+                and_(
+                    SalesRequest.requested_fulfillment_date.isnot(None),
+                    SalesRequest.requested_fulfillment_date < today_val,
+                ),
+                func.date(SalesRequest.created_at) <= fourteen_days_ago,
+            )
+        )
+    if date_from:
+        query = query.filter(func.date(SalesRequest.created_at) >= date_from)
+    if date_to:
+        query = query.filter(func.date(SalesRequest.created_at) <= date_to)
+
+    # Sorting
+    sort_map = {
+        "created_at": SalesRequest.created_at,
+        "request_number": SalesRequest.request_number,
+        "customer_name": SalesRequest.customer_name,
+        "status": SalesRequest.status,
+        "updated_at": SalesRequest.updated_at,
+    }
+    sort_col = sort_map.get(sort_by)
+    if sort_col is not None:
+        query = query.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+    elif sort_by == "total_amount":
+        from sqlalchemy import literal_column
+        query = query.order_by(
+            literal_column("total_amount").desc()
+            if sort_dir == "desc"
+            else literal_column("total_amount").asc()
+        )
+    else:
+        query = query.order_by(SalesRequest.created_at.desc())
+
+    # Get total count BEFORE applying limit/offset
+    total_count = query.count()
+
+    # Apply pagination
+    query = query.offset(offset).limit(limit)
+
+    rows = query.all()
+
+    # Batch fetch: linked invoices (subquery)
+    sr_ids = [row[0].id for row in rows]
+    linked_invoice_ids: set[int] = set()
+    if sr_ids:
+        invoice_rows = (
+            db.query(Invoice.sales_request_id)
+            .filter(Invoice.sales_request_id.in_(sr_ids))
+            .all()
+        )
+        linked_invoice_ids = {row[0] for row in invoice_rows}
+
+    # Batch fetch: user names
+    user_ids = {row[0].created_by_user_id for row in rows if row[0].created_by_user_id}
+    user_name_map: dict[int, str] = {}
+    if user_ids:
+        user_rows = db.query(User.id, User.email).filter(User.id.in_(user_ids)).all()
+        user_name_map = {uid: email for uid, email in user_rows}
+
+    # Batch fetch: preferred supplier costs per item for margin estimation
+    # Note: SupplierItem.landed_cost is a @property, not a column.
+    # We compute it as supplier_cost + freight_cost + tariff_cost in SQL.
+    all_item_ids: set[int] = set()
+    for row in rows:
+        sr = row[0]
+        for line in sr.lines:
+            all_item_ids.add(line.item_id)
+    preferred_cost_map: dict[int, Decimal] = {}
+    if all_item_ids:
+        pref_rows = (
+            db.query(
+                SupplierItem.item_id,
+                (
+                    func.coalesce(SupplierItem.supplier_cost, 0)
+                    + func.coalesce(SupplierItem.freight_cost, 0)
+                    + func.coalesce(SupplierItem.tariff_cost, 0)
+                ).label("landed_cost"),
+            )
+            .filter(SupplierItem.item_id.in_(all_item_ids), SupplierItem.is_preferred.is_(True))
+            .all()
+        )
+        for item_id, landed_cost in pref_rows:
+            preferred_cost_map[item_id] = Decimal(str(landed_cost or 0))
+
+    result = []
+    for row in rows:
+        sr = row[0]
+        line_count = row[1] or 0
+        total_amount = Decimal(str(row[2] or 0))
+
+        days_open = (today - sr.created_at.date()).days if sr.created_at else 0
+
+        # Fulfillment urgency
+        urgency = "none"
+        if sr.requested_fulfillment_date and sr.status not in SALES_REQUEST_TERMINAL_STATUSES:
+            delta = (sr.requested_fulfillment_date - today).days
+            if delta < 0:
+                urgency = "overdue"
+            elif delta <= 3:
+                urgency = "due_soon"
+            else:
+                urgency = "normal"
+
+        # Estimated margin from preferred supplier costs
+        estimated_margin_pct = None
+        if total_amount > 0:
+            total_cost = Decimal("0")
+            has_cost_data = False
+            for line in sr.lines:
+                cost = preferred_cost_map.get(line.item_id)
+                if cost is not None:
+                    total_cost += cost * Decimal(str(line.quantity or 0))
+                    has_cost_data = True
+            if has_cost_data and total_cost > 0:
+                margin = total_amount - total_cost
+                estimated_margin_pct = round(float((margin / total_amount) * 100), 1)
+
+        result.append({
+            "id": sr.id,
+            "request_number": sr.request_number,
+            "customer_id": sr.customer_id,
+            "customer_name": sr.customer_name,
+            "status": sr.status,
+            "created_at": sr.created_at,
+            "updated_at": sr.updated_at,
+            "requested_fulfillment_date": sr.requested_fulfillment_date,
+            "total_amount": total_amount,
+            "line_count": line_count,
+            "days_open": days_open,
+            "created_by_user_id": sr.created_by_user_id,
+            "created_by_name": user_name_map.get(sr.created_by_user_id),
+            "has_linked_invoice": sr.id in linked_invoice_ids,
+            "fulfillment_urgency": urgency,
+            "estimated_margin_percent": estimated_margin_pct,
+            "notes": sr.notes,
+        })
+
+    return {
+        "items": result,
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_sales_request_360(db: Session, sales_request_id: int) -> Optional[dict]:
+    """Full 360 view: existing detail + KPIs + customer recent orders."""
+    base = get_sales_request_detail(db, sales_request_id)
+    if not base:
+        return None
+
+    sr = base["sales_request"]
+    today = date.today()
+
+    # Compute KPIs
+    total_amount = Decimal(str(base["display_total_amount"]))
+    line_count = len(sr.lines)
+    avg_line_value = (total_amount / line_count) if line_count > 0 else None
+    days_open = (today - sr.created_at.date()).days if sr.created_at else 0
+
+    fulfillment_remaining = None
+    if sr.requested_fulfillment_date:
+        fulfillment_remaining = (sr.requested_fulfillment_date - today).days
+
+    # Estimated margin from preferred supplier landed costs
+    total_cost = Decimal("0")
+    has_cost_data = False
+    for eline in base["enriched_lines"]:
+        preferred = next((s for s in eline["supplier_options"] if s.get("is_preferred")), None)
+        if preferred:
+            total_cost += Decimal(str(preferred["landed_cost"])) * Decimal(str(eline["quantity"]))
+            has_cost_data = True
+
+    margin_amount = (total_amount - total_cost) if has_cost_data and total_cost > 0 else None
+    margin_pct = round(float((margin_amount / total_amount) * 100), 1) if margin_amount is not None and total_amount > 0 else None
+
+    kpis = {
+        "total_amount": total_amount,
+        "line_count": line_count,
+        "avg_line_value": avg_line_value,
+        "estimated_margin_percent": margin_pct,
+        "estimated_margin_amount": margin_amount,
+        "days_open": days_open,
+        "fulfillment_days_remaining": fulfillment_remaining,
+    }
+
+    # Customer's recent orders (last 5, excluding current)
+    customer_recent_orders: list[dict] = []
+    if sr.customer_id:
+        recent = (
+            db.query(SalesRequest)
+            .options(selectinload(SalesRequest.lines))
+            .filter(SalesRequest.customer_id == sr.customer_id, SalesRequest.id != sr.id)
+            .order_by(SalesRequest.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        for o in recent:
+            customer_recent_orders.append({
+                "id": o.id,
+                "request_number": o.request_number,
+                "status": o.status,
+                "total_amount": calculate_sales_request_total(o),
+                "created_at": o.created_at,
+            })
+
+    base["kpis"] = kpis
+    base["customer_recent_orders"] = customer_recent_orders
+    return base

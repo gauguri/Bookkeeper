@@ -32,6 +32,7 @@ import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
+import ItemProfilePage from "./pages/ItemProfilePage";
 import AnalyticsDashboard from "./pages/analytics/AnalyticsDashboard";
 import FinancialHealth from "./pages/analytics/FinancialHealth";
 import CashFlow from "./pages/analytics/CashFlow";
@@ -169,6 +170,7 @@ export default function App() {
             <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
             <Route path="/sales/customers/:customerId" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomerProfilePage /></ProtectedRoute>} />
             <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />
+            <Route path="/sales/items/:itemId" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemProfilePage /></ProtectedRoute>} />
             <Route path="/sales-requests" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestsPage /></ProtectedRoute>} />
             <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestDetailPage /></ProtectedRoute>} />
             <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestEditPage /></ProtectedRoute>} />

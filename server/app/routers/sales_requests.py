@@ -10,7 +10,7 @@ from app.db import get_db
 from app.inventory.service import SOURCE_SALES_REQUEST
 from app.module_keys import ModuleKey
 from app.pricing.mwb import compute_mwb_price, serialize_explanation
-from app.models import AuditEvent, SalesRequest, SalesRequestLine
+from app.models import AuditEvent, Invoice, SalesRequest, SalesRequestLine
 from app.sales_requests import schemas
 from app.sales_requests.service import (
     InventoryQuantityExceededError,
@@ -20,6 +20,10 @@ from app.sales_requests.service import (
     generate_invoice_from_sales_request,
     get_allowed_sales_request_status_transitions,
     get_sales_request_detail,
+    get_sales_request_360,
+    get_sales_requests_enriched,
+    get_sales_requests_summary,
+    get_sales_requests_view_summary,
     update_open_sales_request,
     update_sales_request_status,
     _sync_sales_request_reservations,
@@ -117,6 +121,60 @@ def _load_status_timeline_events(db: Session, sales_request_id: int) -> dict[str
     return events
 
 
+# ── Enriched / 360 endpoints (MUST be before /{sales_request_id} routes) ──
+
+
+@router.get("/summary", response_model=schemas.SalesRequestsSummaryResponse)
+def get_sales_requests_summary_endpoint(db: Session = Depends(get_db)):
+    """Aggregate pipeline KPIs for the list page header."""
+    return get_sales_requests_summary(db)
+
+
+@router.get("/summary/{view}")
+def get_sales_requests_view_summary_endpoint(view: str, db: Session = Depends(get_db)):
+    """View-specific KPIs for the Salesforce-style list page tabs."""
+    allowed_views = {"active_pipeline", "fulfillment", "closed", "all", "needs_attention"}
+    if view not in allowed_views:
+        raise HTTPException(status_code=400, detail=f"Invalid view: {view}")
+    return get_sales_requests_view_summary(db, view)
+
+
+@router.get("/enriched", response_model=schemas.PaginatedSalesRequestList)
+def get_sales_requests_enriched_endpoint(
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    needs_attention: bool = False,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Enriched list with computed fields, search, filters, sorting, and pagination."""
+    from datetime import date as date_cls
+
+    status_list = [s.strip() for s in status.split(",") if s.strip()] if status else None
+    df = date_cls.fromisoformat(date_from) if date_from else None
+    dt = date_cls.fromisoformat(date_to) if date_to else None
+    return get_sales_requests_enriched(
+        db,
+        search=search,
+        status_filter=status_list,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        date_from=df,
+        date_to=dt,
+        needs_attention=needs_attention,
+        limit=limit,
+        offset=offset,
+    )
+
+
+# ── Original list endpoint ──
+
+
 @router.get("", response_model=List[schemas.SalesRequestResponse])
 def list_sales_requests(
     status_filter: Optional[schemas.SalesRequestStatus] = Query(None, alias="status"),
@@ -169,6 +227,44 @@ def get_sales_request(sales_request_id: int, db: Session = Depends(get_db)):
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
     return _to_response(sales_request)
+
+
+@router.get("/{sales_request_id}/360", response_model=schemas.SalesRequest360Response)
+def get_sales_request_360_endpoint(sales_request_id: int, db: Session = Depends(get_db)):
+    """Full 360 view: detail + KPIs + customer's recent orders."""
+    result = get_sales_request_360(db, sales_request_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sales request not found.")
+    sr = result["sales_request"]
+    return schemas.SalesRequest360Response(
+        id=sr.id,
+        request_number=sr.request_number,
+        customer_id=sr.customer_id,
+        customer_name=sr.customer_name,
+        status=sr.status,
+        created_at=sr.created_at,
+        updated_at=sr.updated_at,
+        created_by_user_id=sr.created_by_user_id,
+        notes=sr.notes,
+        requested_fulfillment_date=sr.requested_fulfillment_date,
+        total_amount=Decimal(str(result["display_total_amount"])),
+        lines=result["enriched_lines"],
+        linked_invoice_id=result["linked_invoice_id"],
+        linked_invoice_number=result["linked_invoice_number"],
+        invoice_id=result["linked_invoice_id"],
+        invoice_number=result["linked_invoice_number"],
+        linked_invoice_status=result["linked_invoice_status"],
+        linked_invoice_shipped_at=result["linked_invoice_shipped_at"],
+        allowed_transitions=get_allowed_sales_request_status_transitions(sr),
+        timeline=_build_timeline(
+            sr,
+            result["linked_invoice_status"],
+            result["linked_invoice_shipped_at"],
+            timeline_events=_load_status_timeline_events(db, sr.id),
+        ),
+        kpis=result["kpis"],
+        customer_recent_orders=result["customer_recent_orders"],
+    )
 
 
 @router.get("/{sales_request_id}/detail", response_model=schemas.SalesRequestDetailResponse)
@@ -236,6 +332,7 @@ def generate_invoice_endpoint(
     sales_request_id: int,
     payload: schemas.GenerateInvoiceFromSRRequest,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     sales_request = (
         db.query(SalesRequest)
@@ -245,10 +342,25 @@ def generate_invoice_endpoint(
     )
     if not sales_request:
         raise HTTPException(status_code=404, detail="Sales request not found.")
+
+    previous_status = sales_request.status
+
     try:
         invoice = generate_invoice_from_sales_request(db, sales_request, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Record the CONFIRMED → INVOICED transition and sync inventory reservations
+    # (generate_invoice_from_sales_request sets status to INVOICED internally)
+    _sync_sales_request_reservations(db, sales_request)
+    record_sales_request_status_transition(
+        db,
+        sales_request=sales_request,
+        from_status=previous_status,
+        to_status="INVOICED",
+        user_id=getattr(current_user, "id", None),
+    )
+
     db.commit()
     db.refresh(invoice)
     return {
@@ -279,34 +391,44 @@ def patch_sales_request(
     # When transitioning CONFIRMED → INVOICED, auto-generate the invoice
     # so the sales request is properly linked to a real invoice record.
     if previous_status == "CONFIRMED" and next_status == "INVOICED":
-        if not sales_request.customer_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot generate invoice for a walk-in customer without a linked customer record.",
-            )
-        today = datetime.utcnow().date()
-        auto_payload = {
-            "issue_date": today.isoformat(),
-            "due_date": (today + timedelta(days=30)).isoformat(),
-            "notes": None,
-            "terms": "Net 30",
-            "markup_percent": 0,
-            "line_selections": [
-                {
-                    "sales_request_line_id": line.id,
-                    "supplier_id": None,
-                    "unit_cost": None,
-                    "unit_price": float(line.unit_price),
-                    "discount": 0,
-                    "tax_rate": 0,
-                }
-                for line in sales_request.lines
-            ],
-        }
-        try:
-            generate_invoice_from_sales_request(db, sales_request, auto_payload)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+        # Check if an invoice was already generated (e.g., via the sidebar form)
+        existing_invoice = (
+            db.query(Invoice)
+            .filter(Invoice.sales_request_id == sales_request.id)
+            .first()
+        )
+        if existing_invoice:
+            # Invoice already exists – just update the status without re-generating
+            update_sales_request_status(sales_request, next_status)
+        else:
+            if not sales_request.customer_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot generate invoice for a walk-in customer without a linked customer record.",
+                )
+            today = datetime.utcnow().date()
+            auto_payload = {
+                "issue_date": today.isoformat(),
+                "due_date": (today + timedelta(days=30)).isoformat(),
+                "notes": None,
+                "terms": "Net 30",
+                "markup_percent": 0,
+                "line_selections": [
+                    {
+                        "sales_request_line_id": line.id,
+                        "supplier_id": None,
+                        "unit_cost": None,
+                        "unit_price": float(line.unit_price),
+                        "discount": 0,
+                        "tax_rate": 0,
+                    }
+                    for line in sales_request.lines
+                ],
+            }
+            try:
+                generate_invoice_from_sales_request(db, sales_request, auto_payload)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
     else:
         update_sales_request_status(sales_request, next_status)
 

@@ -219,3 +219,74 @@ class ApplyMWBResponse(BaseModel):
     confidence_score: float = 0.0
     explanation: dict
     computed_at: datetime
+
+
+# ── Enriched / 360 schemas ──────────────────────────────────
+
+
+class SalesRequestsSummaryResponse(BaseModel):
+    """Aggregate pipeline KPIs for the list-page header."""
+    total_orders: int = 0
+    pipeline_value: Decimal = Decimal("0")
+    conversion_rate: Optional[float] = None
+    avg_deal_size: Optional[Decimal] = None
+    overdue_orders: int = 0
+    avg_cycle_time_days: Optional[float] = None
+    orders_by_status: dict = Field(default_factory=dict)
+
+
+class SalesRequestListEnriched(BaseModel):
+    """Single row in the enriched sales-order list."""
+    id: int
+    request_number: str
+    customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    status: SalesRequestStatus
+    created_at: datetime
+    updated_at: datetime
+    requested_fulfillment_date: Optional[date] = None
+    total_amount: Decimal = Decimal("0")
+    line_count: int = 0
+    days_open: int = 0
+    created_by_user_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    has_linked_invoice: bool = False
+    fulfillment_urgency: str = "none"
+    estimated_margin_percent: Optional[float] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedSalesRequestList(BaseModel):
+    """Paginated response wrapper for the enriched sales-order list."""
+    items: List[SalesRequestListEnriched]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class SalesRequestKpis(BaseModel):
+    """Computed KPIs for the 360 detail header."""
+    total_amount: Decimal = Decimal("0")
+    line_count: int = 0
+    avg_line_value: Optional[Decimal] = None
+    estimated_margin_percent: Optional[float] = None
+    estimated_margin_amount: Optional[Decimal] = None
+    days_open: int = 0
+    fulfillment_days_remaining: Optional[int] = None
+
+
+class CustomerRecentOrder(BaseModel):
+    """Lightweight summary of another order from the same customer."""
+    id: int
+    request_number: str
+    status: SalesRequestStatus
+    total_amount: Decimal = Decimal("0")
+    created_at: datetime
+
+
+class SalesRequest360Response(SalesRequestDetailResponse):
+    """Full 360 view — extends the detail response with KPIs + related orders."""
+    kpis: SalesRequestKpis = Field(default_factory=SalesRequestKpis)
+    customer_recent_orders: List[CustomerRecentOrder] = Field(default_factory=list)

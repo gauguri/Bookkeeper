@@ -245,3 +245,77 @@ class CustomerInsightsResponse(BaseModel):
     outstanding_ar: DecimalValue
     average_days_to_pay: Optional[float] = None
     last_invoices: List[CustomerInsightInvoiceSummary]
+
+
+# ── Customer 360 ────────────────────────────────────────────────
+
+
+class CustomerActivityItem(BaseModel):
+    id: str
+    type: str  # invoice_created, invoice_sent, invoice_paid, payment_received, note_added, reminder_sent
+    title: str
+    description: str
+    amount: Optional[Decimal] = None
+    reference: Optional[str] = None
+    date: datetime
+    icon: str  # frontend icon hint: invoice, payment, note, reminder, shipped
+
+
+class CustomerRevenueTrendPoint(BaseModel):
+    period: str
+    revenue: Decimal = Decimal("0")
+    payments: Decimal = Decimal("0")
+
+
+class CustomerAgingBuckets(BaseModel):
+    current: Decimal = Decimal("0")
+    days_1_30: Decimal = Decimal("0")
+    days_31_60: Decimal = Decimal("0")
+    days_61_90: Decimal = Decimal("0")
+    days_90_plus: Decimal = Decimal("0")
+
+
+class CustomerKpis(BaseModel):
+    lifetime_revenue: Decimal = Decimal("0")
+    ytd_revenue: Decimal = Decimal("0")
+    outstanding_ar: Decimal = Decimal("0")
+    avg_days_to_pay: Optional[float] = None
+    gross_margin_percent: Optional[float] = None
+    total_invoices: int = 0
+    total_payments: int = 0
+    overdue_amount: Decimal = Decimal("0")
+    payment_score: str = "good"  # good, average, slow, at-risk
+
+
+class Customer360Response(BaseModel):
+    customer: CustomerResponse
+    kpis: CustomerKpis
+    aging: CustomerAgingBuckets
+    revenue_trend: List[CustomerRevenueTrendPoint]
+    recent_activity: List[CustomerActivityItem]
+    top_items: List[dict]  # {item_name, quantity, revenue}
+
+
+class CustomerListItem(BaseModel):
+    id: int
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    tier: str = "STANDARD"
+    is_active: bool = True
+    created_at: datetime
+    total_revenue: Decimal = Decimal("0")
+    outstanding_ar: Decimal = Decimal("0")
+    invoice_count: int = 0
+    last_invoice_date: Optional[date] = None
+    avg_days_to_pay: Optional[float] = None
+    payment_score: str = "good"
+
+
+class CustomersSummaryResponse(BaseModel):
+    total_customers: int = 0
+    active_customers: int = 0
+    total_revenue_ytd: Decimal = Decimal("0")
+    total_outstanding_ar: Decimal = Decimal("0")
+    avg_days_to_pay: Optional[float] = None
+    customers_at_risk: int = 0

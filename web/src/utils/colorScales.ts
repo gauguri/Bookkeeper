@@ -2,29 +2,20 @@
  * Threshold-based color functions and chart palettes.
  */
 
+import { CHART_PALETTE, NEUTRALS, PL_NEGATIVE, PL_POSITIVE } from "../theme/chartPalette";
+
 // Shared P&L / finance palette
 export const PL_PALETTE = {
-  positive: "#3b82f6",
-  negative: "#dc2626",
-  neutralAxis: "#6b7280",
-  neutralGrid: "#e5e7eb",
+  positive: PL_POSITIVE,
+  negative: PL_NEGATIVE,
+  neutralAxis: NEUTRALS.axis,
+  neutralGrid: NEUTRALS.grid,
   hoverPositive: "#2563eb",
   hoverNegative: "#b91c1c",
 } as const;
 
 // Finance-oriented palette
-export const CHART_COLORS = [
-  PL_PALETTE.positive, // blue
-  "#8b5cf6", // violet
-  "#ec4899", // pink
-  "#f97316", // orange
-  "#14b8a6", // teal
-  "#f59e0b", // amber
-  "#6366f1", // indigo
-  "#10b981", // emerald
-  "#ef4444", // red
-  "#06b6d4", // cyan
-];
+export const CHART_COLORS = [...CHART_PALETTE.categorical];
 
 export const COLOR = {
   primary: "#1e3a5f",

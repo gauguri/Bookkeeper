@@ -78,3 +78,21 @@ Sample CSVs:
 cd server
 pytest
 ```
+
+## Sales Management Module (MVP+ skeleton)
+- **Primary UI route:** `/sales/management`
+- **Legacy sales requests remain active:** `/sales-requests`
+- **Core backend endpoints:**
+  - `GET/POST /api/sales/accounts`
+  - `POST /api/sales/contacts`
+  - `GET/POST /api/sales/opportunities`
+  - `GET/POST /api/sales/quotes`
+  - `POST /api/sales/quotes/{quote_id}/convert-to-order`
+  - `GET/POST /api/sales/orders`
+  - `POST /api/sales/orders/{order_id}/status`
+  - `GET/POST /api/sales/activities`
+  - `GET /api/sales/pricebooks`
+  - `GET /api/sales/reports/summary`
+  - `POST /api/sales/sales-requests/{sales_request_id}/convert-to-opportunity`
+
+The command center includes KPI cards, stage summary, quick actions, URL-driven list views (search/saved view/sort/pagination/density/column toggle), and placeholders for activities/reports expansion.

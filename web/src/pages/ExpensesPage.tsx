@@ -37,11 +37,13 @@ export default function ExpensesPage() {
   const pageSize = Number(searchParams.get("pageSize") ?? "10");
 
   const setParam = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (!value) next.delete(key);
-    else next.set(key, value);
-    if (key !== "page") next.set("page", "1");
-    setSearchParams(next, { replace: true });
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (!value) next.delete(key);
+      else next.set(key, value);
+      if (key !== "page") next.set("page", "1");
+      return next;
+    }, { replace: true });
   };
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export default function ExpensesPage() {
   const load = async () => {
     try {
       setIsLoading(true);
-      const [accountData, entryData] = await Promise.all([apiFetch<Account[]>("/chart-of-accounts"), listJournalEntries<Entry[]>("limit=250")]);
+      const [accountData, entryData] = await Promise.all([apiFetch<Account[]>("/chart-of-accounts"), listJournalEntries<Entry[]>("limit=200")]);
       setAccounts(accountData);
       setEntries(entryData);
       setError("");

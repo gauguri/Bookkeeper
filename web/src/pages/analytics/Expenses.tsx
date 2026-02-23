@@ -5,15 +5,9 @@ import KpiTile from "../../components/analytics/KpiTile";
 import DistributionChart from "../../components/analytics/DistributionChart";
 import DashboardFilter from "../../components/analytics/DashboardFilter";
 import { formatCompact } from "../../utils/formatters";
+import { CHART_PALETTE } from "../../theme/chartPalette";
 
-const EXPENSES_DISTRIBUTION_COLORS = [
-  "var(--pl-positive)",
-  "color-mix(in srgb, var(--pl-positive) 86%, #1e293b)",
-  "color-mix(in srgb, var(--pl-positive) 72%, #334155)",
-  "color-mix(in srgb, var(--pl-positive) 60%, #475569)",
-  "color-mix(in srgb, var(--pl-positive) 48%, #64748b)",
-  "color-mix(in srgb, var(--pl-positive) 36%, #94a3b8)",
-];
+const EXPENSES_DISTRIBUTION_COLORS = [...CHART_PALETTE.monotone];
 
 export default function Expenses() {
   const [period, setPeriod] = useState("ytd");

@@ -25,6 +25,7 @@ import ReportsPage from "./pages/ReportsPage";
 import ARAgingPage from "./pages/ARAgingPage";
 import CashForecastPage from "./pages/CashForecastPage";
 import SalesLanding from "./pages/SalesLanding";
+import SalesManagementPage from "./pages/SalesManagementPage";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
 import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
@@ -61,6 +62,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Balance Sheet", to: "/analytics/balance-sheet", icon: FileText, moduleKey: MODULES.REPORTS },
   ]},
   { title: "Sales", items: [
+    { label: "Command Center", to: "/sales/management", icon: LayoutGrid, moduleKey: MODULES.SALES_REQUESTS },
     { label: "Customers", to: MODULE_ROUTE_MAP[MODULES.CUSTOMERS], icon: Users, moduleKey: MODULES.CUSTOMERS },
     { label: "Items", to: MODULE_ROUTE_MAP[MODULES.ITEMS], icon: ClipboardList, moduleKey: MODULES.ITEMS },
     { label: "Sales Requests", to: MODULE_ROUTE_MAP[MODULES.SALES_REQUESTS], icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
@@ -169,6 +171,7 @@ export default function App() {
           <Route path="*" element={<Layout><Routes>
             <Route path="/" element={<Navigate to="/analytics" replace />} />
             <Route path="/sales" element={<Navigate to="/analytics" replace />} />
+            <Route path="/sales/management" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesManagementPage /></ProtectedRoute>} />
             <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
             <Route path="/sales/customers/:customerId" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomerProfilePage /></ProtectedRoute>} />
             <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />

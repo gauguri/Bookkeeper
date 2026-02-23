@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Eye, EyeOff, Loader2, LockKeyhole, Mail } from "lucide-react";
 import { APP_NAME } from "../../branding";
 
@@ -24,7 +24,6 @@ export function LoginCard({
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  const emailInvalid = useMemo(() => email.length > 0 && !email.includes("@"), [email]);
 
   return (
     <section className="bedrock-login-panel relative w-full max-w-md rounded-2xl border p-6 sm:p-8" aria-label="Login panel">
@@ -39,15 +38,15 @@ export function LoginCard({
           <div className="relative">
             <Mail aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             <input
-              aria-invalid={emailInvalid}
-              autoComplete="email"
+              aria-invalid={Boolean(error)}
+              autoComplete="username"
               className="bedrock-input"
               id="login-email"
               name="email"
               onChange={(e) => onEmailChange(e.target.value)}
-              placeholder="name@company.com"
+              placeholder="Enter username"
               required
-              type="email"
+              type="text"
               value={email}
             />
           </div>

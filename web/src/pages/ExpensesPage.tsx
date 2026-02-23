@@ -1,75 +1,79 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { createJournalEntry, listJournalEntries, apiFetch } from "../api";
+import ExpensesRail from "../components/expenses/ExpensesRail";
+import ExpensesHeaderBar from "../components/expenses/ExpensesHeaderBar";
+import ExpensesCharts from "../components/expenses/ExpensesCharts";
+import ExpensesTable from "../components/expenses/ExpensesTable";
+import ExpenseDetailsDrawer from "../components/expenses/ExpenseDetailsDrawer";
+import { Account, DateRange, Density, Entry } from "../components/expenses/types";
+import "../styles/bedrockSurface.css";
 
-type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE" | "COGS" | "OTHER";
-
-type Account = {
-  id: number;
-  code?: string | null;
-  name: string;
-  type: AccountType;
-  is_active: boolean;
-};
-
-type Entry = {
-  id: number;
-  date: string;
-  memo?: string | null;
-  amount: number;
-  source_type: string;
-  debit_account_id: number;
-  credit_account_id: number;
-  debit_account: string;
-  credit_account: string;
-  debit_account_code?: string | null;
-  credit_account_code?: string | null;
-  debit_account_type?: AccountType | null;
-  credit_account_type?: AccountType | null;
-};
+const defaultColumns = { date: true, memo: true, debit: true, credit: true, amount: true, source: true };
 
 export default function ExpensesPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [view, setView] = useState<"all" | "expense">("all");
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [openEntry, setOpenEntry] = useState<Entry | null>(null);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [columns, setColumns] = useState(defaultColumns);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [memo, setMemo] = useState("");
   const [expenseAccountId, setExpenseAccountId] = useState("");
   const [fundingAccountId, setFundingAccountId] = useState("");
   const [amount, setAmount] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchDraft, setSearchDraft] = useState(searchParams.get("q") ?? "");
+
+  const search = searchParams.get("q") ?? "";
+  const view = searchParams.get("view") ?? "all";
+  const dateRange = (searchParams.get("range") as DateRange) ?? "mtd";
+  const density = (searchParams.get("density") as Density) ?? "comfortable";
+  const page = Number(searchParams.get("page") ?? "1");
+  const pageSize = Number(searchParams.get("pageSize") ?? "10");
+
+  const setParam = (key: string, value: string) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (!value) next.delete(key);
+      else next.set(key, value);
+      if (key !== "page") next.set("page", "1");
+      return next;
+    }, { replace: true });
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setParam("q", searchDraft), 320);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
 
   const load = async () => {
     try {
-      const [accountData, entryData] = await Promise.all([apiFetch<Account[]>("/chart-of-accounts"), listJournalEntries<Entry[]>("limit=100")]);
+      setIsLoading(true);
+      const [accountData, entryData] = await Promise.all([apiFetch<Account[]>("/chart-of-accounts"), listJournalEntries<Entry[]>("limit=200")]);
       setAccounts(accountData);
       setEntries(entryData);
       setError("");
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   const expenseAccounts = useMemo(() => accounts.filter((account) => account.type === "EXPENSE" && account.is_active), [accounts]);
-  const fundingAccounts = useMemo(
-    () => accounts.filter((account) => ["ASSET", "LIABILITY"].includes(account.type) && account.is_active),
-    [accounts]
-  );
+  const fundingAccounts = useMemo(() => accounts.filter((account) => ["ASSET", "LIABILITY"].includes(account.type) && account.is_active), [accounts]);
 
   useEffect(() => {
     if (!isModalOpen) return;
-    if (!expenseAccountId && expenseAccounts.length > 0) {
-      setExpenseAccountId(String(expenseAccounts[0].id));
-    }
-    if (!fundingAccountId && fundingAccounts.length > 0) {
-      const cashAccount = fundingAccounts.find((account) => account.name.toLowerCase().includes("cash"));
-      setFundingAccountId(String((cashAccount ?? fundingAccounts[0]).id));
-    }
+    if (!expenseAccountId && expenseAccounts.length > 0) setExpenseAccountId(String(expenseAccounts[0].id));
+    if (!fundingAccountId && fundingAccounts.length > 0) setFundingAccountId(String((fundingAccounts.find((a) => a.name.toLowerCase().includes("cash")) ?? fundingAccounts[0]).id));
   }, [isModalOpen, expenseAccountId, fundingAccountId, expenseAccounts, fundingAccounts]);
 
   const resetModal = () => {
@@ -87,7 +91,6 @@ export default function ExpensesPage() {
       setError("Please complete all fields with a valid amount.");
       return;
     }
-
     try {
       await createJournalEntry({
         date,
@@ -106,153 +109,131 @@ export default function ExpensesPage() {
   };
 
   const filteredEntries = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return entries.filter((entry) => {
-      const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
-      if (view === "expense" && !isExpenseEntry) {
-        return false;
-      }
-      if (!needle) {
-        return true;
-      }
-      const haystack = [
-        entry.memo ?? "",
-        entry.debit_account,
-        entry.credit_account,
-        entry.debit_account_code ?? "",
-        entry.credit_account_code ?? ""
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(needle);
-    });
-  }, [entries, search, view]);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-  const formatAccountLabel = (name: string, code?: string | null) => (code ? `${name} (${code})` : name);
+    const matchesDateRange = (entryDate: string) => {
+      const value = new Date(entryDate);
+      if (dateRange === "qtd") return value >= startOfQuarter;
+      if (dateRange === "ytd") return value >= startOfYear;
+      return value >= startOfMonth;
+    };
+
+    return entries.filter((entry) => {
+      if (!matchesDateRange(entry.date)) return false;
+      const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
+      if (view === "manual" && entry.source_type !== "MANUAL") return false;
+      if (view === "purchase" && entry.source_type !== "PURCHASE_ORDER") return false;
+      if (view === "unreviewed" && entry.memo) return false;
+      if (view === "all" && !isExpenseEntry) return false;
+
+      if (!search.trim()) return true;
+      const needle = search.toLowerCase();
+      return [entry.memo ?? "", entry.debit_account, entry.credit_account, entry.source_type].join(" ").toLowerCase().includes(needle);
+    });
+  }, [entries, search, view, dateRange]);
+
+  const handleQuickAction = (action: "new" | "export" | "import") => {
+    if (action === "new") setIsModalOpen(true);
+    if (action === "export") {
+      const rows = filteredEntries.map((item) => `${item.date},${JSON.stringify(item.memo || "")},${item.amount},${item.source_type}`).join("\n");
+      const blob = new Blob([`date,memo,amount,source\n${rows}`], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "expenses-export.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+    if (action === "import") setError("Import is not yet available in this module.");
+  };
 
   return (
-    <section className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Expenses</h1>
-          <p className="text-muted">Record and review accounting entries.</p>
-        </div>
-        <button className="app-button" onClick={() => setIsModalOpen(true)}>New expense</button>
-      </header>
+    <section className="bedrock-expenses-shell min-h-[80vh] p-3 sm:p-4 lg:p-5">
+      <div className="relative z-10 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+        <ExpensesRail
+          entries={entries}
+          currentView={view}
+          onViewChange={(next) => setParam("view", next)}
+          onQuickAction={handleQuickAction}
+          onApplyFilter={(filter) => {
+            if (filter === "advanced") setShowAdvancedFilters((value) => !value);
+            if (filter === "manual") setParam("view", "manual");
+            if (filter === "mtd") setParam("range", "mtd");
+            if (filter === "qtd") setParam("range", "qtd");
+          }}
+        />
 
-      {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
+        <main className="space-y-4">
 
-      <div className="app-card space-y-4 p-6">
-        <div className="grid gap-3 md:grid-cols-[1fr,220px]">
-          <input
-            className="app-input"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search memo, payee, or account"
+          <div className="bedrock-surface rounded-2xl p-3 lg:hidden">
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--bedrock-muted)]">Expenses command center</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button className="app-button !bg-[var(--bedrock-accent)]" onClick={() => handleQuickAction("new")}>New expense</button>
+              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => setParam("view", "all")}>All entries</button>
+              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => setShowAdvancedFilters((v) => !v)}>Advanced filters</button>
+            </div>
+          </div>
+
+          <ExpensesHeaderBar
+            search={searchDraft}
+            dateRange={dateRange}
+            density={density}
+            onSearch={setSearchDraft}
+            onDateRange={(next) => setParam("range", next)}
+            onDensity={(next) => setParam("density", next)}
+            onToggleColumns={() => setColumns((current) => ({ ...current, memo: !current.memo }))}
           />
-          <label className="text-sm text-muted">
-            View
-            <select className="app-input mt-1" value={view} onChange={(event) => setView(event.target.value as "all" | "expense")}>
-              <option value="all">All entries</option>
-              <option value="expense">Expense entries only</option>
-            </select>
-          </label>
-        </div>
 
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="min-w-full text-sm">
-            <thead className="border-b border-border bg-surface text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Memo/Payee</th>
-                <th className="px-3 py-2 text-left">Debit account</th>
-                <th className="px-3 py-2 text-left">Credit account</th>
-                <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-left">Tags</th>
-                <th className="px-3 py-2 text-left">Source</th>
-                <th className="px-3 py-2 text-left">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-muted" colSpan={8}>No entries yet. Create your first expense.</td>
-                </tr>
-              ) : filteredEntries.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-8 text-center text-muted" colSpan={8}>
-                    No expense entries yet. Switch to All entries or create an expense.
-                  </td>
-                </tr>
-              ) : (
-                filteredEntries.map((entry) => {
-                  const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
-                  return (
-                    <tr key={entry.id} className="border-t border-border/70">
-                      <td className="px-3 py-2">{entry.date}</td>
-                      <td className="px-3 py-2">{entry.memo || "—"}</td>
-                      <td className="px-3 py-2">{formatAccountLabel(entry.debit_account, entry.debit_account_code)}</td>
-                      <td className="px-3 py-2">{formatAccountLabel(entry.credit_account, entry.credit_account_code)}</td>
-                      <td className="px-3 py-2 text-right">${Number(entry.amount).toFixed(2)}</td>
-                      <td className="px-3 py-2">
-                        {isExpenseEntry ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">Expense</span> : "—"}
-                      </td>
-                      <td className="px-3 py-2">{entry.source_type === "PURCHASE_ORDER" ? "Purchase Order" : "Manual"}</td>
-                      <td className="px-3 py-2">View</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+          {showAdvancedFilters ? <div className="bedrock-surface rounded-xl p-3 text-sm">Advanced filters coming next: source, account, amount ranges.</div> : null}
+          {error ? <div className="rounded-xl border border-[var(--bedrock-danger)]/45 bg-[var(--bedrock-danger)]/15 px-4 py-3 text-sm">{error}</div> : null}
+
+          <ExpensesCharts
+            entries={filteredEntries}
+            loading={isLoading}
+            onFilter={(type, value) => {
+              if (type === "source") setParam("view", value.startsWith("Manual") ? "manual" : "purchase");
+              else setSearchDraft(value);
+            }}
+          />
+
+          {selectedRows.length > 0 ? (
+            <div className="bedrock-surface flex items-center justify-between rounded-xl px-3 py-2 text-sm">
+              <span>{selectedRows.length} selected</span>
+              <div className="flex gap-2"><button className="app-button-secondary">Export selected</button><button className="app-button-secondary">Tag selected</button></div>
+            </div>
+          ) : null}
+
+          <ExpensesTable
+            entries={filteredEntries}
+            density={density}
+            page={page}
+            pageSize={pageSize}
+            onPage={(next) => setParam("page", String(next))}
+            onPageSize={(next) => setParam("pageSize", String(next))}
+            visibleColumns={columns}
+            selected={selectedRows}
+            onSelect={(id, checked) => setSelectedRows((rows) => checked ? [...rows, id] : rows.filter((rowId) => rowId !== id))}
+            onSelectAll={(checked) => setSelectedRows(checked ? filteredEntries.map((row) => row.id) : [])}
+            onOpenDetails={setOpenEntry}
+          />
+        </main>
       </div>
+
+      <ExpenseDetailsDrawer entry={openEntry} onClose={() => setOpenEntry(null)} />
 
       {isModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
           <div className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-soft">
             <h2 className="text-xl font-semibold">New expense</h2>
-            <label className="block text-sm text-muted">
-              Date
-              <input className="app-input mt-1" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            </label>
-            <label className="block text-sm text-muted">
-              Payee / Memo
-              <input className="app-input mt-1" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Who or what is this expense for?" />
-            </label>
-            <label className="block text-sm text-muted">
-              Expense account
-              <select className="app-input mt-1" value={expenseAccountId} onChange={(event) => setExpenseAccountId(event.target.value)}>
-                <option value="">Select expense account</option>
-                {expenseAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>{account.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-muted">
-              Funding account
-              <select className="app-input mt-1" value={fundingAccountId} onChange={(event) => setFundingAccountId(event.target.value)}>
-                <option value="">Select funding account</option>
-                {fundingAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>{account.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm text-muted">
-              Amount
-              <input
-                className="app-input mt-1"
-                type="number"
-                min="0"
-                step="0.01"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-              />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button className="app-button-secondary" onClick={resetModal}>Cancel</button>
-              <button className="app-button" onClick={saveExpense}>Save</button>
-            </div>
+            <label className="block text-sm text-muted">Date<input className="app-input mt-1" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+            <label className="block text-sm text-muted">Payee / Memo<input className="app-input mt-1" value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Who or what is this expense for?" /></label>
+            <label className="block text-sm text-muted">Expense account<select className="app-input mt-1" value={expenseAccountId} onChange={(event) => setExpenseAccountId(event.target.value)}><option value="">Select expense account</option>{expenseAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+            <label className="block text-sm text-muted">Funding account<select className="app-input mt-1" value={fundingAccountId} onChange={(event) => setFundingAccountId(event.target.value)}><option value="">Select funding account</option>{fundingAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+            <label className="block text-sm text-muted">Amount<input className="app-input mt-1" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+            <div className="flex justify-end gap-2"><button className="app-button-secondary" onClick={resetModal}>Cancel</button><button className="app-button" onClick={saveExpense}>Save</button></div>
           </div>
         </div>
       ) : null}

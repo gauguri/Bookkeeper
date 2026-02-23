@@ -1417,3 +1417,500 @@ def get_customers_summary(db: Session) -> dict:
         "avg_days_to_pay": None,
         "customers_at_risk": overdue_customers,
     }
+
+
+# ── Invoice List Views (Salesforce-style) ─────────────────────
+
+
+def get_invoices_enriched(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    status_filter: Optional[List[str]] = None,
+    sort_by: str = "issue_date",
+    sort_dir: str = "desc",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    min_total: Optional[Decimal] = None,
+    max_total: Optional[Decimal] = None,
+    overdue_only: bool = False,
+    limit: int = 25,
+    offset: int = 0,
+) -> dict:
+    """Return paginated, enriched invoice list with filters and sorting."""
+    from sqlalchemy import or_
+
+    today_val = date.today()
+
+    # ── base query: invoice + customer name + aggregates ──
+    line_count_sub = (
+        db.query(
+            InvoiceLine.invoice_id,
+            func.count(InvoiceLine.id).label("line_count"),
+        )
+        .group_by(InvoiceLine.invoice_id)
+        .subquery()
+    )
+    payment_count_sub = (
+        db.query(
+            PaymentApplication.invoice_id,
+            func.count(PaymentApplication.id).label("payment_count"),
+        )
+        .group_by(PaymentApplication.invoice_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(
+            Invoice,
+            Customer.name.label("customer_name"),
+            func.coalesce(line_count_sub.c.line_count, 0).label("line_count"),
+            func.coalesce(payment_count_sub.c.payment_count, 0).label("payment_count"),
+        )
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .outerjoin(line_count_sub, Invoice.id == line_count_sub.c.invoice_id)
+        .outerjoin(payment_count_sub, Invoice.id == payment_count_sub.c.invoice_id)
+    )
+
+    # ── filters ──
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Invoice.invoice_number.ilike(term),
+                Customer.name.ilike(term),
+            )
+        )
+
+    if status_filter:
+        query = query.filter(Invoice.status.in_(status_filter))
+
+    if overdue_only:
+        query = query.filter(
+            Invoice.status.in_(["SENT", "SHIPPED", "PARTIALLY_PAID"]),
+            Invoice.due_date < today_val,
+        )
+
+    if date_from:
+        query = query.filter(Invoice.issue_date >= date_from)
+    if date_to:
+        query = query.filter(Invoice.issue_date <= date_to)
+    if min_total is not None:
+        query = query.filter(Invoice.total >= min_total)
+    if max_total is not None:
+        query = query.filter(Invoice.total <= max_total)
+
+    # ── sorting ──
+    sort_map = {
+        "invoice_number": Invoice.invoice_number,
+        "customer_name": Customer.name,
+        "status": Invoice.status,
+        "total": Invoice.total,
+        "amount_due": Invoice.amount_due,
+        "issue_date": Invoice.issue_date,
+        "due_date": Invoice.due_date,
+        "created_at": Invoice.created_at,
+    }
+    sort_col = sort_map.get(sort_by, Invoice.issue_date)
+    query = query.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+
+    # ── pagination ──
+    total_count = query.count()
+    query = query.offset(offset).limit(limit)
+    rows = query.all()
+
+    # ── look up linked sales request numbers ──
+    sr_ids = {r[0].sales_request_id for r in rows if r[0].sales_request_id}
+    sr_map = {}
+    if sr_ids:
+        sr_rows = (
+            db.query(SalesRequest.id, SalesRequest.request_number)
+            .filter(SalesRequest.id.in_(sr_ids))
+            .all()
+        )
+        sr_map = {row.id: row.request_number for row in sr_rows}
+
+    # ── build enriched result ──
+    result = []
+    for inv, customer_name, line_count, payment_count in rows:
+        days_until_due = (inv.due_date - today_val).days if inv.due_date else None
+        days_overdue = max(0, -days_until_due) if days_until_due is not None else None
+
+        # aging bucket
+        aging_bucket = None
+        if days_overdue is not None:
+            if days_overdue == 0:
+                aging_bucket = "current"
+            elif days_overdue <= 30:
+                aging_bucket = "1-30"
+            elif days_overdue <= 60:
+                aging_bucket = "31-60"
+            elif days_overdue <= 90:
+                aging_bucket = "61-90"
+            else:
+                aging_bucket = "90+"
+
+        result.append({
+            "id": inv.id,
+            "invoice_number": inv.invoice_number,
+            "customer_id": inv.customer_id,
+            "customer_name": customer_name,
+            "status": inv.status,
+            "issue_date": inv.issue_date,
+            "due_date": inv.due_date,
+            "total": inv.total,
+            "amount_due": inv.amount_due,
+            "subtotal": inv.subtotal,
+            "tax_total": inv.tax_total,
+            "line_count": line_count,
+            "payment_count": payment_count,
+            "days_until_due": days_until_due,
+            "days_overdue": days_overdue,
+            "aging_bucket": aging_bucket,
+            "sales_request_id": inv.sales_request_id,
+            "sales_request_number": sr_map.get(inv.sales_request_id),
+            "created_at": inv.created_at,
+            "updated_at": inv.updated_at,
+        })
+
+    return {
+        "items": result,
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_invoices_view_summary(db: Session, view: str) -> dict:
+    """Return view-specific KPIs for the invoice list views."""
+    today_val = date.today()
+
+    if view == "open_invoices":
+        base = db.query(Invoice).filter(Invoice.status.in_(["DRAFT", "SENT"]))
+        total_outstanding = float(
+            base.with_entities(func.coalesce(func.sum(Invoice.amount_due), 0)).scalar() or 0
+        )
+        avg_size = base.with_entities(func.avg(Invoice.total)).scalar()
+        draft_count = base.filter(Invoice.status == "DRAFT").count()
+        sent_count = base.filter(Invoice.status == "SENT").count()
+        return {
+            "total_outstanding": total_outstanding,
+            "avg_invoice_size": float(avg_size) if avg_size else None,
+            "draft_count": draft_count,
+            "sent_count": sent_count,
+            "order_count": draft_count + sent_count,
+        }
+
+    elif view == "awaiting_payment":
+        base = db.query(Invoice).filter(Invoice.status.in_(["SHIPPED", "PARTIALLY_PAID"]))
+        total_ar = float(
+            base.with_entities(func.coalesce(func.sum(Invoice.amount_due), 0)).scalar() or 0
+        )
+        overdue_amount = float(
+            base.filter(Invoice.due_date < today_val)
+            .with_entities(func.coalesce(func.sum(Invoice.amount_due), 0))
+            .scalar() or 0
+        )
+        count = base.count()
+        # avg days since issue_date
+        dialect_name = db.get_bind().dialect.name
+        avg_days_q = base.with_entities(func.avg(days_between(func.current_date(), Invoice.issue_date, dialect_name=dialect_name))).scalar()
+        partially_paid_count = base.filter(Invoice.status == "PARTIALLY_PAID").count()
+        return {
+            "total_ar": total_ar,
+            "overdue_amount": overdue_amount,
+            "avg_days_outstanding": round(float(avg_days_q), 1) if avg_days_q else None,
+            "partially_paid_count": partially_paid_count,
+            "order_count": count,
+        }
+
+    elif view == "paid_closed":
+        base = db.query(Invoice).filter(Invoice.status == "PAID")
+        total_collected = float(
+            base.with_entities(func.coalesce(func.sum(Invoice.total), 0)).scalar() or 0
+        )
+        count = base.count()
+        # collection rate: PAID / (PAID + VOID)
+        void_count = db.query(Invoice).filter(Invoice.status == "VOID").count()
+        collection_rate = round(count / (count + void_count) * 100, 1) if (count + void_count) > 0 else None
+        # avg days to pay: difference between last payment date and issue_date
+        dialect_name = db.get_bind().dialect.name
+        avg_dtp = (
+            db.query(func.avg(days_between(Payment.payment_date, Invoice.issue_date, dialect_name=dialect_name)))
+            .select_from(Invoice)
+            .join(PaymentApplication, PaymentApplication.invoice_id == Invoice.id)
+            .join(Payment, Payment.id == PaymentApplication.payment_id)
+            .filter(Invoice.status == "PAID")
+            .scalar()
+        )
+        return {
+            "total_collected": total_collected,
+            "avg_days_to_pay": round(float(avg_dtp), 1) if avg_dtp else None,
+            "collection_rate": collection_rate,
+            "order_count": count,
+        }
+
+    elif view == "voided":
+        base = db.query(Invoice).filter(Invoice.status == "VOID")
+        count = base.count()
+        total_val = float(
+            base.with_entities(func.coalesce(func.sum(Invoice.total), 0)).scalar() or 0
+        )
+        return {
+            "voided_count": count,
+            "total_voided_value": total_val,
+        }
+
+    elif view == "overdue":
+        base = db.query(Invoice).filter(
+            Invoice.status.in_(["SENT", "SHIPPED", "PARTIALLY_PAID"]),
+            Invoice.due_date < today_val,
+        )
+        total_overdue = float(
+            base.with_entities(func.coalesce(func.sum(Invoice.amount_due), 0)).scalar() or 0
+        )
+        count = base.count()
+        dialect_name = db.get_bind().dialect.name
+        avg_days = base.with_entities(func.avg(days_between(func.current_date(), Invoice.due_date, dialect_name=dialect_name))).scalar()
+        highest = float(
+            base.with_entities(func.coalesce(func.max(Invoice.amount_due), 0)).scalar() or 0
+        )
+        return {
+            "total_overdue": total_overdue,
+            "avg_days_overdue": round(float(avg_days), 1) if avg_days else None,
+            "count": count,
+            "highest_overdue": highest,
+        }
+
+    else:  # "all"
+        total_invoices = db.query(Invoice).count()
+        total_outstanding = float(
+            db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+            .filter(Invoice.status != "VOID", Invoice.amount_due > 0)
+            .scalar() or 0
+        )
+        total_collected = float(
+            db.query(func.coalesce(func.sum(Invoice.total), 0))
+            .filter(Invoice.status == "PAID")
+            .scalar() or 0
+        )
+        overdue_count = (
+            db.query(Invoice)
+            .filter(
+                Invoice.status.in_(["SENT", "SHIPPED", "PARTIALLY_PAID"]),
+                Invoice.due_date < today_val,
+            )
+            .count()
+        )
+        return {
+            "total_invoices": total_invoices,
+            "total_outstanding": total_outstanding,
+            "total_collected": total_collected,
+            "overdue_count": overdue_count,
+        }
+
+
+# ── Payment List Views (Salesforce-style) ──────────────────────
+
+
+def get_payments_enriched(
+    db: Session,
+    *,
+    search: Optional[str] = None,
+    method_filter: Optional[str] = None,
+    sort_by: str = "payment_date",
+    sort_dir: str = "desc",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    min_amount: Optional[Decimal] = None,
+    max_amount: Optional[Decimal] = None,
+    recent_days: Optional[int] = None,
+    large_only: bool = False,
+    limit: int = 25,
+    offset: int = 0,
+) -> dict:
+    """Return paginated, enriched payment list with filters and sorting."""
+    from sqlalchemy import or_
+
+    today_val = date.today()
+
+    # ── base query ──
+    applied_sub = (
+        db.query(
+            PaymentApplication.payment_id,
+            func.coalesce(func.sum(PaymentApplication.applied_amount), 0).label("applied_amount"),
+        )
+        .group_by(PaymentApplication.payment_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(
+            Payment,
+            Customer.name.label("customer_name"),
+            Invoice.invoice_number.label("invoice_number"),
+            Invoice.total.label("invoice_total"),
+            func.coalesce(applied_sub.c.applied_amount, 0).label("applied_amount"),
+        )
+        .join(Customer, Payment.customer_id == Customer.id)
+        .outerjoin(Invoice, Payment.invoice_id == Invoice.id)
+        .outerjoin(applied_sub, Payment.id == applied_sub.c.payment_id)
+    )
+
+    # ── filters ──
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Invoice.invoice_number.ilike(term),
+                Customer.name.ilike(term),
+                Payment.reference.ilike(term),
+            )
+        )
+
+    if method_filter:
+        query = query.filter(Payment.method == method_filter)
+
+    if recent_days is not None:
+        cutoff = today_val - timedelta(days=recent_days)
+        query = query.filter(Payment.payment_date >= cutoff)
+
+    if date_from:
+        query = query.filter(Payment.payment_date >= date_from)
+    if date_to:
+        query = query.filter(Payment.payment_date <= date_to)
+    if min_amount is not None:
+        query = query.filter(Payment.amount >= min_amount)
+    if max_amount is not None:
+        query = query.filter(Payment.amount <= max_amount)
+
+    if large_only:
+        # 75th percentile threshold
+        threshold_q = db.query(
+            func.percentile_cont(0.75).within_group(Payment.amount)
+        ).scalar()
+        threshold = Decimal(str(threshold_q)) if threshold_q else Decimal("1000")
+        query = query.filter(Payment.amount >= threshold)
+
+    # ── sorting ──
+    sort_map = {
+        "payment_date": Payment.payment_date,
+        "customer_name": Customer.name,
+        "invoice_number": Invoice.invoice_number,
+        "amount": Payment.amount,
+        "method": Payment.method,
+    }
+    sort_col = sort_map.get(sort_by, Payment.payment_date)
+    order = sort_col.desc() if sort_dir == "desc" else sort_col.asc()
+    # secondary sort by id for stable ordering
+    query = query.order_by(order, Payment.id.desc())
+
+    # ── pagination ──
+    total_count = query.count()
+    query = query.offset(offset).limit(limit)
+    rows = query.all()
+
+    # ── build result ──
+    result = []
+    for pmt, customer_name, invoice_number, invoice_total, applied_amount in rows:
+        result.append({
+            "id": pmt.id,
+            "customer_id": pmt.customer_id,
+            "customer_name": customer_name,
+            "invoice_id": pmt.invoice_id,
+            "invoice_number": invoice_number,
+            "invoice_total": float(invoice_total) if invoice_total else None,
+            "amount": pmt.amount,
+            "applied_amount": applied_amount,
+            "payment_date": pmt.payment_date,
+            "method": pmt.method,
+            "reference": pmt.reference,
+            "notes": pmt.notes,
+            "created_at": pmt.created_at,
+        })
+
+    return {
+        "items": result,
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_payments_view_summary(db: Session, view: str, method: Optional[str] = None) -> dict:
+    """Return view-specific KPIs for the payment list views."""
+    today_val = date.today()
+
+    if view == "recent":
+        cutoff = today_val - timedelta(days=30)
+        base = db.query(Payment).filter(Payment.payment_date >= cutoff)
+        total = float(
+            base.with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
+        )
+        count = base.count()
+        avg_size = base.with_entities(func.avg(Payment.amount)).scalar()
+        # methods breakdown
+        method_rows = (
+            base.with_entities(Payment.method, func.count(Payment.id))
+            .group_by(Payment.method)
+            .all()
+        )
+        methods_breakdown = {m or "Unknown": c for m, c in method_rows}
+        return {
+            "total_collected_30d": total,
+            "avg_payment_size": round(float(avg_size), 2) if avg_size else None,
+            "payment_count": count,
+            "methods_breakdown": methods_breakdown,
+        }
+
+    elif view == "by_method":
+        base = db.query(Payment)
+        if method:
+            base = base.filter(Payment.method == method)
+        total = float(
+            base.with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
+        )
+        count = base.count()
+        avg_size = base.with_entities(func.avg(Payment.amount)).scalar()
+        method_rows = (
+            base.with_entities(Payment.method, func.count(Payment.id))
+            .group_by(Payment.method)
+            .all()
+        )
+        methods_breakdown = {m or "Unknown": c for m, c in method_rows}
+        return {
+            "total_collected": total,
+            "avg_payment_size": round(float(avg_size), 2) if avg_size else None,
+            "payment_count": count,
+            "methods_breakdown": methods_breakdown,
+        }
+
+    elif view == "large_payments":
+        threshold_q = db.query(
+            func.percentile_cont(0.75).within_group(Payment.amount)
+        ).scalar()
+        threshold = float(threshold_q) if threshold_q else 1000.0
+        base = db.query(Payment).filter(Payment.amount >= Decimal(str(threshold)))
+        count = base.count()
+        largest = float(
+            base.with_entities(func.coalesce(func.max(Payment.amount), 0)).scalar() or 0
+        )
+        avg_large = base.with_entities(func.avg(Payment.amount)).scalar()
+        return {
+            "largest_payment": largest,
+            "avg_large_payment": round(float(avg_large), 2) if avg_large else None,
+            "count": count,
+            "threshold": round(threshold, 2),
+        }
+
+    else:  # "all_payments"
+        total = float(
+            db.query(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
+        )
+        count = db.query(Payment).count()
+        avg_pmt = db.query(func.avg(Payment.amount)).scalar()
+        return {
+            "total_all_time": total,
+            "avg_payment": round(float(avg_pmt), 2) if avg_pmt else None,
+            "payment_count": count,
+        }

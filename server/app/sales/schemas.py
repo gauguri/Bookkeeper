@@ -416,3 +416,70 @@ class ItemsSummaryResponse(BaseModel):
     total_revenue_ytd: Decimal = Decimal("0")
     low_stock_items: int = 0
     out_of_stock_items: int = 0
+
+
+# ── Invoice List Views ─────────────────────────────────────
+
+
+class InvoiceListEnriched(BaseModel):
+    """Single row in the enriched invoice list."""
+    id: int
+    invoice_number: str
+    customer_id: int
+    customer_name: str
+    status: str
+    issue_date: date
+    due_date: date
+    total: Decimal = Decimal("0")
+    amount_due: Decimal = Decimal("0")
+    subtotal: Decimal = Decimal("0")
+    tax_total: Decimal = Decimal("0")
+    line_count: int = 0
+    payment_count: int = 0
+    days_until_due: Optional[int] = None
+    days_overdue: Optional[int] = None
+    aging_bucket: Optional[str] = None
+    sales_request_id: Optional[int] = None
+    sales_request_number: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedInvoiceList(BaseModel):
+    """Paginated response wrapper for the enriched invoice list."""
+    items: List[InvoiceListEnriched]
+    total_count: int
+    limit: int
+    offset: int
+
+
+# ── Payment List Views ─────────────────────────────────────
+
+
+class PaymentListEnriched(BaseModel):
+    """Single row in the enriched payment list."""
+    id: int
+    customer_id: int
+    customer_name: str
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    invoice_total: Optional[Decimal] = None
+    amount: Decimal = Decimal("0")
+    applied_amount: Decimal = Decimal("0")
+    payment_date: date
+    method: Optional[str] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedPaymentList(BaseModel):
+    """Paginated response wrapper for the enriched payment list."""
+    items: List[PaymentListEnriched]
+    total_count: int
+    limit: int
+    offset: int

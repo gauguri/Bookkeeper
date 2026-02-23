@@ -18,6 +18,10 @@ from app.sales.service import (
     create_invoice_payment,
     create_invoice,
     get_invoice_payments,
+    get_invoices_enriched,
+    get_invoices_view_summary,
+    get_payments_enriched,
+    get_payments_view_summary,
     list_customers,
     list_invoices,
     list_items,
@@ -264,6 +268,51 @@ def get_invoices(
     ]
 
 
+@router.get("/invoices/enriched", response_model=schemas.PaginatedInvoiceList)
+def get_invoices_enriched_endpoint(
+    search: Optional[str] = None,
+    status_val: Optional[str] = Query(None, alias="status"),
+    sort_by: str = "issue_date",
+    sort_dir: str = "desc",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    min_total: Optional[Decimal] = Query(None, ge=0),
+    max_total: Optional[Decimal] = Query(None, ge=0),
+    overdue_only: bool = False,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.INVOICES.value)),
+):
+    status_filter = [s.strip() for s in status_val.split(",") if s.strip()] if status_val else None
+    return get_invoices_enriched(
+        db,
+        search=search,
+        status_filter=status_filter,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        date_from=date_from,
+        date_to=date_to,
+        min_total=min_total,
+        max_total=max_total,
+        overdue_only=overdue_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/invoices/summary/{view}")
+def get_invoices_view_summary_endpoint(
+    view: str,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.INVOICES.value)),
+):
+    allowed_views = {"open_invoices", "awaiting_payment", "paid_closed", "voided", "all", "overdue"}
+    if view not in allowed_views:
+        raise HTTPException(status_code=400, detail=f"Invalid view: {view}")
+    return get_invoices_view_summary(db, view)
+
+
 @router.post("/invoices", response_model=schemas.InvoiceResponse, status_code=status.HTTP_201_CREATED)
 def create_invoice_endpoint(payload: schemas.InvoiceCreate, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.INVOICES.value))):
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
@@ -423,6 +472,53 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+@router.get("/payments/enriched", response_model=schemas.PaginatedPaymentList)
+def get_payments_enriched_endpoint(
+    search: Optional[str] = None,
+    method: Optional[str] = None,
+    sort_by: str = "payment_date",
+    sort_dir: str = "desc",
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    min_amount: Optional[Decimal] = Query(None, ge=0),
+    max_amount: Optional[Decimal] = Query(None, ge=0),
+    recent_days: Optional[int] = None,
+    large_only: bool = False,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.PAYMENTS.value)),
+):
+    return get_payments_enriched(
+        db,
+        search=search,
+        method_filter=method,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        date_from=date_from,
+        date_to=date_to,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        recent_days=recent_days,
+        large_only=large_only,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/payments/summary/{view}")
+def get_payments_view_summary_endpoint(
+    view: str,
+    method: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.PAYMENTS.value)),
+):
+    allowed_views = {"recent", "by_method", "all_payments", "large_payments"}
+    if view not in allowed_views:
+        raise HTTPException(status_code=400, detail=f"Invalid view: {view}")
+    return get_payments_view_summary(db, view, method=method)
 
 
 @router.get("/payments", response_model=List[schemas.PaymentResponse])

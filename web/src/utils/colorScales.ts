@@ -2,9 +2,19 @@
  * Threshold-based color functions and chart palettes.
  */
 
+// Shared P&L / finance palette
+export const PL_PALETTE = {
+  positive: "#3b82f6",
+  negative: "#dc2626",
+  neutralAxis: "#6b7280",
+  neutralGrid: "#e5e7eb",
+  hoverPositive: "#2563eb",
+  hoverNegative: "#b91c1c",
+} as const;
+
 // Finance-oriented palette
 export const CHART_COLORS = [
-  "#3b82f6", // blue
+  PL_PALETTE.positive, // blue
   "#8b5cf6", // violet
   "#ec4899", // pink
   "#f97316", // orange
@@ -18,11 +28,11 @@ export const CHART_COLORS = [
 
 export const COLOR = {
   primary: "#1e3a5f",
-  positive: "#16a34a",
-  negative: "#dc2626",
+  positive: PL_PALETTE.positive,
+  negative: PL_PALETTE.negative,
   warning: "#f59e0b",
-  neutral: "#6b7280",
-  info: "#3b82f6",
+  neutral: PL_PALETTE.neutralAxis,
+  info: PL_PALETTE.positive,
 } as const;
 
 export const AGING_COLORS = {

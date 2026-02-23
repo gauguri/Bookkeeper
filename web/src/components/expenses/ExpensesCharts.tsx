@@ -7,7 +7,14 @@ type Props = {
   onFilter: (type: "source" | "account", value: string) => void;
 };
 
-const colors = ["#4A6CF7", "#2F8F9D", "#A0A6AD", "#E25555", "#8B5CF6"];
+const EXPENSES_CHART_COLORS = [
+  "var(--pl-positive)",
+  "color-mix(in srgb, var(--pl-positive) 85%, #111827)",
+  "color-mix(in srgb, var(--pl-positive) 70%, #0f172a)",
+  "color-mix(in srgb, var(--pl-positive) 58%, #1f2937)",
+  "color-mix(in srgb, var(--pl-positive) 45%, #334155)",
+  "color-mix(in srgb, var(--pl-positive) 32%, #475569)",
+];
 
 export default function ExpensesCharts({ entries, loading, onFilter }: Props) {
   if (loading) {
@@ -25,7 +32,11 @@ export default function ExpensesCharts({ entries, loading, onFilter }: Props) {
     const key = entry.source_type === "PURCHASE_ORDER" ? "Purchase Orders" : "Manual";
     acc[key] = (acc[key] ?? 0) + Number(entry.amount);
     return acc;
-  }, {})).map(([name, value]) => ({ name, value }));
+  }, {})).map(([name, value]) => ({
+    name,
+    value,
+    fill: name === "Manual" ? "var(--pl-positive)" : "var(--pl-negative)",
+  }));
 
   const byCategory = Object.entries(entries.reduce<Record<string, number>>((acc, entry) => {
     const key = entry.debit_account_type === "EXPENSE" ? entry.debit_account : entry.credit_account;
@@ -42,7 +53,7 @@ export default function ExpensesCharts({ entries, loading, onFilter }: Props) {
         <div className="h-44">
           <ResponsiveContainer>
             <BarChart data={overTime}><XAxis dataKey="date" hide /><YAxis hide /><Tooltip />
-              <Bar dataKey="amount" fill="#4A6CF7" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="amount" fill="var(--pl-positive)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -53,7 +64,7 @@ export default function ExpensesCharts({ entries, loading, onFilter }: Props) {
           <ResponsiveContainer>
             <PieChart>
               <Pie data={byCategory} dataKey="value" nameKey="name" outerRadius={72} onClick={(data) => data?.name && onFilter("account", String(data.name))}>
-                {byCategory.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
+                {byCategory.map((_, index) => <Cell key={index} fill={EXPENSES_CHART_COLORS[index % EXPENSES_CHART_COLORS.length]} />)}
               </Pie>
               <Tooltip />
             </PieChart>
@@ -65,7 +76,9 @@ export default function ExpensesCharts({ entries, loading, onFilter }: Props) {
         <div className="h-44">
           <ResponsiveContainer>
             <BarChart data={bySource}><XAxis dataKey="name" /><YAxis hide /><Tooltip />
-              <Bar dataKey="value" fill="#2F8F9D" onClick={(payload) => payload?.name && onFilter("source", String(payload.name))} />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]} onClick={(payload) => payload?.name && onFilter("source", String(payload.name))}>
+                {bySource.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>

@@ -13,6 +13,7 @@ type Props = {
   height?: number;
   centerLabel?: string;
   centerValue?: string;
+  colors?: string[];
 };
 
 export default function DistributionChart({
@@ -21,6 +22,7 @@ export default function DistributionChart({
   height = 280,
   centerLabel,
   centerValue,
+  colors = CHART_COLORS,
 }: Props) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const sortedData = [...data].sort((a, b) => b.value - a.value);
@@ -44,7 +46,7 @@ export default function DistributionChart({
                 stroke="none"
               >
                 {sortedData.map((_, index) => (
-                  <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  <Cell key={index} fill={colors[index % colors.length]} />
                 ))}
               </Pie>
               <Tooltip
@@ -72,7 +74,7 @@ export default function DistributionChart({
               <div key={item.category} className="flex items-center gap-2 text-xs">
                 <div
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                  style={{ backgroundColor: colors[i % colors.length] }}
                 />
                 <span className="flex-1 truncate text-muted">{item.category}</span>
                 <span className="font-medium">{formatCurrency(item.value)}</span>

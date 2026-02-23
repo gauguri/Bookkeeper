@@ -33,7 +33,7 @@ export default function ExpensesHeaderBar({ search, dateRange, density, onSearch
           <select aria-label="Density" className="bedrock-focus rounded-xl border border-[var(--bedrock-border)] bg-black/20 px-3 py-2 text-sm" value={density} onChange={(event) => onDensity(event.target.value as Density)}>
             <option value="comfortable">Comfortable</option><option value="compact">Compact</option>
           </select>
-          <button type="button" onClick={onToggleColumns} className="bedrock-focus inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--bedrock-border)] px-3 py-2 text-sm hover:bg-white/10">
+          <button type="button" onClick={onToggleColumns} className="bedrock-focus inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--bedrock-border)] px-3 py-2 text-sm hover:bg-[var(--pl-hover)]">
             <LayoutGrid size={16} /> Columns <ListFilter size={16} />
           </button>
         </div>

@@ -381,6 +381,78 @@ class PaymentApplication(Base):
     invoice = relationship("Invoice", back_populates="payment_applications")
 
 
+class BankAccount(Base):
+    __tablename__ = "bank_accounts"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    institution = Column(String(200), nullable=False)
+    account_type = Column(String(20), nullable=False)
+    last4 = Column(String(4), nullable=False)
+    currency = Column(String(10), nullable=False, default="USD")
+    opening_balance = Column(Numeric(14, 2), nullable=False, default=0)
+    current_balance = Column(Numeric(14, 2), nullable=True)
+    status = Column(String(20), nullable=False, default="active")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BankTransaction(Base):
+    __tablename__ = "bank_transactions"
+
+    id = Column(Integer, primary_key=True)
+    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id", ondelete="CASCADE"), nullable=False)
+    posted_date = Column(Date, nullable=False)
+    description = Column(String(300), nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)
+    currency = Column(String(10), nullable=False, default="USD")
+    direction = Column(String(10), nullable=False)
+    category = Column(String(120), nullable=True)
+    vendor = Column(String(200), nullable=True)
+    reference = Column(String(120), nullable=True)
+    source = Column(String(50), nullable=False, default="manual")
+    status = Column(String(20), nullable=False, default="new")
+    excluded_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    bank_account = relationship("BankAccount")
+
+    __table_args__ = (
+        Index("ix_bank_transactions_account_date", "bank_account_id", "posted_date"),
+        Index("ix_bank_transactions_status", "status"),
+    )
+
+
+class MatchLink(Base):
+    __tablename__ = "match_links"
+
+    id = Column(Integer, primary_key=True)
+    bank_transaction_id = Column(Integer, ForeignKey("bank_transactions.id", ondelete="CASCADE"), nullable=False)
+    linked_entity_type = Column(String(30), nullable=False)
+    linked_entity_id = Column(Integer, nullable=False)
+    match_confidence = Column(Numeric(5, 2), nullable=True)
+    match_type = Column(String(20), nullable=False, default="manual")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    bank_transaction = relationship("BankTransaction")
+
+
+class ReconciliationSession(Base):
+    __tablename__ = "reconciliation_sessions"
+
+    id = Column(Integer, primary_key=True)
+    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id", ondelete="CASCADE"), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    statement_ending_balance = Column(Numeric(14, 2), nullable=False)
+    status = Column(String(20), nullable=False, default="open")
+    reconciled_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    bank_account = relationship("BankAccount")
+    creator = relationship("User")
+
+
 class ARCollectionActivity(Base):
     __tablename__ = "ar_collection_activities"
 

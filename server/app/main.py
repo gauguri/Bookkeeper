@@ -6,6 +6,7 @@ from .routers import (
     ar,
     auth,
     backlog,
+    banking,
     chart_of_accounts,
     control,
     dashboard,
@@ -34,6 +35,7 @@ app.include_router(analytics.router)
 app.include_router(ar.router)
 app.include_router(auth.router)
 app.include_router(backlog.router)
+app.include_router(banking.router)
 app.include_router(sales.router)
 app.include_router(dashboard.router)
 app.include_router(suppliers.router)

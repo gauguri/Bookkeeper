@@ -16,6 +16,7 @@ from .routers import (
     pricing,
     purchase_orders,
     sales,
+    sales_management,
     sales_requests,
     suppliers,
 )
@@ -37,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(backlog.router)
 app.include_router(banking.router)
 app.include_router(sales.router)
+app.include_router(sales_management.router)
 app.include_router(dashboard.router)
 app.include_router(suppliers.router)
 app.include_router(inventory.router)

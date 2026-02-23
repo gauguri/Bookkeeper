@@ -6,3 +6,12 @@ node_modules/
 dist/
 *.log
 pgdata/
+# Claude
+.claude/
+
+# Local docs
+*.pdf
+
+# Windows junk
+nul
+null

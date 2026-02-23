@@ -20,7 +20,6 @@ import ItemsPage from "./pages/ItemsPage";
 import LoginPage from "./pages/LoginPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import NoAccessPage from "./pages/NoAccessPage";
-import PlaceholderPage from "./pages/PlaceholderPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import ReportsPage from "./pages/ReportsPage";
 import ARAgingPage from "./pages/ARAgingPage";
@@ -42,6 +41,9 @@ import RevenueAnalytics from "./pages/analytics/Revenue";
 import ExpenseAnalytics from "./pages/analytics/Expenses";
 import ProfitLoss from "./pages/analytics/ProfitLoss";
 import BalanceSheetPage from "./pages/analytics/BalanceSheet";
+import BankingHomePage from "./pages/banking/BankingHomePage";
+import BankingTransactionsPage from "./pages/banking/BankingTransactionsPage";
+import BankingReconciliationPage from "./pages/banking/BankingReconciliationPage";
 import { APP_NAME, APP_TAGLINE } from "./branding";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -67,7 +69,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
   ]},
   { title: "Accounting", items: [
     { label: "Expenses", to: "/expenses", icon: FileText, moduleKey: MODULES.EXPENSES },
-    { label: "Banking", to: "/banking", icon: Banknote, moduleKey: MODULES.BANKING },
+    { label: "Banking", to: "/banking", icon: Banknote, moduleKey: MODULES.BANKING, children: [{ label: "Transactions", to: "/banking/transactions", icon: ClipboardList, moduleKey: MODULES.BANKING }, { label: "Reconciliation", to: "/banking/reconciliation", icon: Layers, moduleKey: MODULES.BANKING }] },
     { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: MODULES.CHART_OF_ACCOUNTS, children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: MODULES.IMPORT }] }
   ]},
   { title: "Purchasing", items: [
@@ -193,7 +195,9 @@ export default function App() {
             <Route path="/analytics/pnl" element={<ProtectedRoute moduleKey={MODULES.REPORTS}><ProfitLoss /></ProtectedRoute>} />
             <Route path="/analytics/balance-sheet" element={<ProtectedRoute moduleKey={MODULES.REPORTS}><BalanceSheetPage /></ProtectedRoute>} />
             <Route path="/expenses" element={<ProtectedRoute moduleKey={MODULES.EXPENSES}><ExpensesPage /></ProtectedRoute>} />
-            <Route path="/banking" element={<ProtectedRoute moduleKey={MODULES.BANKING}><PlaceholderPage title="Banking" /></ProtectedRoute>} />
+            <Route path="/banking" element={<ProtectedRoute moduleKey={MODULES.BANKING}><BankingHomePage /></ProtectedRoute>} />
+            <Route path="/banking/transactions" element={<ProtectedRoute moduleKey={MODULES.BANKING}><BankingTransactionsPage /></ProtectedRoute>} />
+            <Route path="/banking/reconciliation" element={<ProtectedRoute moduleKey={MODULES.BANKING}><BankingReconciliationPage /></ProtectedRoute>} />
             <Route path="/accounts" element={<ProtectedRoute moduleKey={MODULES.CHART_OF_ACCOUNTS}><ChartOfAccountsPage /></ProtectedRoute>} />
             <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
             <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />

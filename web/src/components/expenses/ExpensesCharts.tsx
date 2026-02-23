@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Entry } from "./types";
 import { formatCurrency, formatPercent } from "../../utils/formatters";
@@ -70,7 +70,7 @@ export default function ExpensesCharts({ entries, loading, dateRange, onFilter }
 
   const cardClass = "bedrock-surface rounded-2xl p-3";
 
-  const sourceLegend = useMemo(() => bySource.filter((item) => item.name !== "All sources"), [bySource]);
+  const sourceLegend = bySource.filter((item) => item.name !== "All sources");
 
   return (
     <section className="grid gap-3 lg:grid-cols-3">

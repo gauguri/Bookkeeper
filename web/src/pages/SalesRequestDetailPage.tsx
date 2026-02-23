@@ -96,6 +96,7 @@ export default function SalesRequestDetailPage() {
   const [statusError, setStatusError] = useState("");
   const [statusDraft, setStatusDraft] = useState<SalesRequestDetail["status"] | "">("");
   const [statusNotice, setStatusNotice] = useState("");
+  const [converting, setConverting] = useState(false);
 
   const notice = (location.state as { notice?: string } | null)?.notice || "";
 
@@ -212,6 +213,21 @@ export default function SalesRequestDetailPage() {
       );
     } finally {
       setStatusUpdating(false);
+    }
+  };
+
+
+  const handleConvertToOpportunity = async () => {
+    if (!id) return;
+    setConverting(true);
+    setStatusError("");
+    try {
+      await apiFetch(`/sales/sales-requests/${id}/convert-to-opportunity`, { method: "POST" });
+      setStatusNotice("Sales request converted to opportunity in Sales Command Center.");
+    } catch (err) {
+      setStatusError((err as Error).message || "Unable to convert sales request.");
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -390,6 +406,9 @@ export default function SalesRequestDetailPage() {
                   Edit
                 </button>
               )}
+            <button className="app-button-secondary" onClick={handleConvertToOpportunity} disabled={converting}>
+              {converting ? "Converting…" : "Convert to Opportunity"}
+            </button>
           </div>
         </div>
 

@@ -526,6 +526,258 @@ class SalesRequestLine(Base):
     item = relationship("Item")
 
 
+
+
+class SalesAccount(Base):
+    __tablename__ = "sales_accounts"
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    name = Column(String(200), nullable=False)
+    website = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    billing_address = Column(Text, nullable=True)
+    shipping_address = Column(Text, nullable=True)
+    industry = Column(String(120), nullable=True)
+    tags = Column(Text, nullable=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    customer = relationship("Customer")
+    owner = relationship("User", foreign_keys=[owner_user_id])
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    contacts = relationship("SalesContact", back_populates="account", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_sales_accounts_name", "name"),
+        Index("ix_sales_accounts_owner", "owner_user_id"),
+    )
+
+
+class SalesContact(Base):
+    __tablename__ = "sales_contacts"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("sales_accounts.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(200), nullable=False)
+    title = Column(String(120), nullable=True)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    account = relationship("SalesAccount", back_populates="contacts")
+
+    __table_args__ = (
+        Index("ix_sales_contacts_account", "account_id"),
+        Index("ix_sales_contacts_email", "email"),
+    )
+
+
+class OpportunityStageConfig(Base):
+    __tablename__ = "opportunity_stage_configs"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(80), nullable=False, unique=True)
+    stage_order = Column(Integer, nullable=False)
+    probability_default = Column(Integer, nullable=False, default=10)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class Opportunity(Base):
+    __tablename__ = "opportunities"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("sales_accounts.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    stage = Column(String(80), nullable=False)
+    amount_estimate = Column(Numeric(14, 2), nullable=False, default=0)
+    probability = Column(Integer, nullable=False, default=10)
+    expected_close_date = Column(Date, nullable=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    forecast_category = Column(String(30), nullable=False, default="PIPELINE")
+    source = Column(String(80), nullable=True)
+    next_step = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    account = relationship("SalesAccount")
+    owner = relationship("User", foreign_keys=[owner_user_id])
+
+    __table_args__ = (
+        Index("ix_opportunities_account", "account_id"),
+        Index("ix_opportunities_stage", "stage"),
+        Index("ix_opportunities_expected_close_date", "expected_close_date"),
+    )
+
+
+class Quote(Base):
+    __tablename__ = "quotes"
+
+    id = Column(Integer, primary_key=True)
+    opportunity_id = Column(Integer, ForeignKey("opportunities.id"), nullable=False)
+    quote_number = Column(String(30), nullable=False, unique=True)
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String(20), nullable=False, default="DRAFT")
+    valid_until = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=0)
+    discount_total = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_total = Column(Numeric(14, 2), nullable=False, default=0)
+    total = Column(Numeric(14, 2), nullable=False, default=0)
+    approval_status = Column(String(20), nullable=False, default="NOT_REQUIRED")
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    opportunity = relationship("Opportunity")
+    lines = relationship("QuoteLine", back_populates="quote", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_quotes_opportunity", "opportunity_id"),
+        Index("ix_quotes_status", "status"),
+    )
+
+
+class QuoteLine(Base):
+    __tablename__ = "quote_lines"
+
+    id = Column(Integer, primary_key=True)
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    description = Column(Text, nullable=True)
+    qty = Column(Numeric(14, 2), nullable=False, default=1)
+    unit_price = Column(Numeric(14, 2), nullable=False, default=0)
+    discount_pct = Column(Numeric(7, 4), nullable=False, default=0)
+    discount_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    line_total = Column(Numeric(14, 2), nullable=False, default=0)
+
+    quote = relationship("Quote", back_populates="lines")
+    item = relationship("Item")
+
+
+class SalesOrder(Base):
+    __tablename__ = "sales_orders"
+
+    id = Column(Integer, primary_key=True)
+    order_number = Column(String(30), nullable=False, unique=True)
+    account_id = Column(Integer, ForeignKey("sales_accounts.id"), nullable=False)
+    opportunity_id = Column(Integer, ForeignKey("opportunities.id"), nullable=True)
+    quote_id = Column(Integer, ForeignKey("quotes.id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="DRAFT")
+    order_date = Column(Date, nullable=False)
+    requested_ship_date = Column(Date, nullable=True)
+    fulfillment_type = Column(String(20), nullable=False, default="SHIPPING")
+    shipping_address = Column(Text, nullable=True)
+    subtotal = Column(Numeric(14, 2), nullable=False, default=0)
+    tax_total = Column(Numeric(14, 2), nullable=False, default=0)
+    total = Column(Numeric(14, 2), nullable=False, default=0)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    account = relationship("SalesAccount")
+    opportunity = relationship("Opportunity")
+    quote = relationship("Quote")
+    invoice = relationship("Invoice")
+    lines = relationship("SalesOrderLine", back_populates="sales_order", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_sales_orders_account", "account_id"),
+        Index("ix_sales_orders_status", "status"),
+    )
+
+
+class SalesOrderLine(Base):
+    __tablename__ = "sales_order_lines"
+
+    id = Column(Integer, primary_key=True)
+    sales_order_id = Column(Integer, ForeignKey("sales_orders.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    qty = Column(Numeric(14, 2), nullable=False, default=1)
+    unit_price = Column(Numeric(14, 2), nullable=False, default=0)
+    discount = Column(Numeric(14, 2), nullable=False, default=0)
+    line_total = Column(Numeric(14, 2), nullable=False, default=0)
+    fulfillment_status = Column(String(20), nullable=False, default="PENDING")
+
+    sales_order = relationship("SalesOrder", back_populates="lines")
+    item = relationship("Item")
+
+
+class SalesActivity(Base):
+    __tablename__ = "sales_activities"
+
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(20), nullable=False)
+    entity_id = Column(Integer, nullable=False)
+    type = Column(String(20), nullable=False)
+    subject = Column(String(255), nullable=False)
+    body = Column(Text, nullable=True)
+    due_date = Column(Date, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_sales_activities_entity", "entity_type", "entity_id"),
+        Index("ix_sales_activities_due_date", "due_date"),
+    )
+
+
+class PriceBook(Base):
+    __tablename__ = "price_books"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False, unique=True)
+    is_default = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    items = relationship("PriceBookItem", back_populates="price_book", cascade="all, delete-orphan")
+
+
+class PriceBookItem(Base):
+    __tablename__ = "price_book_items"
+
+    id = Column(Integer, primary_key=True)
+    price_book_id = Column(Integer, ForeignKey("price_books.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    list_price = Column(Numeric(14, 2), nullable=False)
+
+    price_book = relationship("PriceBook", back_populates="items")
+    item = relationship("Item")
+
+    __table_args__ = (
+        UniqueConstraint("price_book_id", "item_id", name="uq_price_book_item"),
+    )
+
+
+class CustomerPricingOverride(Base):
+    __tablename__ = "customer_pricing_overrides"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("sales_accounts.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    price = Column(Numeric(14, 2), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "item_id", name="uq_customer_pricing_override"),
+    )
+
+
+class DiscountApprovalRule(Base):
+    __tablename__ = "discount_approval_rules"
+
+    id = Column(Integer, primary_key=True)
+    role_key = Column(String(50), nullable=True)
+    max_discount_pct = Column(Numeric(7, 4), nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
 

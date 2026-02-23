@@ -5,7 +5,7 @@ type AccessContext = { isAdmin: boolean; allowedModules: ModuleKey[] };
 
 export const MODULE_ROUTE_MAP: Record<ModuleKey, string> = {
   [MODULES.DASHBOARD]: "/analytics",
-  [MODULES.SALES_REQUESTS]: "/sales-requests",
+  [MODULES.SALES_REQUESTS]: "/sales/management",
   [MODULES.INVOICES]: "/invoices",
   [MODULES.PAYMENTS]: "/payments",
   [MODULES.INVENTORY]: "/inventory",
@@ -43,7 +43,7 @@ const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: stri
   { moduleKey: MODULES.DASHBOARD, matches: (pathname) => pathname === "/" || pathname === "/sales" || pathname === "/analytics" },
   { moduleKey: MODULES.CUSTOMERS, matches: (pathname) => pathname.startsWith("/sales/customers") },
   { moduleKey: MODULES.ITEMS, matches: (pathname) => pathname.startsWith("/sales/items") },
-  { moduleKey: MODULES.SALES_REQUESTS, matches: (pathname) => pathname.startsWith("/sales-requests") },
+  { moduleKey: MODULES.SALES_REQUESTS, matches: (pathname) => pathname.startsWith("/sales-requests") || pathname.startsWith("/sales/management") || pathname.startsWith("/sales/accounts") || pathname.startsWith("/sales/opportunities") || pathname.startsWith("/sales/quotes") || pathname.startsWith("/sales/orders") },
   { moduleKey: MODULES.INVOICES, matches: (pathname) => pathname.startsWith("/sales/invoices") || pathname.startsWith("/invoices") },
   { moduleKey: MODULES.PAYMENTS, matches: (pathname) => pathname.startsWith("/sales/payments") || pathname.startsWith("/payments") },
   { moduleKey: MODULES.REPORTS, matches: (pathname) => pathname.startsWith("/sales/reports") || pathname.startsWith("/finance/ar-aging") || pathname.startsWith("/finance/cash-forecast") || pathname.startsWith("/analytics") },

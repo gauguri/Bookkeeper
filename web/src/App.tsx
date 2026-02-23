@@ -65,7 +65,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Command Center", to: "/sales/management", icon: LayoutGrid, moduleKey: MODULES.SALES_REQUESTS },
     { label: "Customers", to: MODULE_ROUTE_MAP[MODULES.CUSTOMERS], icon: Users, moduleKey: MODULES.CUSTOMERS },
     { label: "Items", to: MODULE_ROUTE_MAP[MODULES.ITEMS], icon: ClipboardList, moduleKey: MODULES.ITEMS },
-    { label: "Sales Requests", to: MODULE_ROUTE_MAP[MODULES.SALES_REQUESTS], icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
+    { label: "Sales Requests", to: "/sales-requests", icon: ClipboardList, moduleKey: MODULES.SALES_REQUESTS },
     { label: "Invoices", to: MODULE_ROUTE_MAP[MODULES.INVOICES], icon: FileText, moduleKey: MODULES.INVOICES },
     { label: "Payments", to: MODULE_ROUTE_MAP[MODULES.PAYMENTS], icon: Banknote, moduleKey: MODULES.PAYMENTS },
   ]},

@@ -193,9 +193,15 @@ export default function ExpensesPage() {
           <ExpensesCharts
             entries={filteredEntries}
             loading={isLoading}
+            dateRange={dateRange}
             onFilter={(type, value) => {
-              if (type === "source") setParam("view", value.startsWith("Manual") ? "manual" : "purchase");
-              else setSearchDraft(value);
+              if (type === "source") {
+                if (value === "Manual") setParam("view", "manual");
+                else if (value === "Purchase Orders") setParam("view", "purchase");
+                // TODO: add dedicated source filters (Payroll, Bill, Reimbursement) in Advanced Filters.
+              } else {
+                setSearchDraft(value);
+              }
             }}
           />
 

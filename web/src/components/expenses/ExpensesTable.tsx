@@ -51,7 +51,7 @@ export default function ExpensesTable(props: Props) {
     <section className="bedrock-surface overflow-hidden rounded-2xl">
       <div className="overflow-auto">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-black/35 text-xs uppercase tracking-[0.12em] text-[var(--bedrock-muted)]">
+          <thead className="sticky top-0 z-10 bg-[var(--pl-hover)] text-xs uppercase tracking-[0.12em] text-[var(--bedrock-muted)]">
             <tr>
               <th className="px-3 py-2"><input aria-label="Select all rows" type="checkbox" checked={paged.length > 0 && paged.every((row) => selected.includes(row.id))} onChange={(e) => onSelectAll(e.target.checked)} /></th>
               {visibleColumns.date && headerCell("Date", "date")}
@@ -64,24 +64,37 @@ export default function ExpensesTable(props: Props) {
             </tr>
           </thead>
           <tbody>
-            {paged.length === 0 ? <tr><td colSpan={8} className="px-3 py-12 text-center text-[var(--bedrock-muted)]">No matching expenses. Refine filters or create a new expense.</td></tr> : paged.map((entry) => (
-              <tr key={entry.id} className="border-t border-[var(--bedrock-border)]/80 hover:bg-white/5">
-                <td className={`px-3 ${rowPadding}`}><input aria-label={`Select expense ${entry.id}`} type="checkbox" checked={selected.includes(entry.id)} onChange={(e) => onSelect(entry.id, e.target.checked)} /></td>
-                {visibleColumns.date && <td className={`px-3 ${rowPadding}`}>{entry.date}</td>}
-                {visibleColumns.memo && <td className={`px-3 ${rowPadding}`}>{entry.memo || "—"}</td>}
-                {visibleColumns.debit && <td className={`px-3 ${rowPadding}`}>{entry.debit_account}</td>}
-                {visibleColumns.credit && <td className={`px-3 ${rowPadding}`}>{entry.credit_account}</td>}
-                {visibleColumns.amount && <td className={`px-3 text-right ${rowPadding}`}>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(entry.amount))}</td>}
-                {visibleColumns.source && <td className={`px-3 ${rowPadding}`}><span className="rounded-full border border-[var(--bedrock-border)] px-2 py-0.5 text-xs">{entry.source_type === "PURCHASE_ORDER" ? "Purchase Order" : "Manual"}</span></td>}
-                <td className={`px-3 ${rowPadding}`}>
-                  <div className="flex gap-1">
-                    <button className="bedrock-focus rounded p-1 hover:bg-white/10" aria-label="View" onClick={() => onOpenDetails(entry)}><Eye size={15} /></button>
-                    <button className="bedrock-focus rounded p-1 hover:bg-white/10" aria-label="Edit"><Pencil size={15} /></button>
-                    <button className="bedrock-focus rounded p-1 hover:bg-white/10" aria-label="Duplicate"><Files size={15} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {paged.length === 0 ? <tr><td colSpan={8} className="px-3 py-12 text-center text-[var(--bedrock-muted)]">No matching expenses. Refine filters or create a new expense.</td></tr> : paged.map((entry) => {
+              const isSelected = selected.includes(entry.id);
+              const isPurchaseOrder = entry.source_type === "PURCHASE_ORDER";
+              return (
+                <tr
+                  key={entry.id}
+                  className={`border-t border-[var(--bedrock-border)]/80 ${isSelected ? "bg-[var(--pl-hover)]" : "hover:bg-[var(--pl-hover)]"}`}
+                >
+                  <td className={`px-3 ${rowPadding}`}><input aria-label={`Select expense ${entry.id}`} type="checkbox" checked={isSelected} onChange={(e) => onSelect(entry.id, e.target.checked)} /></td>
+                  {visibleColumns.date && <td className={`px-3 ${rowPadding}`}>{entry.date}</td>}
+                  {visibleColumns.memo && <td className={`px-3 ${rowPadding}`}>{entry.memo || "—"}</td>}
+                  {visibleColumns.debit && <td className={`px-3 ${rowPadding}`}>{entry.debit_account}</td>}
+                  {visibleColumns.credit && <td className={`px-3 ${rowPadding}`}>{entry.credit_account}</td>}
+                  {visibleColumns.amount && <td className={`px-3 text-right ${rowPadding}`}>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(entry.amount))}</td>}
+                  {visibleColumns.source && (
+                    <td className={`px-3 ${rowPadding}`}>
+                      <span className={`rounded-full border px-2 py-0.5 text-xs ${isPurchaseOrder ? "border-[var(--pl-negative)]/35 bg-[var(--pl-negative-soft)] text-white" : "border-[var(--pl-positive)]/35 bg-[var(--pl-hover)]"}`}>
+                        {isPurchaseOrder ? "Purchase Order" : "Manual"}
+                      </span>
+                    </td>
+                  )}
+                  <td className={`px-3 ${rowPadding}`}>
+                    <div className="flex gap-1">
+                      <button className="bedrock-focus rounded p-1 hover:bg-[var(--pl-hover)]" aria-label="View" onClick={() => onOpenDetails(entry)}><Eye size={15} /></button>
+                      <button className="bedrock-focus rounded p-1 hover:bg-[var(--pl-hover)]" aria-label="Edit"><Pencil size={15} /></button>
+                      <button className="bedrock-focus rounded p-1 hover:bg-[var(--pl-hover)]" aria-label="Duplicate"><Files size={15} /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -91,8 +104,8 @@ export default function ExpensesTable(props: Props) {
           <select className="bedrock-focus rounded border border-[var(--bedrock-border)] bg-black/20 px-2 py-1" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))}>
             {[10, 25, 50].map((size) => <option key={size} value={size}>{size}/page</option>)}
           </select>
-          <button className="bedrock-focus rounded border border-[var(--bedrock-border)] px-2 py-1 disabled:opacity-40" disabled={boundedPage <= 1} onClick={() => onPage(boundedPage - 1)}>Prev</button>
-          <button className="bedrock-focus rounded border border-[var(--bedrock-border)] px-2 py-1 disabled:opacity-40" disabled={boundedPage >= totalPages} onClick={() => onPage(boundedPage + 1)}>Next</button>
+          <button className="bedrock-focus rounded border border-[var(--bedrock-border)] px-2 py-1 disabled:opacity-40 hover:bg-[var(--pl-hover)]" disabled={boundedPage <= 1} onClick={() => onPage(boundedPage - 1)}>Prev</button>
+          <button className="bedrock-focus rounded border border-[var(--bedrock-border)] px-2 py-1 disabled:opacity-40 hover:bg-[var(--pl-hover)]" disabled={boundedPage >= totalPages} onClick={() => onPage(boundedPage + 1)}>Next</button>
         </div>
       </footer>
     </section>

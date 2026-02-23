@@ -172,8 +172,8 @@ export default function ExpensesPage() {
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--bedrock-muted)]">Expenses command center</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button className="app-button !bg-[var(--bedrock-accent)]" onClick={() => handleQuickAction("new")}>New expense</button>
-              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => setParam("view", "all")}>All entries</button>
-              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => setShowAdvancedFilters((v) => !v)}>Advanced filters</button>
+              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)] hover:!bg-[var(--pl-hover)]" onClick={() => setParam("view", "all")}>All entries</button>
+              <button className="app-button-secondary !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)] hover:!bg-[var(--pl-hover)]" onClick={() => setShowAdvancedFilters((v) => !v)}>Advanced filters</button>
             </div>
           </div>
 

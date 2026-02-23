@@ -1,14 +1,24 @@
 :root {
-  --bedrock-bg-0: #0f1115;
-  --bedrock-bg-1: #1c1f24;
+  --pl-positive: #3b82f6;
+  --pl-negative: #dc2626;
+  --pl-neutral-0: #0f1115;
+  --pl-neutral-1: #1c1f24;
+  --pl-neutral-2: rgba(160, 166, 173, 0.22);
+  --pl-focus-ring: color-mix(in srgb, var(--pl-positive) 72%, white);
+  --pl-hover: color-mix(in srgb, var(--pl-positive) 16%, transparent);
+  --pl-hover-strong: color-mix(in srgb, var(--pl-positive) 30%, transparent);
+  --pl-negative-soft: color-mix(in srgb, var(--pl-negative) 14%, transparent);
+
+  --bedrock-bg-0: var(--pl-neutral-0);
+  --bedrock-bg-1: var(--pl-neutral-1);
   --bedrock-panel: rgba(28, 31, 36, 0.72);
   --bedrock-panel-strong: rgba(28, 31, 36, 0.88);
-  --bedrock-border: rgba(160, 166, 173, 0.22);
+  --bedrock-border: var(--pl-neutral-2);
   --bedrock-text: #f2f4f7;
   --bedrock-muted: #a0a6ad;
-  --bedrock-accent: #4a6cf7;
-  --bedrock-accent-2: #2f8f9d;
-  --bedrock-danger: #e25555;
+  --bedrock-accent: var(--pl-positive);
+  --bedrock-accent-2: color-mix(in srgb, var(--pl-positive) 76%, #1d4ed8);
+  --bedrock-danger: var(--pl-negative);
 }
 
 .bedrock-expenses-shell {
@@ -16,7 +26,7 @@
   overflow: hidden;
   border: 1px solid var(--bedrock-border);
   border-radius: 1.5rem;
-  background: radial-gradient(circle at 20% 0%, rgba(74, 108, 247, 0.12), transparent 42%),
+  background: radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--pl-positive) 18%, transparent), transparent 42%),
     linear-gradient(160deg, var(--bedrock-bg-0), var(--bedrock-bg-1));
   color: var(--bedrock-text);
 }
@@ -45,7 +55,7 @@
 }
 
 .bedrock-focus:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--bedrock-accent) 75%, white);
+  outline: 2px solid var(--pl-focus-ring);
   outline-offset: 2px;
 }
 

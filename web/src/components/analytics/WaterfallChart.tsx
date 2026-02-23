@@ -10,7 +10,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { CHART_MARGIN, AXIS_STYLE } from "../../utils/chartHelpers";
-import { COLOR } from "../../utils/colorScales";
+import { PL_PALETTE } from "../../utils/colorScales";
 import { formatCompact, formatCurrency } from "../../utils/formatters";
 
 type WaterfallItem = {
@@ -57,7 +57,7 @@ export default function WaterfallChart({ data, title, height = 300 }: Props) {
       {title && <h3 className="mb-4 text-sm font-semibold">{title}</h3>}
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={chartData} margin={CHART_MARGIN}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+          <CartesianGrid strokeDasharray="3 3" stroke={PL_PALETTE.neutralGrid} opacity={0.3} />
           <XAxis dataKey="name" {...AXIS_STYLE} angle={-20} textAnchor="end" height={50} />
           <YAxis tickFormatter={formatCompact} {...AXIS_STYLE} />
           <Tooltip
@@ -71,18 +71,14 @@ export default function WaterfallChart({ data, title, height = 300 }: Props) {
               fontSize: "13px",
             }}
           />
-          <ReferenceLine y={0} stroke="#6b7280" strokeWidth={1} />
+          <ReferenceLine y={0} stroke={PL_PALETTE.neutralAxis} strokeWidth={1} />
           <Bar dataKey="hidden" stackId="stack" fill="transparent" />
           <Bar dataKey="value" stackId="stack" radius={[4, 4, 0, 0]}>
             {chartData.map((entry, index) => (
               <Cell
                 key={index}
                 fill={
-                  entry.isTotal
-                    ? COLOR.info
-                    : entry.rawValue >= 0
-                      ? COLOR.positive
-                      : COLOR.negative
+                  entry.rawValue >= 0 ? PL_PALETTE.positive : PL_PALETTE.negative
                 }
               />
             ))}

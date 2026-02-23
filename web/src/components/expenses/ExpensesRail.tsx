@@ -29,8 +29,8 @@ export default function ExpensesRail({ entries, currentView, onViewChange, onQui
 
       <div className="grid grid-cols-1 gap-2">
         <button type="button" className="app-button bedrock-focus !bg-[var(--bedrock-accent)]" onClick={() => onQuickAction("new")}><Plus size={16} />New expense</button>
-        <button type="button" className="app-button-secondary bedrock-focus !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => onQuickAction("export")}><Download size={16} />Export</button>
-        <button type="button" className="app-button-secondary bedrock-focus !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)]" onClick={() => onQuickAction("import")}><Upload size={16} />Import</button>
+        <button type="button" className="app-button-secondary bedrock-focus !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)] hover:!bg-[var(--pl-hover)]" onClick={() => onQuickAction("export")}><Download size={16} />Export</button>
+        <button type="button" className="app-button-secondary bedrock-focus !border-[var(--bedrock-border)] !bg-transparent !text-[var(--bedrock-text)] hover:!bg-[var(--pl-hover)]" onClick={() => onQuickAction("import")}><Upload size={16} />Import</button>
       </div>
 
       <div>
@@ -40,7 +40,7 @@ export default function ExpensesRail({ entries, currentView, onViewChange, onQui
             <button
               key={value}
               type="button"
-              className={`bedrock-focus flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${currentView === value ? "bg-white/12" : "hover:bg-white/5"}`}
+              className={`bedrock-focus flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${currentView === value ? "bg-[var(--pl-hover-strong)]" : "hover:bg-[var(--pl-hover)]"}`}
               onClick={() => onViewChange(value)}
             >
               <span>{label}</span>
@@ -51,7 +51,7 @@ export default function ExpensesRail({ entries, currentView, onViewChange, onQui
 
       <button
         type="button"
-        className="bedrock-focus inline-flex items-center gap-2 rounded-xl border border-[var(--bedrock-border)] px-3 py-2 text-sm"
+        className="bedrock-focus inline-flex items-center gap-2 rounded-xl border border-[var(--bedrock-border)] px-3 py-2 text-sm hover:bg-[var(--pl-hover)]"
         onClick={() => onApplyFilter("advanced")}
       >
         <Filter size={16} /> Advanced Filters

@@ -20,6 +20,15 @@
     --danger: 0 84% 60%;
     --danger-foreground: 0 0% 100%;
     --muted: 215 16% 47%;
+    --pl-positive: #3b82f6;
+    --pl-negative: #dc2626;
+    --pl-neutral-0: #0f1115;
+    --pl-neutral-1: #1c1f24;
+    --pl-neutral-2: rgba(160, 166, 173, 0.22);
+    --pl-focus-ring: color-mix(in srgb, var(--pl-positive) 72%, white);
+    --pl-hover: color-mix(in srgb, var(--pl-positive) 16%, transparent);
+    --pl-hover-strong: color-mix(in srgb, var(--pl-positive) 30%, transparent);
+    --pl-negative-soft: color-mix(in srgb, var(--pl-negative) 14%, transparent);
   }
 
   .dark {
@@ -39,6 +48,15 @@
     --danger: 0 84% 60%;
     --danger-foreground: 0 0% 100%;
     --muted: 215 20% 65%;
+    --pl-positive: #3b82f6;
+    --pl-negative: #dc2626;
+    --pl-neutral-0: #0f1115;
+    --pl-neutral-1: #1c1f24;
+    --pl-neutral-2: rgba(160, 166, 173, 0.22);
+    --pl-focus-ring: color-mix(in srgb, var(--pl-positive) 72%, white);
+    --pl-hover: color-mix(in srgb, var(--pl-positive) 16%, transparent);
+    --pl-hover-strong: color-mix(in srgb, var(--pl-positive) 30%, transparent);
+    --pl-negative-soft: color-mix(in srgb, var(--pl-negative) 14%, transparent);
   }
 
   body {

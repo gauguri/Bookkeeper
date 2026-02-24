@@ -1,9 +1,14 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel, Field
 
-class Page(BaseModel):
-    items: list
+PageItemT = TypeVar("PageItemT")
+
+
+class Page(BaseModel, Generic[PageItemT]):
+    items: list[PageItemT]
     total_count: int
 
 class SalesAccountBase(BaseModel):

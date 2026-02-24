@@ -210,3 +210,14 @@ class ReportSummary(BaseModel):
     orders_pending_fulfillment: int
     won_last_30d: Decimal
     by_stage: list[PipelineSummaryRow]
+
+
+class PipelineTrendPoint(BaseModel):
+    period: str
+    value: Decimal
+
+
+class ConversionSummary(BaseModel):
+    quotes: int
+    orders: int
+    invoices: int

@@ -202,3 +202,37 @@ def reports_summary(db: Session):
     won_last_30d = db.query(func.coalesce(func.sum(Opportunity.amount_estimate), 0)).filter(Opportunity.stage == "Closed Won", Opportunity.updated_at >= thirty_days_ago).scalar() or 0
     by_stage = [{"stage": s, "count": c, "amount": a} for s, c, a in db.query(Opportunity.stage, func.count(Opportunity.id), func.coalesce(func.sum(Opportunity.amount_estimate), 0)).group_by(Opportunity.stage).all()]
     return {"pipeline_value": pipeline_value, "open_opportunities": open_opportunities, "quotes_pending_approval": quotes_pending_approval, "orders_pending_fulfillment": orders_pending_fulfillment, "won_last_30d": won_last_30d, "by_stage": by_stage}
+
+
+def pipeline_trend(db: Session, months: int = 12):
+    months = max(1, min(months, 24))
+    today = datetime.utcnow().date().replace(day=1)
+    month_starts = []
+    cursor = today
+    for _ in range(months):
+        month_starts.append(cursor)
+        cursor = (cursor.replace(day=1) - timedelta(days=1)).replace(day=1)
+    month_starts = list(reversed(month_starts))
+
+    trend = []
+    for month_start in month_starts:
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        value = (
+            db.query(func.coalesce(func.sum(Opportunity.amount_estimate), 0))
+            .filter(Opportunity.created_at >= month_start, Opportunity.created_at < next_month)
+            .scalar()
+            or 0
+        )
+        trend.append({"period": month_start.strftime("%b %y"), "value": value})
+    return trend
+
+
+def conversion_summary(db: Session):
+    return {
+        "quotes": db.query(func.count(Quote.id)).scalar() or 0,
+        "orders": db.query(func.count(SalesOrder.id)).scalar() or 0,
+        "invoices": db.query(func.count(SalesOrder.id)).filter(SalesOrder.invoice_id.isnot(None)).scalar() or 0,
+    }

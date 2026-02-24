@@ -26,6 +26,10 @@ import ARAgingPage from "./pages/ARAgingPage";
 import CashForecastPage from "./pages/CashForecastPage";
 import SalesLanding from "./pages/SalesLanding";
 import SalesManagementPage from "./pages/SalesManagementPage";
+import AccountCreatePage from "./pages/sales/accounts/AccountCreatePage";
+import OpportunityCreatePage from "./pages/sales/opportunities/OpportunityCreatePage";
+import QuoteCreatePage from "./pages/sales/quotes/QuoteCreatePage";
+import OrderCreatePage from "./pages/sales/orders/OrderCreatePage";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
 import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
@@ -172,6 +176,10 @@ export default function App() {
             <Route path="/" element={<Navigate to="/analytics" replace />} />
             <Route path="/sales" element={<Navigate to="/analytics" replace />} />
             <Route path="/sales/management" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesManagementPage /></ProtectedRoute>} />
+            <Route path="/sales/accounts/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><AccountCreatePage /></ProtectedRoute>} />
+            <Route path="/sales/opportunities/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OpportunityCreatePage /></ProtectedRoute>} />
+            <Route path="/sales/quotes/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><QuoteCreatePage /></ProtectedRoute>} />
+            <Route path="/sales/orders/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OrderCreatePage /></ProtectedRoute>} />
             <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
             <Route path="/sales/customers/:customerId" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomerProfilePage /></ProtectedRoute>} />
             <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />

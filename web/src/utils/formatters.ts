@@ -22,9 +22,19 @@ const compactFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 
-export function formatCurrency(value: number | null | undefined, detailed = false): string {
-  if (value == null || !Number.isFinite(value)) return "$0";
-  return detailed ? currencyDetailedFormatter.format(value) : currencyFormatter.format(value);
+function toFiniteNumber(value: number | string | null | undefined): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function formatCurrency(value: number | string | null | undefined, detailed = false): string {
+  const numericValue = toFiniteNumber(value);
+  if (numericValue == null) return "$0";
+  return detailed ? currencyDetailedFormatter.format(numericValue) : currencyFormatter.format(numericValue);
 }
 
 export function formatCompact(value: number | null | undefined): string {

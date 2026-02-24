@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import Customer, Invoice, InvoiceLine, Opportunity, OpportunityStageConfig, PriceBook, Quote, QuoteLine, SalesAccount, SalesActivity, SalesContact, SalesOrder, SalesOrderLine
 
@@ -81,6 +81,18 @@ def list_quotes(db: Session, status: str | None, page: int, page_size: int):
     q = db.query(Quote)
     if status: q = q.filter(Quote.status == status)
     return _paginate(q.order_by(Quote.updated_at.desc()), page, page_size)
+
+
+def get_quote(db: Session, quote_id: int):
+    return (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.lines),
+            joinedload(Quote.opportunity).joinedload(Opportunity.account),
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
 
 def convert_quote_to_order(db: Session, quote: Quote, user_id: int | None):
     oppty = db.query(Opportunity).filter(Opportunity.id == quote.opportunity_id).first()

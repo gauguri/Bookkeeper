@@ -131,6 +131,17 @@ class QuoteResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class QuoteDetailOpportunity(BaseModel):
+    id: int
+    name: str
+    account_id: int
+    account_name: str | None = None
+
+
+class QuoteDetailResponse(QuoteResponse):
+    opportunity: QuoteDetailOpportunity | None = None
+
 class SalesOrderCreate(BaseModel):
     account_id: int
     opportunity_id: int | None = None

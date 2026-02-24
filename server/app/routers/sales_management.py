@@ -20,6 +20,7 @@ from app.sales_management.service import (
     list_orders,
     list_pricebooks,
     list_quotes,
+    get_quote,
     reports_summary,
     update_account,
     update_opportunity,
@@ -92,6 +93,38 @@ def get_quotes(status: str | None = None, page: int = Query(0, ge=0), page_size:
 @router.post("/quotes", response_model=schemas.QuoteResponse, status_code=status.HTTP_201_CREATED)
 def post_quote(payload: schemas.QuoteCreate, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return create_quote(db, payload.model_dump(), user.id if user else None)
+
+@router.get("/quotes/{quote_id}", response_model=schemas.QuoteDetailResponse)
+def get_quote_by_id(quote_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    quote = get_quote(db, quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found.")
+
+    opportunity = quote.opportunity
+    account = opportunity.account if opportunity else None
+    return schemas.QuoteDetailResponse(
+        id=quote.id,
+        opportunity_id=quote.opportunity_id,
+        quote_number=quote.quote_number,
+        version=quote.version,
+        status=quote.status,
+        valid_until=quote.valid_until,
+        notes=quote.notes,
+        subtotal=quote.subtotal,
+        discount_total=quote.discount_total,
+        tax_total=quote.tax_total,
+        total=quote.total,
+        approval_status=quote.approval_status,
+        lines=quote.lines or [],
+        created_at=quote.created_at,
+        updated_at=quote.updated_at,
+        opportunity={
+            "id": opportunity.id,
+            "name": opportunity.name,
+            "account_id": opportunity.account_id,
+            "account_name": account.name if account else None,
+        } if opportunity else None,
+    )
 
 @router.post("/quotes/{quote_id}/convert-to-order", response_model=schemas.SalesOrderResponse)
 def post_convert_quote(quote_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):

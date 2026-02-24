@@ -103,7 +103,60 @@ def convert_quote_to_order(db: Session, quote: Quote, user_id: int | None):
     db.commit(); db.refresh(order); return order
 
 def create_order(db: Session, payload: dict, user_id: int | None):
-    obj = SalesOrder(**payload, order_number=_next_number(db, "SO", SalesOrder), status="DRAFT", created_by_user_id=user_id)
+    lines = payload.pop("lines", [])
+    quote_id = payload.get("quote_id")
+
+    subtotal = Decimal("0")
+    tax_total = Decimal("0")
+    total = Decimal("0")
+    order_lines: list[SalesOrderLine] = []
+
+    if quote_id:
+        quote = (
+            db.query(Quote)
+            .options(joinedload(Quote.lines))
+            .filter(Quote.id == quote_id)
+            .first()
+        )
+        if not quote:
+            raise ValueError("Quote not found.")
+
+        subtotal = Decimal(quote.subtotal or 0)
+        tax_total = Decimal(quote.tax_total or 0)
+        total = Decimal(quote.total or 0)
+        order_lines = [
+            SalesOrderLine(
+                item_id=line.item_id,
+                qty=line.qty,
+                unit_price=line.unit_price,
+                discount=line.discount_amount,
+                line_total=line.line_total,
+            )
+            for line in quote.lines
+        ]
+    elif lines:
+        normalized, subtotal, _, tax_total, total = _quote_totals(lines)
+        order_lines = [
+            SalesOrderLine(
+                item_id=line.get("item_id"),
+                qty=line.get("qty"),
+                unit_price=line.get("unit_price"),
+                discount=line.get("discount_amount") or Decimal("0"),
+                line_total=line.get("line_total") or Decimal("0"),
+            )
+            for line in normalized
+        ]
+
+    obj = SalesOrder(
+        **payload,
+        order_number=_next_number(db, "SO", SalesOrder),
+        status="DRAFT",
+        subtotal=subtotal,
+        tax_total=tax_total,
+        total=total,
+        created_by_user_id=user_id,
+    )
+    obj.lines = order_lines
     db.add(obj); db.commit(); db.refresh(obj); return obj
 
 def list_orders(db: Session, status: str | None, page: int, page_size: int):

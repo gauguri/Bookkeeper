@@ -4,10 +4,10 @@ import { apiFetch } from "../../api";
 import EntityCreateDrawer from "./EntityCreateDrawer";
 import { ListResponse, SalesAccount } from "./types";
 
-type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void };
+type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void; mode?: "overlay" | "inline" };
 const INDUSTRIES = ["Technology", "Healthcare", "Manufacturing", "Retail", "Financial Services", "Education"];
 
-export default function CreateAccountDrawer({ open, onClose, onCreated }: Props) {
+export default function CreateAccountDrawer({ open, onClose, onCreated, mode = "overlay" }: Props) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -37,7 +37,7 @@ export default function CreateAccountDrawer({ open, onClose, onCreated }: Props)
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
   };
 
-  return <EntityCreateDrawer open={open} title="New Account" description="Create a governed customer account record." icon={<Building2 className="h-5 w-5" />} steps={["Overview", "Details", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.name || form.website || form.phone)} error={error} onClose={onClose} onSaveDraft={persistDraft} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} disableCreate={validation.length > 0}
+  return <EntityCreateDrawer open={open} title="New Account" description="Create a governed customer account record." icon={<Building2 className="h-5 w-5" />} steps={["Overview", "Details", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.name || form.website || form.phone)} error={error} onClose={onClose} onSaveDraft={persistDraft} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} disableCreate={validation.length > 0} mode={mode}
     insights={<div className="space-y-4"><h4 className="font-semibold">Insights / Duplicate Risk</h4><p className="text-xs text-muted">Possible duplicates update as you type name, phone, or website.</p><div className="space-y-2">{dupes.length ? dupes.map((d) => <div key={d.id} className="rounded-lg border border-[var(--bedrock-border)] p-2 text-xs"><p className="font-medium">{d.name}</p><p className="text-muted">{d.phone || d.website || "No phone/website"}</p></div>) : <p className="text-xs text-muted">No similar accounts found.</p>}</div></div>}>
       <div className="grid gap-3 md:grid-cols-2">
         <input data-autofocus="true" className="app-input" placeholder="Account name*" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />

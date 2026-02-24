@@ -150,6 +150,7 @@ class SalesOrderCreate(BaseModel):
     requested_ship_date: date | None = None
     fulfillment_type: str = "SHIPPING"
     shipping_address: str | None = None
+    lines: list[QuoteLineInput] = []
 
 class SalesOrderStatusUpdate(BaseModel):
     status: str

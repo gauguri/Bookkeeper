@@ -30,7 +30,7 @@ export default function CreateOrderDrawer({ open, onClose, onCreated, mode = "ov
     if (!form.account_id) return setError("Account is required.");
     setSaving(true); setError("");
     try {
-      const created = await apiFetch<SalesOrder>("/sales/orders", { method: "POST", body: JSON.stringify({ account_id: Number(form.account_id), quote_id: form.quote_id ? Number(form.quote_id) : null, opportunity_id: form.opportunity_id ? Number(form.opportunity_id) : null, order_date: form.order_date, requested_ship_date: form.requested_ship_date || null, fulfillment_type: form.fulfillment_type, shipping_address: form.shipping_address || null }) });
+      const created = await apiFetch<SalesOrder>("/sales/orders", { method: "POST", body: JSON.stringify({ account_id: Number(form.account_id), quote_id: form.quote_id ? Number(form.quote_id) : null, opportunity_id: form.opportunity_id ? Number(form.opportunity_id) : null, order_date: form.order_date, requested_ship_date: form.requested_ship_date || null, fulfillment_type: form.fulfillment_type, shipping_address: form.shipping_address || null, lines }) });
       if (saveNew) setForm((p) => ({ ...p, account_id: "", quote_id: "", opportunity_id: "", shipping_address: "" }));
       onCreated(created.id, saveNew);
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }

@@ -19,6 +19,9 @@ export type SalesOpportunity = {
   amount_estimate: number;
   probability: number;
   expected_close_date?: string;
+  source?: string | null;
+  next_step?: string | null;
+  updated_at?: string;
 };
 
 export type SalesQuote = {

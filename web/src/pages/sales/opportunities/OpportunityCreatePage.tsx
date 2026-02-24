@@ -17,7 +17,7 @@ export default function OpportunityCreatePage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ account_id: "", name: "", stage: "Qualification", expected_close_date: "", amount_estimate: "0", probability: "25", source: "", next_step: "", notes: "" });
 
-  useEffect(() => { apiFetch<ListResponse<SalesOpportunity>>(`/sales/opportunities?page=0&page_size=100`).then(setPipeline); apiFetch<ListResponse<SalesAccount>>(`/sales/accounts?search=&page=0&page_size=100`).then((r) => setAccounts(r.items)); }, []);
+  useEffect(() => { apiFetch<ListResponse<SalesOpportunity>>(`/sales/opportunities?page=0&page_size=100`).then(setPipeline); apiFetch<ListResponse<SalesAccount>>(`/sales/accounts?page=0&page_size=100`).then((r) => setAccounts(r.items)); }, []);
   useEffect(() => setForm((p) => ({ ...p, probability: String(STAGE_PROB[p.stage] ?? 25) })), [form.stage]);
 
   const validation = useMemo(() => {

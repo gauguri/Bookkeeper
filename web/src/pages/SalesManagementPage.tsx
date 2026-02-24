@@ -52,11 +52,30 @@ export default function SalesManagementPage() {
   useEffect(() => {
     setLoading(true);
     setError("");
+
+    const buildQuery = (params: Record<string, string | number | undefined>) => {
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === "") return;
+        query.set(key, String(value));
+      });
+      return query.toString();
+    };
+
     const tasks: Promise<unknown>[] = [apiFetch<Summary>("/sales/reports/summary").then(setSummary)];
-    if (section === "accounts") tasks.push(apiFetch<ListResponse<SalesAccount>>(`/sales/accounts?search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}`).then(setAccounts));
-    else if (section === "opportunities") tasks.push(apiFetch<ListResponse<SalesOpportunity>>(`/sales/opportunities?search=${encodeURIComponent(search)}&stage=${view === "needs_approval" ? "Negotiation" : ""}&page=${page}&page_size=${pageSize}`).then(setOpportunities));
-    else if (section === "quotes") tasks.push(apiFetch<ListResponse<SalesQuote>>(`/sales/quotes?status=${encodeURIComponent(view === "needs_approval" ? "Sent" : "")}&page=${page}&page_size=${pageSize}`).then(setQuotes));
-    else if (section === "orders") tasks.push(apiFetch<ListResponse<SalesOrder>>(`/sales/orders?status=${encodeURIComponent(view === "needs_approval" ? "CONFIRMED" : "")}&page=${page}&page_size=${pageSize}`).then(setOrders));
+    if (section === "accounts") {
+      const q = buildQuery({ search: search.trim() || undefined, page, page_size: pageSize });
+      tasks.push(apiFetch<ListResponse<SalesAccount>>(`/sales/accounts?${q}`).then(setAccounts));
+    } else if (section === "opportunities") {
+      const q = buildQuery({ search: search.trim() || undefined, stage: view === "needs_approval" ? "Negotiation" : undefined, page, page_size: pageSize });
+      tasks.push(apiFetch<ListResponse<SalesOpportunity>>(`/sales/opportunities?${q}`).then(setOpportunities));
+    } else if (section === "quotes") {
+      const q = buildQuery({ status: view === "needs_approval" ? "Sent" : undefined, page, page_size: pageSize });
+      tasks.push(apiFetch<ListResponse<SalesQuote>>(`/sales/quotes?${q}`).then(setQuotes));
+    } else if (section === "orders") {
+      const q = buildQuery({ status: view === "needs_approval" ? "CONFIRMED" : undefined, page, page_size: pageSize });
+      tasks.push(apiFetch<ListResponse<SalesOrder>>(`/sales/orders?${q}`).then(setOrders));
+    }
     Promise.all(tasks).catch((e: Error) => setError(e.message || "Failed to load sales data")).finally(() => setLoading(false));
   }, [section, search, view, page, pageSize, reloadTick]);
 

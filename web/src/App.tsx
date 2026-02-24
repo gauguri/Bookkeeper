@@ -27,6 +27,7 @@ import CashForecastPage from "./pages/CashForecastPage";
 import SalesLanding from "./pages/SalesLanding";
 import SalesManagementPage from "./pages/SalesManagementPage";
 import AccountCreatePage from "./pages/sales/accounts/AccountCreatePage";
+import AccountDetailPage from "./pages/sales/accounts/AccountDetailPage";
 import OpportunityCreatePage from "./pages/sales/opportunities/OpportunityCreatePage";
 import QuoteCreatePage from "./pages/sales/quotes/QuoteCreatePage";
 import OrderCreatePage from "./pages/sales/orders/OrderCreatePage";
@@ -177,6 +178,7 @@ export default function App() {
             <Route path="/sales" element={<Navigate to="/analytics" replace />} />
             <Route path="/sales/management" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesManagementPage /></ProtectedRoute>} />
             <Route path="/sales/accounts/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><AccountCreatePage /></ProtectedRoute>} />
+            <Route path="/sales/accounts/:accountId" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><AccountDetailPage /></ProtectedRoute>} />
             <Route path="/sales/opportunities/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OpportunityCreatePage /></ProtectedRoute>} />
             <Route path="/sales/quotes/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><QuoteCreatePage /></ProtectedRoute>} />
             <Route path="/sales/orders/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OrderCreatePage /></ProtectedRoute>} />

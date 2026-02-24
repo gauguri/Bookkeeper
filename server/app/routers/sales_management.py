@@ -39,6 +39,14 @@ def get_accounts(
 ):
     return list_accounts(db, search, owner_user_id, page, page_size)
 
+
+@router.get("/accounts/{account_id}", response_model=schemas.SalesAccountResponse)
+def get_account(account_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    account = db.query(SalesAccount).filter(SalesAccount.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    return account
+
 @router.post("/accounts", response_model=schemas.SalesAccountResponse, status_code=status.HTTP_201_CREATED)
 def post_account(payload: schemas.SalesAccountCreate, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return create_account(db, payload.model_dump(), user.id if user else None)

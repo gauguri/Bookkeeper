@@ -5,9 +5,9 @@ import { formatCurrency } from "../../utils/formatters";
 import EntityCreateDrawer from "./EntityCreateDrawer";
 import { ItemLookup, ListResponse, QuoteLine, SalesOpportunity, SalesQuote } from "./types";
 
-type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void };
+type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void; mode?: "overlay" | "inline" };
 
-export default function CreateQuoteDrawer({ open, onClose, onCreated }: Props) {
+export default function CreateQuoteDrawer({ open, onClose, onCreated, mode = "overlay" }: Props) {
   const [step, setStep] = useState(0);
   const [opps, setOpps] = useState<SalesOpportunity[]>([]);
   const [items, setItems] = useState<ItemLookup[]>([]);
@@ -37,7 +37,7 @@ export default function CreateQuoteDrawer({ open, onClose, onCreated }: Props) {
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
   };
 
-  return <EntityCreateDrawer open={open} title="New Quote" description="CPQ-lite quote creation with approvals and margin signals." icon={<FileText className="h-5 w-5" />} steps={["Overview", "Line Items", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.opportunity_id || lines.length)} error={error} onClose={onClose} onSaveDraft={() => localStorage.setItem("draft:create-quote", JSON.stringify({ form, lines }))} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} insights={<div className="space-y-3 text-sm"><h4 className="font-semibold">Quote Insights</h4><p>Pricing source: <span className="text-muted">Default pricebook + manual overrides</span></p>{approvalRequired && <p className="rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-300">Approval required: discount over threshold.</p>}<p>Margin preview: {totals.grand > 0 ? `${Math.round(((totals.grand - totals.subtotal * 0.7) / totals.grand) * 100)}%` : "0%"}</p><button className="app-button-secondary w-full" disabled title="Coming soon">Generate PDF (coming soon)</button></div>}>
+  return <EntityCreateDrawer open={open} title="New Quote" description="CPQ-lite quote creation with approvals and margin signals." icon={<FileText className="h-5 w-5" />} steps={["Overview", "Line Items", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.opportunity_id || lines.length)} error={error} onClose={onClose} onSaveDraft={() => localStorage.setItem("draft:create-quote", JSON.stringify({ form, lines }))} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} mode={mode} insights={<div className="space-y-3 text-sm"><h4 className="font-semibold">Quote Insights</h4><p>Pricing source: <span className="text-muted">Default pricebook + manual overrides</span></p>{approvalRequired && <p className="rounded border border-amber-400/40 bg-amber-500/10 p-2 text-amber-300">Approval required: discount over threshold.</p>}<p>Margin preview: {totals.grand > 0 ? `${Math.round(((totals.grand - totals.subtotal * 0.7) / totals.grand) * 100)}%` : "0%"}</p><button className="app-button-secondary w-full" disabled title="Coming soon">Generate PDF (coming soon)</button></div>}>
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2"><select data-autofocus="true" className="app-select" value={form.opportunity_id} onChange={(e) => setForm((p) => ({ ...p, opportunity_id: e.target.value }))}><option value="">Select opportunity*</option>{opps.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select><input className="app-input" type="date" value={form.valid_until} onChange={(e) => setForm((p) => ({ ...p, valid_until: e.target.value }))} /></div>
       <div className="rounded-xl border border-[var(--bedrock-border)] p-3">

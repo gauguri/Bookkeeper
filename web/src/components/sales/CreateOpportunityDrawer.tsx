@@ -5,11 +5,11 @@ import { formatCurrency } from "../../utils/formatters";
 import EntityCreateDrawer from "./EntityCreateDrawer";
 import { ListResponse, SalesAccount, SalesOpportunity } from "./types";
 
-type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void };
+type Props = { open: boolean; onClose: () => void; onCreated: (id: number, saveNew?: boolean) => void; mode?: "overlay" | "inline" };
 const STAGES = ["Prospecting", "Qualification", "Proposal", "Negotiation", "Closed Won", "Closed Lost"];
 const STAGE_PROB: Record<string, number> = { Prospecting: 10, Qualification: 25, Proposal: 50, Negotiation: 75, "Closed Won": 100, "Closed Lost": 0 };
 
-export default function CreateOpportunityDrawer({ open, onClose, onCreated }: Props) {
+export default function CreateOpportunityDrawer({ open, onClose, onCreated, mode = "overlay" }: Props) {
   const [step, setStep] = useState(0);
   const [accounts, setAccounts] = useState<SalesAccount[]>([]);
   const [pipeline, setPipeline] = useState<ListResponse<SalesOpportunity>>({ items: [], total_count: 0 });
@@ -39,7 +39,7 @@ export default function CreateOpportunityDrawer({ open, onClose, onCreated }: Pr
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
   };
 
-  return <EntityCreateDrawer open={open} title="New Opportunity" description="Create a pipeline record with guided defaults." icon={<BriefcaseBusiness className="h-5 w-5" />} steps={["Overview", "Details", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.account_id || form.name)} error={error || (warning ? "Probability differs from stage baseline." : "")} onClose={onClose} onSaveDraft={() => localStorage.setItem("draft:create-opportunity", JSON.stringify(form))} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} insights={<div className="space-y-3"><h4 className="font-semibold">Pipeline snapshot</h4><p className="text-xs text-muted">My pipeline total</p><p className="text-xl font-semibold">{formatCurrency(totals)}</p><div className="space-y-1 text-xs">{Object.entries(STAGE_PROB).map(([s, p]) => <div key={s} className="flex justify-between"><span>{s}</span><span>{p}%</span></div>)}</div></div>}>
+  return <EntityCreateDrawer open={open} title="New Opportunity" description="Create a pipeline record with guided defaults." icon={<BriefcaseBusiness className="h-5 w-5" />} steps={["Overview", "Details", "Review"]} step={step} onStepChange={setStep} dirty={Boolean(form.account_id || form.name)} error={error || (warning ? "Probability differs from stage baseline." : "")} onClose={onClose} onSaveDraft={() => localStorage.setItem("draft:create-opportunity", JSON.stringify(form))} onSaveNew={() => create(true)} onCreate={() => create(false)} creating={saving} mode={mode} insights={<div className="space-y-3"><h4 className="font-semibold">Pipeline snapshot</h4><p className="text-xs text-muted">My pipeline total</p><p className="text-xl font-semibold">{formatCurrency(totals)}</p><div className="space-y-1 text-xs">{Object.entries(STAGE_PROB).map(([s, p]) => <div key={s} className="flex justify-between"><span>{s}</span><span>{p}%</span></div>)}</div></div>}>
     <div className="grid gap-3 md:grid-cols-2">
       <select data-autofocus="true" className="app-select" value={form.account_id} onChange={(e) => setForm((p) => ({ ...p, account_id: e.target.value, name: p.name || defaultName }))}><option value="">Select account*</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
       <input className="app-input" placeholder="Opportunity name*" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value || defaultName }))} />

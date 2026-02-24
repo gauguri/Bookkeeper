@@ -28,7 +28,7 @@ from app.sales_management.service import (
 
 router = APIRouter(prefix="/api/sales", tags=["sales-management"])
 
-@router.get("/accounts", response_model=schemas.Page)
+@router.get("/accounts", response_model=schemas.Page[schemas.SalesAccountResponse])
 def get_accounts(
     search: str | None = None,
     owner_user_id: int | None = None,
@@ -54,7 +54,7 @@ def put_account(account_id: int, payload: schemas.SalesAccountUpdate, db: Sessio
 def post_contact(payload: schemas.SalesContactCreate, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return create_contact(db, payload.model_dump())
 
-@router.get("/opportunities", response_model=schemas.Page)
+@router.get("/opportunities", response_model=schemas.Page[schemas.OpportunityResponse])
 def get_opportunities(search: str | None = None, stage: str | None = None, owner_user_id: int | None = None, page: int = Query(0, ge=0), page_size: int = Query(25, ge=1, le=200), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_opportunities(db, search, stage, owner_user_id, page, page_size)
 
@@ -69,7 +69,7 @@ def put_opportunity(opportunity_id: int, payload: schemas.OpportunityUpdate, db:
         raise HTTPException(status_code=404, detail="Opportunity not found.")
     return update_opportunity(db, obj, payload.model_dump(exclude_unset=True), user.id if user else None)
 
-@router.get("/quotes", response_model=schemas.Page)
+@router.get("/quotes", response_model=schemas.Page[schemas.QuoteResponse])
 def get_quotes(status: str | None = None, page: int = Query(0, ge=0), page_size: int = Query(25, ge=1, le=200), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_quotes(db, status, page, page_size)
 
@@ -84,7 +84,7 @@ def post_convert_quote(quote_id: int, db: Session = Depends(get_db), user=Depend
         raise HTTPException(status_code=404, detail="Quote not found.")
     return convert_quote_to_order(db, quote, user.id if user else None)
 
-@router.get("/orders", response_model=schemas.Page)
+@router.get("/orders", response_model=schemas.Page[schemas.SalesOrderResponse])
 def get_orders(status: str | None = None, page: int = Query(0, ge=0), page_size: int = Query(25, ge=1, le=200), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_orders(db, status, page, page_size)
 
@@ -102,7 +102,7 @@ def post_order_status(order_id: int, payload: schemas.SalesOrderStatusUpdate, db
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-@router.get("/activities", response_model=schemas.Page)
+@router.get("/activities", response_model=schemas.Page[schemas.ActivityResponse])
 def get_activities(entity_type: str | None = None, entity_id: int | None = None, page: int = Query(0, ge=0), page_size: int = Query(25, ge=1, le=200), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_activities(db, entity_type, entity_id, page, page_size)
 

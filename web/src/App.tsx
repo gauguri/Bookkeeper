@@ -33,6 +33,7 @@ import OpportunityDetailPage from "./pages/sales/opportunities/OpportunityDetail
 import QuoteCreatePage from "./pages/sales/quotes/QuoteCreatePage";
 import QuoteDetailPage from "./pages/sales/quotes/QuoteDetailPage";
 import OrderCreatePage from "./pages/sales/orders/OrderCreatePage";
+import OrderDetailPage from "./pages/sales/orders/OrderDetailPage";
 import SalesRequestDetailPage from "./pages/SalesRequestDetailPage";
 import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
@@ -187,6 +188,7 @@ export default function App() {
             <Route path="/sales/quotes/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><QuoteCreatePage /></ProtectedRoute>} />
             <Route path="/sales/quotes/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><QuoteDetailPage /></ProtectedRoute>} />
             <Route path="/sales/orders/new" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OrderCreatePage /></ProtectedRoute>} />
+            <Route path="/sales/orders/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><OrderDetailPage /></ProtectedRoute>} />
             <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
             <Route path="/sales/customers/:customerId" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomerProfilePage /></ProtectedRoute>} />
             <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />

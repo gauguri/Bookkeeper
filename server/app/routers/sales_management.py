@@ -22,6 +22,8 @@ from app.sales_management.service import (
     list_quotes,
     get_quote,
     reports_summary,
+    pipeline_trend,
+    conversion_summary,
     update_account,
     update_opportunity,
     update_order_status,
@@ -174,6 +176,21 @@ def get_pricebooks(db: Session = Depends(get_db), _=Depends(require_module(Modul
 @router.get("/reports/summary", response_model=schemas.ReportSummary)
 def get_reports_summary(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return reports_summary(db)
+
+
+@router.get("/reports/pipeline_trend", response_model=list[schemas.PipelineTrendPoint])
+def get_pipeline_trend(months: int = Query(12, ge=1, le=24), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    return pipeline_trend(db, months=months)
+
+
+@router.get("/reports/stage_distribution", response_model=list[schemas.PipelineSummaryRow])
+def get_stage_distribution(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    return reports_summary(db).get("by_stage", [])
+
+
+@router.get("/reports/conversion_summary", response_model=schemas.ConversionSummary)
+def get_conversion_summary(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    return conversion_summary(db)
 
 @router.post("/sales-requests/{sales_request_id}/convert-to-opportunity", response_model=schemas.OpportunityResponse)
 def convert_sales_request_to_opportunity(sales_request_id: int, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):

@@ -137,6 +137,14 @@ def post_convert_quote(quote_id: int, db: Session = Depends(get_db), user=Depend
 def get_orders(status: str | None = None, page: int = Query(0, ge=0), page_size: int = Query(25, ge=1, le=200), db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_orders(db, status, page, page_size)
 
+
+@router.get("/orders/{order_id}", response_model=schemas.SalesOrderResponse)
+def get_order_by_id(order_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    order = db.query(SalesOrder).filter(SalesOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found.")
+    return order
+
 @router.post("/orders", response_model=schemas.SalesOrderResponse, status_code=status.HTTP_201_CREATED)
 def post_orders(payload: schemas.SalesOrderCreate, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return create_order(db, payload.model_dump(), user.id if user else None)

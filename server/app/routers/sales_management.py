@@ -70,6 +70,14 @@ def get_opportunities(search: str | None = None, stage: str | None = None, owner
 def post_opportunity(payload: schemas.OpportunityCreate, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return create_opportunity(db, payload.model_dump(), user.id if user else None)
 
+
+@router.get("/opportunities/{opportunity_id}", response_model=schemas.OpportunityResponse)
+def get_opportunity(opportunity_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
+    opportunity = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    if not opportunity:
+        raise HTTPException(status_code=404, detail="Opportunity not found.")
+    return opportunity
+
 @router.put("/opportunities/{opportunity_id}", response_model=schemas.OpportunityResponse)
 def put_opportunity(opportunity_id: int, payload: schemas.OpportunityUpdate, db: Session = Depends(get_db), user=Depends(get_current_user), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     obj = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()

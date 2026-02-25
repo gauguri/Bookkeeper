@@ -26,6 +26,17 @@ export function getChartColor(index: number): string {
   return CHART_COLORS[index % CHART_COLORS.length];
 }
 
+const RANK_COLOR_STEPS = ["#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd"] as const;
+
+export function getRankColor(index: number, total: number): string {
+  const safeTotal = Math.max(1, total);
+  const safeIndex = Math.min(Math.max(index, 0), safeTotal - 1);
+  if (safeTotal === 1) return RANK_COLOR_STEPS[0];
+  const scalePosition = safeIndex / (safeTotal - 1);
+  const stepIndex = Math.round(scalePosition * (RANK_COLOR_STEPS.length - 1));
+  return RANK_COLOR_STEPS[Math.min(stepIndex, RANK_COLOR_STEPS.length - 1)];
+}
+
 export const AXIS_STYLE = {
   fontSize: 11,
   fill: PL_PALETTE.neutralAxis,

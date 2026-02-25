@@ -27,17 +27,27 @@ def po_total(po: PurchaseOrder) -> Decimal:
     return po_items_subtotal(po) + po_extra_costs_total(po)
 
 
-def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrderLine:
-    item = db.query(Item).filter(Item.id == payload["item_id"]).first()
-    if not item:
-        raise ValueError("Item not found.")
+def _supplier_item_link_or_error(db: Session, supplier_id: int, item: Item) -> SupplierItem:
     link = (
         db.query(SupplierItem)
         .filter(SupplierItem.supplier_id == supplier_id, SupplierItem.item_id == item.id)
         .first()
     )
-    if not link and payload.get("unit_cost") is None:
-        raise ValueError("Supplier is not linked to item.")
+    if link:
+        return link
+
+    supplier_name = db.query(Supplier.name).filter(Supplier.id == supplier_id).scalar() or f"Supplier #{supplier_id}"
+    raise ValueError(
+        f"Item {item.name} is not mapped to supplier {supplier_name}. Link supplier to item before creating PO."
+    )
+
+
+def _build_po_line(db: Session, supplier_id: int, payload: dict) -> PurchaseOrderLine:
+    item = db.query(Item).filter(Item.id == payload["item_id"]).first()
+    if not item:
+        raise ValueError("Item not found.")
+
+    link = _supplier_item_link_or_error(db, supplier_id, item)
     unit_cost = Decimal(payload.get("unit_cost") or (link.supplier_cost if link else 0))
     freight_cost = Decimal(payload.get("freight_cost") or (link.freight_cost if link else 0))
     tariff_cost = Decimal(payload.get("tariff_cost") or (link.tariff_cost if link else 0))

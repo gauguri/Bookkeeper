@@ -379,3 +379,53 @@ def test_api_delete_purchase_order_returns_conflict_when_sent(client_with_fk):
         delete_response.json()["detail"]
         == "Cannot delete purchase order because it has dependent records (inventory landed / send log). Use Cancel instead or remove dependencies."
     )
+
+
+def test_api_list_supplier_items_for_purchase_orders_returns_supplier_scoped_catalog(client):
+    supplier = client.post("/api/suppliers", json={"name": "Primary Supply"}).json()
+    other_supplier = client.post("/api/suppliers", json={"name": "Other Supply"}).json()
+    item_one = client.post("/api/items", json={"name": "Widget A", "unit_price": 10.0, "is_active": True}).json()
+    item_two = client.post("/api/items", json={"name": "Widget B", "unit_price": 12.0, "is_active": True}).json()
+
+    client.post(
+        f"/api/suppliers/{supplier['id']}/items",
+        json={"item_id": item_one["id"], "supplier_cost": 7.25, "supplier_sku": "SUP-A"},
+    )
+    client.post(
+        f"/api/suppliers/{other_supplier['id']}/items",
+        json={"item_id": item_two["id"], "supplier_cost": 9.25},
+    )
+
+    response = client.get(f"/api/suppliers/{supplier['id']}/items")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["item_id"] == item_one["id"]
+    assert payload[0]["item_name"] == "Widget A"
+    assert payload[0]["sku"] == item_one["sku"]
+    assert payload[0]["default_unit_cost"] == "7.25"
+    assert payload[0]["supplier_sku"] == "SUP-A"
+
+
+def test_api_purchase_order_rejects_items_not_mapped_to_supplier(client_with_fk):
+    supplier = client_with_fk.post("/api/suppliers", json={"name": "Mapped Supply"}).json()
+    other_supplier = client_with_fk.post("/api/suppliers", json={"name": "Other Supply"}).json()
+    item = client_with_fk.post("/api/items", json={"name": "Widget", "unit_price": 10.0, "is_active": True}).json()
+
+    client_with_fk.post(
+        f"/api/suppliers/{other_supplier['id']}/items",
+        json={"item_id": item["id"], "supplier_cost": 4.0},
+    )
+
+    response = client_with_fk.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "order_date": "2024-01-01",
+            "lines": [{"item_id": item["id"], "quantity": 1, "unit_cost": 4.0}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Item Widget is not mapped to supplier Mapped Supply. Link supplier to item before creating PO."

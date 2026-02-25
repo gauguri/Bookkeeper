@@ -77,7 +77,9 @@ class SupplierItemBySupplierResponse(SupplierItemBase):
     supplier_id: int
     item_id: int
     item_name: str
+    sku: Optional[str] = None
     item_sku: Optional[str] = None
+    default_unit_cost: Decimal
     item_unit_price: Decimal
     landed_cost: Decimal
 

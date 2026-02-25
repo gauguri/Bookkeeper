@@ -5,7 +5,7 @@ import {
   ArrowUpDown, SlidersHorizontal, X,
 } from "lucide-react";
 import {
-  useCustomersEnriched, useCustomersSummary, useCreateCustomer,
+  useCustomersEnriched, useCreateCustomer,
   type CustomerFilters, type CustomerListItem,
 } from "../hooks/useCustomers";
 import { formatCurrency, formatCompact } from "../utils/formatters";
@@ -23,6 +23,39 @@ const emptyForm = {
   name: "", email: "", phone: "", billing_address: "", shipping_address: "",
   notes: "", tier: "STANDARD", is_active: true,
 };
+
+type CustomerListApiRecord = CustomerListItem & {
+  totalRevenue?: number | string;
+  ytd_revenue?: number | string;
+  ytdRevenue?: number | string;
+  outstanding?: number | string;
+  outstandingAr?: number | string;
+  invoiceCount?: number;
+  paymentScore?: "good" | "average" | "slow" | "at-risk";
+  lastInvoiceDate?: string | null;
+  isActive?: boolean;
+};
+
+type NormalizedCustomerRow = CustomerListItem;
+
+const toNumber = (value: unknown): number => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const normalizeCustomerRow = (row: CustomerListApiRecord): NormalizedCustomerRow => ({
+  ...row,
+  is_active: row.is_active ?? row.isActive ?? true,
+  total_revenue: toNumber(row.total_revenue ?? row.ytd_revenue ?? row.ytdRevenue ?? row.totalRevenue),
+  outstanding_ar: toNumber(row.outstanding_ar ?? row.outstanding ?? row.outstandingAr),
+  invoice_count: row.invoice_count ?? row.invoiceCount ?? 0,
+  payment_score: row.payment_score ?? row.paymentScore ?? "good",
+  last_invoice_date: row.last_invoice_date ?? row.lastInvoiceDate ?? null,
+});
 
 export default function CustomersPage() {
   const navigate = useNavigate();
@@ -44,9 +77,20 @@ export default function CustomersPage() {
     sort_dir: sortDir,
   }), [search, tierFilter, statusFilter, sortBy, sortDir]);
 
-  const { data: summary } = useCustomersSummary();
   const { data: customers, isLoading } = useCustomersEnriched(filters);
   const createMutation = useCreateCustomer();
+
+  const normalizedCustomers = useMemo(
+    () => (customers ?? []).map((row) => normalizeCustomerRow(row as CustomerListApiRecord)),
+    [customers],
+  );
+
+  const kpis = useMemo(() => ({
+    customers: normalizedCustomers.length,
+    ytdRevenue: normalizedCustomers.reduce((sum, row) => sum + toNumber(row.total_revenue), 0),
+    outstandingAr: normalizedCustomers.reduce((sum, row) => sum + toNumber(row.outstanding_ar), 0),
+    atRisk: normalizedCustomers.filter((row) => row.payment_score === "at-risk").length,
+  }), [normalizedCustomers]);
 
   const handleSort = (col: string) => {
     if (sortBy === col) {
@@ -91,15 +135,24 @@ export default function CustomersPage() {
       </div>
 
       {/* ── Summary KPI Bar ── */}
-      {summary && (
+      {isLoading ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="app-card p-4">
+              <div className="mb-2 h-3 w-20 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+              <div className="h-7 w-28 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+            </div>
+          ))}
+        </div>
+      ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="app-card flex items-center gap-3 p-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-900/20">
               <Users className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-xs text-muted">Customers</p>
-              <p className="text-lg font-bold">{summary.active_customers}<span className="text-xs font-normal text-muted">/{summary.total_customers}</span></p>
+              <p className="text-xs text-muted">Customers (filtered)</p>
+              <p className="text-lg font-bold">{kpis.customers}</p>
             </div>
           </div>
           <div className="app-card flex items-center gap-3 p-4">
@@ -108,7 +161,7 @@ export default function CustomersPage() {
             </div>
             <div>
               <p className="text-xs text-muted">YTD Revenue</p>
-              <p className="text-lg font-bold">{formatCompact(summary.total_revenue_ytd)}</p>
+              <p className="text-lg font-bold">{formatCompact(kpis.ytdRevenue)}</p>
             </div>
           </div>
           <div className="app-card flex items-center gap-3 p-4">
@@ -117,7 +170,7 @@ export default function CustomersPage() {
             </div>
             <div>
               <p className="text-xs text-muted">Outstanding A/R</p>
-              <p className="text-lg font-bold">{formatCompact(summary.total_outstanding_ar)}</p>
+              <p className="text-lg font-bold">{formatCompact(kpis.outstandingAr)}</p>
             </div>
           </div>
           <div className="app-card flex items-center gap-3 p-4">
@@ -126,7 +179,7 @@ export default function CustomersPage() {
             </div>
             <div>
               <p className="text-xs text-muted">At Risk</p>
-              <p className="text-lg font-bold">{summary.customers_at_risk}</p>
+              <p className="text-lg font-bold">{kpis.atRisk}</p>
             </div>
           </div>
         </div>
@@ -252,7 +305,7 @@ export default function CustomersPage() {
                   </tr>
                 ))
               )}
-              {customers?.map((c) => (
+              {normalizedCustomers.map((c) => (
                 <tr
                   key={c.id}
                   className="border-b last:border-0 cursor-pointer transition hover:bg-gray-50/60 dark:hover:bg-gray-800/40"
@@ -294,7 +347,7 @@ export default function CustomersPage() {
                   </td>
                 </tr>
               ))}
-              {!isLoading && (!customers || customers.length === 0) && (
+              {!isLoading && normalizedCustomers.length === 0 && (
                 <tr>
                   <td colSpan={6} className="py-12 text-center">
                     <div className="mx-auto flex max-w-xs flex-col items-center gap-3">

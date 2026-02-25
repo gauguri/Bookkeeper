@@ -1,17 +1,10 @@
-export const currency = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+import { formatCurrencySafe, toNumberSafe } from "./numberSafe";
+
+export const currency = (value: unknown) => formatCurrencySafe(value);
 
 export const toNumber = (value: unknown): number | null => {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
+  const parsed = toNumberSafe(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 export const formatNumber = (value: unknown, digits = 1): string => {

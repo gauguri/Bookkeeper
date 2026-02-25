@@ -11,6 +11,7 @@ import {
 import { CHART_MARGIN, AXIS_STYLE } from "../../utils/chartHelpers";
 import { AGING_COLORS } from "../../utils/colorScales";
 import { formatCurrency, formatCompact } from "../../utils/formatters";
+import { toNumberSafe } from "../../utils/numberSafe";
 import type { AgingData } from "../../hooks/useAnalytics";
 
 type Props = {
@@ -30,19 +31,22 @@ const BUCKET_COLORS = [
 export default function AgingChart({ data, title, height = 240 }: Props) {
   const chartData = data.bucket_labels.map((label, i) => ({
     name: label,
-    value: data.bucket_values[i],
+    value: toNumberSafe(data.bucket_values[i]),
     color: BUCKET_COLORS[i],
   }));
+  const safeTotal = toNumberSafe(data.total);
+  const hasData = chartData.some((entry) => entry.value > 0);
 
   return (
     <div className="app-card p-4">
       {title && (
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold">{title || data.label}</h3>
-          <span className="text-sm font-bold">{formatCurrency(data.total)}</span>
+          <span className="text-sm font-bold">{formatCurrency(safeTotal)}</span>
         </div>
       )}
-      <ResponsiveContainer width="100%" height={height}>
+      {hasData ? (
+        <ResponsiveContainer width="100%" height={height}>
         <BarChart data={chartData} layout="vertical" margin={{ ...CHART_MARGIN, left: 40 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} horizontal={false} />
           <XAxis type="number" tickFormatter={formatCompact} {...AXIS_STYLE} />
@@ -63,6 +67,9 @@ export default function AgingChart({ data, title, height = 240 }: Props) {
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+      ) : (
+        <div className="flex h-[240px] items-center justify-center text-sm text-muted">No data available.</div>
+      )}
       <div className="mt-2 flex flex-wrap gap-3">
         {chartData.map((entry) => (
           <div key={entry.name} className="flex items-center gap-1.5 text-xs">

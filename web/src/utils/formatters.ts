@@ -1,3 +1,5 @@
+import { formatCurrencySafe, toNumberSafe } from "./numberSafe";
+
 /**
  * Number, currency, percentage, and date formatters for analytics.
  */
@@ -23,18 +25,17 @@ const compactFormatter = new Intl.NumberFormat("en-US", {
 });
 
 function toFiniteNumber(value: number | string | null | undefined): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
+  const parsed = toNumberSafe(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function formatCurrency(value: number | string | null | undefined, detailed = false): string {
-  const numericValue = toFiniteNumber(value);
-  if (numericValue == null) return "$0";
-  return detailed ? currencyDetailedFormatter.format(numericValue) : currencyFormatter.format(numericValue);
+  const digits = detailed ? 2 : 0;
+  return formatCurrencySafe(value, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    fallback: detailed ? "$0.00" : "$0",
+  });
 }
 
 export function formatCompact(value: number | null | undefined): string {
@@ -43,8 +44,9 @@ export function formatCompact(value: number | null | undefined): string {
 }
 
 export function formatPercent(value: number | null | undefined, decimals = 1): string {
-  if (value == null || !Number.isFinite(value)) return "0%";
-  return `${value.toFixed(decimals)}%`;
+  const numeric = toFiniteNumber(value);
+  if (numeric == null) return "0%";
+  return `${numeric.toFixed(decimals)}%`;
 }
 
 export function formatRatio(value: number | null | undefined, decimals = 2): string {
@@ -76,13 +78,14 @@ export function formatKpiValue(value: number | null | undefined, unit: string): 
     case "months":
       return formatMonths(value);
     default:
-      return value.toFixed(1);
+      return toFiniteNumber(value)?.toFixed(1) ?? "0.0";
   }
 }
 
 export function formatChange(value: number, unit: string): string {
-  const sign = value > 0 ? "+" : "";
-  if (unit === "currency") return `${sign}${formatCurrency(value)}`;
-  if (unit === "percent") return `${sign}${value.toFixed(1)}%`;
-  return `${sign}${value.toFixed(1)}`;
+  const numeric = toFiniteNumber(value) ?? 0;
+  const sign = numeric > 0 ? "+" : "";
+  if (unit === "currency") return `${sign}${formatCurrency(numeric)}`;
+  if (unit === "percent") return `${sign}${numeric.toFixed(1)}%`;
+  return `${sign}${numeric.toFixed(1)}`;
 }

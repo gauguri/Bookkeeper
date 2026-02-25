@@ -1,5 +1,6 @@
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { formatKpiValue, formatPercent } from "../../utils/formatters";
+import { toNumberSafe } from "../../utils/numberSafe";
 import { getDirectionColorClass, getStatusBgClass } from "../../utils/colorScales";
 import type { KpiData } from "../../hooks/useAnalytics";
 
@@ -9,13 +10,25 @@ type Props = {
   invertDirection?: boolean;
 };
 
+const warnedMetricCards = new Set<string>();
+
+function guardNaNDisplay(value: string, kpiKey: string): string {
+  if (!value.includes("NaN")) return value;
+  if (!warnedMetricCards.has(kpiKey)) {
+    warnedMetricCards.add(kpiKey);
+    console.warn(`[MetricCard] Replaced invalid KPI display for ${kpiKey}`);
+  }
+  return "$0.00";
+}
+
 export default function MetricCard({ kpi, subtitle, invertDirection = false }: Props) {
   const dirColorClass = getDirectionColorClass(kpi.direction, invertDirection);
+  const displayValue = guardNaNDisplay(formatKpiValue(kpi.current_value, kpi.unit), kpi.kpi_key);
 
   return (
     <div className={`app-card p-5 ${getStatusBgClass(kpi.status)}`}>
       <p className="text-xs font-medium uppercase tracking-wider text-muted">{kpi.label}</p>
-      <p className="mt-2 text-3xl font-bold">{formatKpiValue(kpi.current_value, kpi.unit)}</p>
+      <p className="mt-2 text-3xl font-bold">{displayValue}</p>
       {subtitle && <p className="mt-1 text-xs text-muted">{subtitle}</p>}
 
       <div className="mt-3 flex items-center gap-2">
@@ -40,8 +53,8 @@ export default function MetricCard({ kpi, subtitle, invertDirection = false }: P
               style={{
                 width: `${Math.min(
                   100,
-                  kpi.target_value !== 0
-                    ? Math.abs((kpi.current_value / kpi.target_value) * 100)
+                  toNumberSafe(kpi.target_value) !== 0
+                    ? Math.abs((toNumberSafe(kpi.current_value) / toNumberSafe(kpi.target_value)) * 100)
                     : 0
                 )}%`,
               }}

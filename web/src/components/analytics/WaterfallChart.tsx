@@ -13,6 +13,7 @@ import {
 import { CHART_MARGIN, AXIS_STYLE } from "../../utils/chartHelpers";
 import { PL_PALETTE } from "../../utils/colorScales";
 import { formatCompact, formatCurrency } from "../../utils/formatters";
+import { toNumberSafe } from "../../utils/numberSafe";
 import { NEUTRALS } from "../../theme/chartPalette";
 
 type WaterfallItem = {
@@ -63,7 +64,7 @@ export default function WaterfallChart({ data, title, height = 300 }: Props) {
   let running = 0;
   const chartData: WaterfallDatum[] = data.map((item) => {
     const semanticType = normalizeType(item.type);
-    const numeric = Number(item.value) || 0;
+    const numeric = toNumberSafe(item.value);
 
     if (semanticType === "total") {
       const totalValue = Math.abs(numeric);

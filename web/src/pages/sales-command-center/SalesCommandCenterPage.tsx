@@ -13,6 +13,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Toolti
 import { apiFetch } from "../../api";
 import { ListResponse, SalesAccount, SalesOpportunity, SalesOrder, SalesQuote } from "../../components/sales/types";
 import { formatCompact, formatCurrency } from "../../utils/formatters";
+import { formatCurrencySafe, formatNumberSafe, sumBySafe, toNumberSafe } from "../../utils/numberSafe";
 import type { AgingData, KpiData } from "../../hooks/useAnalytics";
 import SalesCommandCenterTabs from "./SalesCommandCenterTabs";
 import SalesCreateAccountView from "./SalesCreateAccountView";
@@ -127,103 +128,110 @@ export default function SalesCommandCenterPage() {
 
   const pipelineHasData = (summary?.pipeline_value || 0) > 0 || (summary?.open_opportunities || 0) > 0;
   const kpis = useMemo<KpiData[]>(
-    () => [
-      {
-        kpi_key: "pipeline_value",
-        label: "Pipeline Value",
-        current_value: Number(summary?.pipeline_value || 0),
-        unit: "currency",
-        change_percent: 0,
-        direction: "flat",
-        status: "good",
-        sparkline: pipelineTrend.slice(-8).map((point) => Number(point.value || 0)),
-        comparison_period: "last period",
-        category: "sales",
-        previous_value: 0,
-        change_absolute: 0,
-        target_value: null,
-        period,
-        drill_down_url: "",
-      },
-      {
-        kpi_key: "won_last_30d",
-        label: "Won Last 30 Days",
-        current_value: Number(summary?.won_last_30d || 0),
-        unit: "currency",
-        change_percent: 0,
-        direction: "flat",
-        status: "good",
-        sparkline: pipelineTrend.slice(-8).map((point) => Number(point.value || 0)),
-        comparison_period: "last 30d",
-        category: "sales",
-        previous_value: 0,
-        change_absolute: 0,
-        target_value: null,
-        period,
-        drill_down_url: "",
-      },
-      {
-        kpi_key: "open_opportunities",
-        label: "Open Opportunities",
-        current_value: Number(summary?.open_opportunities || 0),
-        unit: "number",
-        change_percent: 0,
-        direction: "flat",
-        status: "good",
-        sparkline: summary?.by_stage.map((stage) => stage.count) || [],
-        comparison_period: "active pipeline",
-        category: "sales",
-        previous_value: 0,
-        change_absolute: 0,
-        target_value: null,
-        period,
-        drill_down_url: "",
-      },
-      {
-        kpi_key: "pending_work",
-        label: "Quotes / Orders Pending",
-        current_value: Number((summary?.quotes_pending_approval || 0) + (summary?.orders_pending_fulfillment || 0)),
-        unit: "number",
-        change_percent: 0,
-        direction: "flat",
-        status: "warning",
-        sparkline: [
-          Number(summary?.quotes_pending_approval || 0),
-          Number(summary?.orders_pending_fulfillment || 0),
-          Number(conversion?.quotes || 0),
-          Number(conversion?.orders || 0),
-        ],
-        comparison_period: "approval + fulfillment",
-        category: "sales",
-        previous_value: 0,
-        change_absolute: 0,
-        target_value: null,
-        period,
-        drill_down_url: "",
-      },
-    ],
-    [summary, pipelineTrend, conversion],
+    () => {
+      const safePipelineTrend = pipelineTrend.slice(-8).map((point) => toNumberSafe(point.value));
+      const safeByStage = summary?.by_stage ?? [];
+      const quotesPending = toNumberSafe(summary?.quotes_pending_approval);
+      const ordersPending = toNumberSafe(summary?.orders_pending_fulfillment);
+
+      return [
+        {
+          kpi_key: "pipeline_value",
+          label: "Pipeline Value",
+          current_value: toNumberSafe(summary?.pipeline_value),
+          unit: "currency",
+          change_percent: 0,
+          direction: "flat",
+          status: "good",
+          sparkline: safePipelineTrend,
+          comparison_period: "last period",
+          category: "sales",
+          previous_value: 0,
+          change_absolute: 0,
+          target_value: null,
+          period,
+          drill_down_url: "",
+        },
+        {
+          kpi_key: "won_last_30d",
+          label: "Won Last 30 Days",
+          current_value: toNumberSafe(summary?.won_last_30d),
+          unit: "currency",
+          change_percent: 0,
+          direction: "flat",
+          status: "good",
+          sparkline: safePipelineTrend,
+          comparison_period: "last 30d",
+          category: "sales",
+          previous_value: 0,
+          change_absolute: 0,
+          target_value: null,
+          period,
+          drill_down_url: "",
+        },
+        {
+          kpi_key: "open_opportunities",
+          label: "Open Opportunities",
+          current_value: toNumberSafe(summary?.open_opportunities),
+          unit: "number",
+          change_percent: 0,
+          direction: "flat",
+          status: "good",
+          sparkline: safeByStage.map((stage) => toNumberSafe(stage.count)),
+          comparison_period: "active pipeline",
+          category: "sales",
+          previous_value: 0,
+          change_absolute: 0,
+          target_value: null,
+          period,
+          drill_down_url: "",
+        },
+        {
+          kpi_key: "pending_work",
+          label: "Quotes / Orders Pending",
+          current_value: quotesPending + ordersPending,
+          unit: "number",
+          change_percent: 0,
+          direction: "flat",
+          status: "warning",
+          sparkline: [
+            quotesPending,
+            ordersPending,
+            toNumberSafe(conversion?.quotes),
+            toNumberSafe(conversion?.orders),
+          ],
+          comparison_period: "approval + fulfillment",
+          category: "sales",
+          previous_value: 0,
+          change_absolute: 0,
+          target_value: null,
+          period,
+          drill_down_url: "",
+        },
+      ];
+    },
+    [summary, pipelineTrend, conversion, period],
   );
 
   const stageAgingData = useMemo<AgingData>(
     () => ({
       kpi_key: "stage_distribution",
       category: "sales",
-      buckets: Object.fromEntries((summary?.by_stage || []).map((row) => [row.stage, Number(row.amount || 0)])),
+      buckets: Object.fromEntries((summary?.by_stage || []).map((row) => [row.stage, toNumberSafe(row.amount)])),
       label: "Open Opportunities by Stage",
-      total: summary?.by_stage.reduce((acc, stage) => acc + Number(stage.amount || 0), 0) || 0,
+      total: sumBySafe(summary?.by_stage || [], (stage) => stage.amount),
       bucket_labels: (summary?.by_stage || []).map((row) => row.stage),
-      bucket_values: (summary?.by_stage || []).map((row) => Number(row.amount || 0)),
+      bucket_values: (summary?.by_stage || []).map((row) => toNumberSafe(row.amount)),
     }),
     [summary],
   );
 
   const pipelineWaterfall = useMemo(
     () => {
-      const pipelineTotal = Number(summary?.pipeline_value || 0);
-      const wonLast30d = Number(summary?.won_last_30d || 0);
-      const quotesPending = Number(summary?.quotes_pending_approval || 0) * 1500;
-      const ordersPending = Number(summary?.orders_pending_fulfillment || 0) * 2000;
+      const pipelineTotal = toNumberSafe(summary?.pipeline_value);
+      const wonLast30d = toNumberSafe(summary?.won_last_30d);
+      const quotesPending = toNumberSafe(summary?.quotes_pending_approval) * 1500;
+      const ordersPending = toNumberSafe(summary?.orders_pending_fulfillment) * 2000;
       const openTotal = pipelineTotal - wonLast30d + quotesPending + ordersPending;
 
       return [
@@ -238,9 +246,9 @@ export default function SalesCommandCenterPage() {
   );
 
   const conversionChartData = useMemo<ConversionStageDatum[]>(() => {
-    const quotesCount = Number(conversion?.quotes || 0);
-    const ordersCount = Number(conversion?.orders || 0);
-    const invoicesCount = Number(conversion?.invoices || 0);
+    const quotesCount = toNumberSafe(conversion?.quotes);
+    const ordersCount = toNumberSafe(conversion?.orders);
+    const invoicesCount = toNumberSafe(conversion?.invoices);
 
     return [
       {
@@ -274,7 +282,7 @@ export default function SalesCommandCenterPage() {
           {kpis.map((kpi) => (
             <div key={kpi.kpi_key} className="app-card p-3">
               <p className="text-xs text-muted">{kpi.label}</p>
-              <p className="mt-1 text-base font-semibold">{kpi.unit === "currency" ? formatCurrency(kpi.current_value) : kpi.current_value.toLocaleString()}</p>
+              <p className="mt-1 text-base font-semibold">{kpi.unit === "currency" ? formatCurrencySafe(kpi.current_value) : toNumberSafe(kpi.current_value).toLocaleString()}</p>
             </div>
           ))}
         </div>
@@ -340,7 +348,7 @@ export default function SalesCommandCenterPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <TrendChart data={pipelineTrend} title="Pipeline Trend (12 Months)" type="line" formatValue={formatCurrency} color={CHART_COLORS[0]} />
+            <TrendChart data={pipelineTrend.map((point) => ({ ...point, value: toNumberSafe(point.value) }))} title="Pipeline Trend (12 Months)" type="line" formatValue={formatCurrency} color={CHART_COLORS[0]} />
             <WaterfallChart data={pipelineWaterfall} title="Pipeline Stage Waterfall" />
             <AgingChart data={stageAgingData} title="Open Opportunities by Stage" height={280} />
             <div className="app-card p-4">
@@ -352,14 +360,14 @@ export default function SalesCommandCenterPage() {
                   <YAxis tickFormatter={formatCompact} {...AXIS_STYLE} />
                   <Tooltip
                     {...TOOLTIP_STYLE}
-                    formatter={(value: number) => value.toLocaleString()}
+                    formatter={(value: number) => toNumberSafe(value).toLocaleString()}
                     labelFormatter={(_, payload) => {
                       const point = payload?.[0]?.payload as ConversionStageDatum | undefined;
                       if (!point) return "";
                       const conversionText =
                         point.conversionFromPrevious == null
                           ? "N/A"
-                          : `${(point.conversionFromPrevious * 100).toFixed(1)}%`;
+                          : `${formatNumberSafe(toNumberSafe(point.conversionFromPrevious) * 100)}%`;
                       return `${point.stage} · Count ${point.count.toLocaleString()} · Conversion ${conversionText}`;
                     }}
                   />
@@ -373,10 +381,10 @@ export default function SalesCommandCenterPage() {
               </ResponsiveContainer>
               <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted sm:grid-cols-2">
                 <p>
-                  Orders / Quotes: {ordersToQuotesRatio == null ? "N/A" : `${(ordersToQuotesRatio * 100).toFixed(1)}%`}
+                  Orders / Quotes: {ordersToQuotesRatio == null ? "N/A" : `${formatNumberSafe(toNumberSafe(ordersToQuotesRatio) * 100)}%`}
                 </p>
                 <p>
-                  Invoices / Orders: {invoicesToOrdersRatio == null ? "N/A" : `${(invoicesToOrdersRatio * 100).toFixed(1)}%`}
+                  Invoices / Orders: {invoicesToOrdersRatio == null ? "N/A" : `${formatNumberSafe(toNumberSafe(invoicesToOrdersRatio) * 100)}%`}
                 </p>
               </div>
             </div>

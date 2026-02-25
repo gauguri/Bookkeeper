@@ -26,8 +26,9 @@ import {
 } from "recharts";
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
-import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE, getRankColor } from "../utils/chartHelpers";
+import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
+import { CATEGORY_COLORS } from "../utils/chartPalette";
 import { formatCompact, formatCurrency } from "../utils/formatters";
 
 type Summary = {
@@ -141,6 +142,10 @@ export default function InventoryPage() {
     () => [...(analytics?.top_consumption ?? [])].sort((a, b) => b.value - a.value),
     [analytics?.top_consumption],
   );
+  const topConsumptionColors = useMemo(
+    () => topConsumptionData.map((_, index) => CATEGORY_COLORS[index % CATEGORY_COLORS.length]),
+    [topConsumptionData],
+  );
 
   const openDetail = async (itemId: number) => {
     const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
@@ -229,7 +234,7 @@ export default function InventoryPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>
         <div className="app-card p-4"><p className="mb-2 font-semibold">Stock Health Breakdown</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={analytics?.health_breakdown ?? []} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85}>{(analytics?.health_breakdown ?? []).map((_, idx) => <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div></div>
-        <div className="app-card p-4"><p className="mb-2 font-semibold">Top Items by Consumption</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><BarChart data={topConsumptionData}><CartesianGrid {...GRID_STYLE} /><XAxis dataKey="item" {...AXIS_STYLE} /><YAxis {...AXIS_STYLE} /><Tooltip {...TOOLTIP_STYLE} formatter={(v: number) => formatNumber(v)} /><Bar dataKey="value">{topConsumptionData.map((_, idx) => <Cell key={`consumption-${idx}`} fill={getRankColor(idx, topConsumptionData.length)} />)}</Bar></BarChart></ResponsiveContainer></div></div>
+        <div className="app-card p-4"><p className="mb-2 font-semibold">Top Items by Consumption</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><BarChart data={topConsumptionData}><CartesianGrid {...GRID_STYLE} /><XAxis dataKey="item" {...AXIS_STYLE} /><YAxis {...AXIS_STYLE} /><Tooltip {...TOOLTIP_STYLE} formatter={(v: number) => formatNumber(v)} /><Bar dataKey="value">{topConsumptionData.map((_, idx) => <Cell key={`consumption-${idx}`} fill={topConsumptionColors[idx]} />)}</Bar></BarChart></ResponsiveContainer></div></div>
         <div className="app-card p-4"><p className="mb-2 font-semibold">Demand vs Supply / Net Flow</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><BarChart data={analytics?.net_flow}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="receipts" stackId="a" fill={CHART_COLORS[1]} /><Bar dataKey="issues" stackId="a" fill={CHART_COLORS[3]} /><Bar dataKey="reserved" stackId="a" fill={CHART_COLORS[4]} /></BarChart></ResponsiveContainer></div></div>
       </div>
 

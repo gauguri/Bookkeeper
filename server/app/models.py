@@ -233,6 +233,7 @@ class Item(Base):
     reserved_qty = Column(Numeric(14, 2), nullable=False, default=0)
     reorder_point = Column(Numeric(14, 2), nullable=True)
     safety_stock_qty = Column(Numeric(14, 2), nullable=False, default=0)
+    lead_time_days = Column(Integer, nullable=False, default=14)
     target_days_supply = Column(Numeric(14, 2), nullable=False, default=30)
     income_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)

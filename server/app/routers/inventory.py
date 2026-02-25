@@ -96,7 +96,7 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
         available = on_hand - reserved
         avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))
         preferred = item.preferred_supplier_link
-        lead_time = int(preferred.lead_time_days if preferred and preferred.lead_time_days else 14)
+        lead_time = int(item.lead_time_days or (preferred.lead_time_days if preferred and preferred.lead_time_days else 14))
         safety_stock = _q2(item.safety_stock_qty)
         reorder_point = _q2(item.reorder_point)
         if reorder_point <= 0:
@@ -260,13 +260,26 @@ def delete_inventory_record(inventory_id: int, db: Session = Depends(get_db)):
 @router.get("/summary", response_model=schemas.InventorySummaryResponse)
 def get_inventory_summary(usage_days: int = Query(90, ge=7, le=365), db: Session = Depends(get_db)):
     rows = _build_inventory_rows(db, usage_days=usage_days)
+    total_on_hand_qty = _q2(sum(row.on_hand for row in rows))
+    total_reserved_qty = _q2(sum(row.reserved for row in rows))
+    total_available_qty = _q2(sum(row.available for row in rows))
+    total_value = _q2(sum(row.total_value for row in rows))
+    total_inbound_qty = _q2(sum(row.inbound_qty for row in rows))
+    total_backordered_qty = _q2(sum(abs(row.available) for row in rows if row.available < 0))
+
     return schemas.InventorySummaryResponse(
-        inventory_value=_q2(sum(row.total_value for row in rows)),
+        inventory_value=total_value,
         low_stock_items=len([row for row in rows if row.available <= row.reorder_point]),
         stockouts=len([row for row in rows if row.available <= 0]),
         at_risk_items=len([row for row in rows if row.days_of_supply > 0 and row.days_of_supply < row.lead_time_days]),
         excess_dead_stock=len([row for row in rows if row.days_of_supply > 180 or row.health_flag == "excess"]),
         reserved_pressure_items=len([row for row in rows if row.on_hand > 0 and (row.reserved / row.on_hand) >= Decimal("0.7")]),
+        total_on_hand_qty=total_on_hand_qty,
+        total_reserved_qty=total_reserved_qty,
+        total_available_qty=total_available_qty,
+        total_value=total_value,
+        total_inbound_qty=total_inbound_qty,
+        total_backordered_qty=total_backordered_qty,
     )
 
 
@@ -314,6 +327,7 @@ def list_inventory_items(
 
 
 @router.patch("/items/{item_id}/planning", response_model=schemas.InventoryItemRow)
+@router.put("/items/{item_id}/planning", response_model=schemas.InventoryItemRow)
 def update_inventory_planning(item_id: int, payload: schemas.InventoryPlanningUpdate, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
@@ -322,6 +336,8 @@ def update_inventory_planning(item_id: int, payload: schemas.InventoryPlanningUp
         item.reorder_point = payload.reorder_point_qty
     if payload.safety_stock_qty is not None:
         item.safety_stock_qty = payload.safety_stock_qty
+    if payload.lead_time_days is not None:
+        item.lead_time_days = payload.lead_time_days
     if payload.target_days_supply is not None:
         item.target_days_supply = payload.target_days_supply
     db.commit()
@@ -380,6 +396,7 @@ def get_inventory_analytics(db: Session = Depends(get_db)):
 
 @router.get("/items/{item_id}/detail", response_model=schemas.InventoryItemDetailResponse)
 def get_item_detail(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
     row = next((entry for entry in _build_inventory_rows(db) if entry.id == item_id), None)
     if not row:
         raise HTTPException(status_code=404, detail="Item not found.")
@@ -392,6 +409,30 @@ def get_item_detail(item_id: int, db: Session = Depends(get_db)):
         .all()
     )
     reservations = list_item_reservations(item_id, db)
+    last_updated = movements[0].created_at if movements else None
+    projected_available = _q2(row.on_hand - row.reserved + row.inbound_qty)
+    target_stock = _q2(row.avg_daily_usage * Decimal(item.target_days_supply or 30))
+
+    since = datetime.utcnow() - timedelta(days=90)
+    daily_consumption: dict[str, Decimal] = {}
+    movement_rows = (
+        db.query(InventoryMovement.created_at, InventoryMovement.qty_delta)
+        .filter(InventoryMovement.item_id == item_id, InventoryMovement.created_at >= since)
+        .order_by(InventoryMovement.created_at.asc())
+        .all()
+    )
+    for created_at, qty_delta in movement_rows:
+        if not created_at:
+            continue
+        key = created_at.date().isoformat()
+        qty = _safe_decimal(qty_delta)
+        consumed = abs(qty) if qty < 0 else Decimal("0")
+        daily_consumption[key] = daily_consumption.get(key, Decimal("0")) + consumed
+
+    consumption_trend = [
+        {"date": date_key, "consumption": _q2(daily_consumption[date_key])}
+        for date_key in sorted(daily_consumption.keys())
+    ]
 
     return schemas.InventoryItemDetailResponse(
         item=row,
@@ -409,8 +450,12 @@ def get_item_detail(item_id: int, db: Session = Depends(get_db)):
         reservations=reservations,
         reorder_explanation=(
             f"ROP {row.reorder_point} = avg usage {row.avg_daily_usage} x lead time {row.lead_time_days} + safety stock {row.safety_stock}. "
-            f"Suggested order {row.suggested_reorder_qty} based on projected on hand."
+            f"Suggested order {row.suggested_reorder_qty} based on projected available ({projected_available})."
         ),
+        projected_available=projected_available,
+        target_stock=target_stock,
+        last_updated=last_updated,
+        consumption_trend=consumption_trend,
     )
 
 

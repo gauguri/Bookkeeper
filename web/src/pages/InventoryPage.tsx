@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -80,15 +80,16 @@ const formatNumber = (value: number) => Number.isFinite(value) ? formatCompact(v
 
 export default function InventoryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState("ytd");
-  const [queue, setQueue] = useState("needs_attention");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("total_value:desc");
   const [usageDays, setUsageDays] = useState(90);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -103,27 +104,52 @@ export default function InventoryPage() {
     last_issue: true,
   });
 
-  const load = async () => {
-    setLoading(true);
+  const queue = searchParams.get("queue") || "needs_attention";
+
+  const setQueue = (nextQueue: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("queue", nextQueue);
+      return next;
+    }, { replace: false });
+  };
+
+  const loadOverview = async () => {
+    setOverviewLoading(true);
     setError("");
     try {
-      const [summaryRes, itemsRes, analyticsRes] = await Promise.all([
+      const [summaryRes, analyticsRes] = await Promise.all([
         apiFetch<Summary>(`/inventory/summary?usage_days=${usageDays}`),
-        apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`),
         apiFetch<AnalyticsResponse>("/inventory/analytics"),
       ]);
       setSummary(summaryRes);
-      setItemsData(itemsRes);
       setAnalytics(analyticsRes);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      setOverviewLoading(false);
+    }
+  };
+
+  const loadTable = async () => {
+    setTableLoading(true);
+    setError("");
+    try {
+      const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
+      setItemsData(itemsRes);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTableLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
+    void loadOverview();
+  }, [usageDays]);
+
+  useEffect(() => {
+    void loadTable();
   }, [queue, sort, usageDays]);
 
   const kpis = useMemo(() => {
@@ -175,11 +201,11 @@ export default function InventoryPage() {
         }),
       });
     }
-    await load();
+    await loadTable();
     navigate("/purchase-orders");
   };
 
-  if (loading) {
+  if (overviewLoading && tableLoading && !summary && !analytics && !itemsData) {
     return (
       <section className="space-y-6">
         <div className="app-card h-24 animate-pulse" />
@@ -208,7 +234,7 @@ export default function InventoryPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 app-card p-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void loadTable()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
           <select className="app-select h-9" value={usageDays} onChange={(e) => setUsageDays(Number(e.target.value))}>
             <option value={30}>Demand 30D</option><option value={60}>Demand 60D</option><option value={90}>Demand 90D</option>
           </select>
@@ -254,12 +280,14 @@ export default function InventoryPage() {
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold">Inventory Items Grid</h3>
             <div className="flex items-center gap-2">
+              {tableLoading && <span className="text-xs text-muted">Updating queue…</span>}
               <button className="app-button-ghost" onClick={() => setCompact((v) => !v)}><Boxes className="h-4 w-4" /> {compact ? "Comfort" : "Compact"}</button>
               <details className="relative"><summary className="app-button-ghost list-none"><Settings2 className="h-4 w-4" /> Columns</summary><div className="absolute right-0 z-10 mt-1 w-52 rounded-xl border bg-surface p-2 shadow-xl">{Object.keys(visibleCols).map((key) => <label key={key} className="flex items-center gap-2 px-2 py-1 text-sm"><input type="checkbox" checked={visibleCols[key]} onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))} />{key.replace(/_/g, " ")}</label>)}</div></details>
             </div>
           </div>
 
-          <div className="overflow-auto">
+          <div className="relative overflow-auto">
+            {tableLoading && <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-1 animate-pulse bg-primary/30" />}
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-surface text-xs uppercase text-muted"><tr><th className="px-3 py-2"><input type="checkbox" onChange={(e) => setSelectedIds(e.target.checked ? (itemsData?.items ?? []).map((x) => x.id) : [])} /></th><th className="px-3 py-2">Item</th><th className="px-3 py-2">On Hand</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">ROP</th>{visibleCols.safety_stock && <th className="px-3 py-2">Safety</th>}{visibleCols.lead_time_days && <th className="px-3 py-2">Lead Time</th>}{visibleCols.avg_daily_usage && <th className="px-3 py-2">Avg Usage</th>}<th className="px-3 py-2">DOS</th><th className="px-3 py-2">ROQ</th><th className="px-3 py-2">Supplier</th>{visibleCols.last_receipt && <th className="px-3 py-2">Last Receipt</th>}{visibleCols.last_issue && <th className="px-3 py-2">Last Issue</th>}<th className="px-3 py-2">Total Value</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>

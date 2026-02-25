@@ -184,25 +184,13 @@ export default function InventoryPage() {
     setReservations(payload);
   };
 
-  const createPOForSelection = async () => {
+  const createPOForSelection = () => {
     const selected = (itemsData?.items ?? []).filter((row) => selectedIds.includes(row.id) && row.preferred_supplier_id && row.suggested_reorder_qty > 0);
-    const grouped = new Map<number, ItemRow[]>();
-    selected.forEach((row) => {
-      const key = row.preferred_supplier_id as number;
-      grouped.set(key, [...(grouped.get(key) ?? []), row]);
+    navigate("/purchasing/purchase-orders/new", {
+      state: {
+        prefillLines: selected.map((row) => ({ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) })),
+      },
     });
-    for (const [supplierId, rows] of grouped.entries()) {
-      await apiFetch("/purchase-orders", {
-        method: "POST",
-        body: JSON.stringify({
-          supplier_id: supplierId,
-          order_date: new Date().toISOString().slice(0, 10),
-          lines: rows.map((row) => ({ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) })),
-        }),
-      });
-    }
-    await loadTable();
-    navigate("/purchase-orders");
   };
 
   if (overviewLoading && tableLoading && !summary && !analytics && !itemsData) {
@@ -224,7 +212,7 @@ export default function InventoryPage() {
           <p className="text-muted">Real-time stock, reservations, reorder intelligence, and purchasing.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="app-button" onClick={() => navigate("/purchase-orders")}><PackagePlus className="h-4 w-4" /> + Receive Inventory</button>
+          <button className="app-button" onClick={() => navigate("/purchasing/purchase-orders")}><PackagePlus className="h-4 w-4" /> + Receive Inventory</button>
           <button className="app-button-secondary" onClick={createPOForSelection}><ShoppingCart className="h-4 w-4" /> + Create Purchase Order</button>
           <button className="app-button-ghost" onClick={() => navigate("/items")}><ArrowDownUp className="h-4 w-4" /> Adjust Stock</button>
           <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
@@ -308,7 +296,7 @@ export default function InventoryPage() {
                     {visibleCols.last_receipt && <td className="px-3 py-2">{row.last_receipt ? new Date(row.last_receipt).toLocaleDateString() : "—"}</td>}
                     {visibleCols.last_issue && <td className="px-3 py-2">{row.last_issue ? new Date(row.last_issue).toLocaleDateString() : "—"}</td>}
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.total_value)}</td>
-                    <td className="px-3 py-2"><div className="flex gap-1"><button className="app-button-ghost" onClick={() => openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => setQueue(queueFlagMap[row.health_flag] ?? queue)}>Adjust</button><button className="app-button-ghost" onClick={() => { setSelectedIds([row.id]); createPOForSelection(); }}>Create PO</button></div></td>
+                    <td className="px-3 py-2"><div className="flex gap-1"><button className="app-button-ghost" onClick={() => openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => setQueue(queueFlagMap[row.health_flag] ?? queue)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -338,7 +326,7 @@ export default function InventoryPage() {
             </div>
             <div className="mt-4 app-card p-3 text-sm"><p className="font-semibold">Reorder recommendation</p><p className="mt-1 text-muted">{detail.reorder_explanation}</p></div>
             <div className="mt-4 app-card p-3"><p className="font-semibold">Recent movements</p><div className="mt-2 space-y-2">{detail.movements.map((movement) => <div key={movement.id} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-sm"><span>{movement.reason}</span><span className="tabular-nums">{formatNumber(movement.qty_delta)}</span></div>)}</div></div>
-            <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchase-orders")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => navigate("/items")}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/inventory")}>Transfer</button></div>
+            <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchasing/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => navigate("/items")}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/inventory")}>Transfer</button></div>
           </div>
         </div>
       )}

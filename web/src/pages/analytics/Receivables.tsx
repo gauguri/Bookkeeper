@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { useReceivables } from "../../hooks/useAnalytics";
 import KpiTile from "../../components/analytics/KpiTile";
@@ -8,6 +9,7 @@ import DashboardFilter from "../../components/analytics/DashboardFilter";
 import { formatCurrency } from "../../utils/formatters";
 
 export default function Receivables() {
+  const navigate = useNavigate();
   const [period, setPeriod] = useState("ytd");
   const { data, isLoading, error } = useReceivables(period);
 
@@ -42,7 +44,11 @@ export default function Receivables() {
 
       {/* KPI Tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiTile kpi={data.ar_total} />
+        <KpiTile
+          kpi={data.ar_total}
+          ariaLabel="View outstanding invoices"
+          onClick={() => navigate("/invoices?view=outstanding")}
+        />
         <KpiTile kpi={data.dso} invertDirection />
         <KpiTile kpi={data.overdue_receivables} invertDirection />
         <KpiTile kpi={data.collection_effectiveness} />

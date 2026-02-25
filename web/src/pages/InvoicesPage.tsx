@@ -94,7 +94,7 @@ type PricingContextResponse = {
   margin_threshold_percent: number;
 };
 
-type QueueKey = "needs-attention" | "drafts" | "overdue" | "sent-unpaid" | "paid" | "void" | "all";
+type QueueKey = "needs-attention" | "drafts" | "overdue" | "outstanding" | "sent-unpaid" | "paid" | "void" | "all";
 type Density = "comfortable" | "compact";
 
 type KpiTile = {
@@ -159,10 +159,17 @@ const addDays = (dateString: string, days: number) => {
 
 const formatDate = (date: string) => new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const fmtMonth = (date: Date) => date.toLocaleDateString("en-US", { month: "short" });
+const queueKeys: QueueKey[] = ["needs-attention", "drafts", "overdue", "outstanding", "sent-unpaid", "paid", "void", "all"];
 
 export default function InvoicesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const queue = (searchParams.get("queue") as QueueKey) || "needs-attention";
+  const queueParam = searchParams.get("queue");
+  const view = searchParams.get("view");
+  const queue = queueParam && queueKeys.includes(queueParam as QueueKey)
+    ? (queueParam as QueueKey)
+    : view === "outstanding"
+      ? "outstanding"
+      : "needs-attention";
   const q = searchParams.get("q") ?? "";
   const statusFilter = searchParams.get("status") ?? "";
   const density = (searchParams.get("density") as Density) || "comfortable";
@@ -220,18 +227,20 @@ export default function InvoicesPage() {
     loadData();
   }, []);
 
-  const isOverdue = (invoice: Invoice) => invoice.amount_due > 0 && invoice.status !== "VOID" && invoice.status !== "PAID" && invoice.due_date < todayISO;
+  const isOutstanding = (invoice: Invoice) => invoice.amount_due > 0 && invoice.status !== "VOID" && invoice.status !== "PAID";
+  const isOverdue = (invoice: Invoice) => isOutstanding(invoice) && invoice.due_date < todayISO;
   const isSentUnpaid = (invoice: Invoice) => ["SENT", "PARTIALLY_PAID", "SHIPPED"].includes(invoice.status) && invoice.amount_due > 0;
   const isPaid = (invoice: Invoice) => invoice.status === "PAID" || (invoice.amount_due === 0 && invoice.status !== "VOID");
 
   const queueBuckets = useMemo(() => {
     const drafts = invoices.filter((inv) => inv.status === "DRAFT");
     const overdue = invoices.filter(isOverdue);
+    const outstanding = invoices.filter(isOutstanding);
     const sentUnpaid = invoices.filter(isSentUnpaid);
     const paid = invoices.filter(isPaid);
     const voidInvoices = invoices.filter((inv) => inv.status === "VOID");
     const needsAttention = invoices.filter((inv) => inv.status === "DRAFT" || isOverdue(inv));
-    return { drafts, overdue, sentUnpaid, paid, voidInvoices, needsAttention, all: invoices };
+    return { drafts, overdue, outstanding, sentUnpaid, paid, voidInvoices, needsAttention, all: invoices };
   }, [invoices]);
 
   const kpis = useMemo(() => {
@@ -244,6 +253,7 @@ export default function InvoicesPage() {
     return [
       { key: "all", label: "Open Balance", value: currency(openBalance), meta: `${invoices.filter((i) => i.amount_due > 0).length} open` },
       { key: "overdue", label: "Overdue", value: currency(overdueBalance), meta: `${queueBuckets.overdue.length} invoices` },
+      { key: "outstanding", label: "Outstanding", value: currency(openBalance), meta: `${queueBuckets.outstanding.length} invoices` },
       { key: "drafts", label: "Drafts", value: String(queueBuckets.drafts.length), meta: "Needs review" },
       { key: "sent-unpaid", label: "Sent / Unpaid", value: currency(sentUnpaidBalance), meta: `${queueBuckets.sentUnpaid.length} invoices` },
       { key: "paid", label: "Paid (MTD)", value: currency(paidMtdAmount), meta: `${paidMtd.length} invoices` },
@@ -255,6 +265,7 @@ export default function InvoicesPage() {
     let source: Invoice[] = [];
     if (queue === "drafts") source = queueBuckets.drafts;
     else if (queue === "overdue") source = queueBuckets.overdue;
+    else if (queue === "outstanding") source = queueBuckets.outstanding;
     else if (queue === "sent-unpaid") source = queueBuckets.sentUnpaid;
     else if (queue === "paid") source = queueBuckets.paid;
     else if (queue === "void") source = queueBuckets.voidInvoices;
@@ -313,6 +324,7 @@ export default function InvoicesPage() {
     { key: "needs-attention", label: "Needs Attention", count: queueBuckets.needsAttention.length },
     { key: "drafts", label: "Drafts", count: queueBuckets.drafts.length },
     { key: "overdue", label: "Overdue", count: queueBuckets.overdue.length },
+    { key: "outstanding", label: "Outstanding", count: queueBuckets.outstanding.length },
     { key: "sent-unpaid", label: "Sent / Unpaid", count: queueBuckets.sentUnpaid.length },
     { key: "paid", label: "Paid", count: queueBuckets.paid.length },
     { key: "void", label: "Void", count: queueBuckets.voidInvoices.length },
@@ -519,7 +531,7 @@ export default function InvoicesPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         {kpis.map((tile) => (
-          <button key={tile.label} className={`app-card p-4 text-left ${queue === tile.key ? "ring-2 ring-primary/40" : ""}`} onClick={() => setParam({ queue: tile.key })}>
+          <button key={tile.label} className={`app-card p-4 text-left ${queue === tile.key ? "ring-2 ring-primary/40" : ""}`} onClick={() => setParam({ queue: tile.key, view: tile.key === "outstanding" ? "outstanding" : null })}>
             <p className="text-xs uppercase tracking-wide text-muted">{tile.label}</p>
             <p className="mt-2 text-xl font-semibold tabular-nums">{tile.value}</p>
             <p className="text-xs text-muted">{tile.meta}</p>
@@ -569,7 +581,7 @@ export default function InvoicesPage() {
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Work Queues</p>
           <div className="space-y-1">
             {queueMeta.map((entry) => (
-              <button key={entry.key} className={`w-full rounded-xl px-3 py-2 text-left text-sm ${queue === entry.key ? "bg-primary/10 text-primary" : "hover:bg-secondary"}`} onClick={() => setParam({ queue: entry.key })}>
+              <button key={entry.key} className={`w-full rounded-xl px-3 py-2 text-left text-sm ${queue === entry.key ? "bg-primary/10 text-primary" : "hover:bg-secondary"}`} onClick={() => setParam({ queue: entry.key, view: entry.key === "outstanding" ? "outstanding" : null })}>
                 <span className="font-medium">{entry.label}</span>
                 <span className="ml-2 text-muted">{entry.count}</span>
               </button>

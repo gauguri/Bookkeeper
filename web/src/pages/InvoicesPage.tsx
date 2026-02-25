@@ -1,25 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Download,
+  ExternalLink,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Send,
+  XCircle
+} from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
-import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
 
-type Customer = {
-  id: number;
-  name: string;
-};
-
+type Customer = { id: number; name: string; terms?: string | null };
 type Item = {
   id: number;
   name: string;
   unit_price: number;
   preferred_supplier_id?: number | null;
-  preferred_supplier_name?: string | null;
   preferred_landed_cost?: number | null;
 };
+type SupplierLink = {
+  supplier_id: number;
+  item_id: number;
+  supplier_name: string;
+  landed_cost: number;
+  is_preferred: boolean;
+};
 
-type InvoiceList = {
+type Invoice = {
   id: number;
   invoice_number: string;
   customer_id: number;
@@ -31,7 +44,36 @@ type InvoiceList = {
   amount_due: number;
 };
 
-type LineItem = {
+type InvoiceLine = {
+  id: number;
+  description?: string;
+  quantity: number;
+  unit_price: number;
+  discount: number;
+  tax_rate: number;
+  line_total: number;
+};
+
+type InvoiceDetail = {
+  id: number;
+  invoice_number: string;
+  status: string;
+  issue_date: string;
+  due_date: string;
+  total: number;
+  amount_due: number;
+  customer?: { id: number; name: string };
+  customer_name?: string;
+  notes?: string;
+  terms?: string;
+  updated_at?: string;
+  created_at?: string;
+  line_items?: InvoiceLine[];
+  lines?: InvoiceLine[];
+  payments?: Array<{ payment_id: number; payment_date: string; applied_amount: number }>;
+};
+
+type LineItemForm = {
   item_id?: number;
   description: string;
   quantity: string;
@@ -45,15 +87,24 @@ type LineItem = {
   margin_threshold_percent: number;
 };
 
-type SupplierLink = {
-  supplier_id: number;
-  item_id: number;
-  supplier_name: string;
-  landed_cost: number;
-  is_preferred: boolean;
+type PricingContextResponse = {
+  landed_unit_cost: number;
+  recommended_price: number;
+  margin_threshold_percent: number;
 };
 
-const emptyLine: LineItem = {
+type QueueKey = "needs-attention" | "drafts" | "overdue" | "sent-unpaid" | "paid" | "void" | "all";
+type Density = "comfortable" | "compact";
+
+type KpiTile = {
+  key: QueueKey;
+  label: string;
+  value: string;
+  meta: string;
+};
+
+const todayISO = new Date().toISOString().slice(0, 10);
+const emptyLine: LineItemForm = {
   item_id: undefined,
   description: "",
   quantity: "1",
@@ -67,13 +118,6 @@ const emptyLine: LineItem = {
   margin_threshold_percent: 20
 };
 
-type PricingContextResponse = {
-  landed_unit_cost: number;
-  available_qty: number;
-  recommended_price: number;
-  margin_threshold_percent: number;
-};
-
 const statusStyles: Record<string, string> = {
   DRAFT: "border-border bg-secondary text-muted",
   SENT: "border-primary/30 bg-primary/10 text-primary",
@@ -83,110 +127,91 @@ const statusStyles: Record<string, string> = {
   VOID: "border-danger/30 bg-danger/10 text-danger"
 };
 
-const formatNumber = (value: string) => (value === "" ? 0 : Number(value));
+const COLUMNS = [
+  "invoice_number",
+  "customer",
+  "status",
+  "issue_date",
+  "due_date",
+  "total",
+  "balance",
+  "updated"
+] as const;
+
+type ColumnKey = (typeof COLUMNS)[number];
 
 const parseTermsDays = (terms: string) => {
-  if (!terms.trim()) {
-    return null;
-  }
+  if (!terms.trim()) return null;
   const normalized = terms.trim().toLowerCase();
-  if (normalized === "due on receipt") {
-    return 0;
-  }
-  const netMatch = normalized.match(/net\s*(\d+)/);
-  if (netMatch) {
-    return Number(netMatch[1]);
-  }
-  return null;
+  if (normalized === "due on receipt") return 0;
+  const match = normalized.match(/net\s*(\d+)/);
+  return match ? Number(match[1]) : null;
 };
 
-const formatDateForInput = (date: Date) => {
-  const timezoneAdjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return timezoneAdjusted.toISOString().slice(0, 10);
-};
-
-const addDaysToDateString = (dateString: string, days: number) => {
+const addDays = (dateString: string, days: number) => {
   const [year, month, day] = dateString.split("-").map(Number);
-  if (!year || !month || !day) {
-    return dateString;
-  }
+  if (!year || !month || !day) return dateString;
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 };
 
+const formatDate = (date: string) => new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const fmtMonth = (date: Date) => date.toLocaleDateString("en-US", { month: "short" });
+
 export default function InvoicesPage() {
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queue = (searchParams.get("queue") as QueueKey) || "needs-attention";
+  const q = searchParams.get("q") ?? "";
+  const statusFilter = searchParams.get("status") ?? "";
+  const density = (searchParams.get("density") as Density) || "comfortable";
+
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceList[]>([]);
-  const [error, setError] = useState("");
-  const [filters, setFilters] = useState({
-    status: "",
-    customer_id: "",
-    start_date: "",
-    end_date: "",
-    min_total: "",
-    max_total: ""
-  });
-  const [form, setForm] = useState({
-    customer_id: "",
-    issue_date: formatDateForInput(new Date()),
-    due_date: "",
-    notes: "",
-    terms: ""
-  });
-  const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
-  const [lines, setLines] = useState<LineItem[]>([{ ...emptyLine }]);
   const [supplierOptions, setSupplierOptions] = useState<Record<number, SupplierLink[]>>({});
 
-  const selectedCustomerId = form.customer_id ? Number(form.customer_id) : null;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<InvoiceDetail | null>(null);
 
-  const loadInvoices = async (filtersOverride = filters) => {
-    const params = new URLSearchParams();
-    if (filtersOverride.status) {
-      params.append("status", filtersOverride.status);
-    }
-    if (filtersOverride.customer_id) {
-      params.append("customer_id", filtersOverride.customer_id);
-    }
-    if (filtersOverride.start_date) {
-      params.append("start_date", filtersOverride.start_date);
-    }
-    if (filtersOverride.end_date) {
-      params.append("end_date", filtersOverride.end_date);
-    }
-    if (filtersOverride.min_total) {
-      params.append("min_total", filtersOverride.min_total);
-    }
-    if (filtersOverride.max_total) {
-      params.append("max_total", filtersOverride.max_total);
-    }
-    return apiFetch<InvoiceList[]>(`/invoices?${params.toString()}`);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [isColumnsOpen, setIsColumnsOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>([...COLUMNS]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [infoBanner, setInfoBanner] = useState("");
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({ customer_id: "", issue_date: todayISO, due_date: "", notes: "", terms: "" });
+  const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
+  const [lines, setLines] = useState<LineItemForm[]>([{ ...emptyLine }]);
+
+  const setParam = (next: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams);
+    Object.entries(next).forEach(([key, value]) => {
+      if (!value) params.delete(key);
+      else params.set(key, value);
+    });
+    setSearchParams(params, { replace: true });
   };
 
   const loadData = async () => {
-    setError("");
     try {
-      const invoicesData = await loadInvoices();
-      setInvoices(invoicesData);
+      setLoading(true);
+      setError("");
+      const [invoiceData, customerData, itemData] = await Promise.all([
+        apiFetch<Invoice[]>("/invoices"),
+        apiFetch<Customer[]>("/customers"),
+        apiFetch<Item[]>("/items")
+      ]);
+      setInvoices(invoiceData);
+      setCustomers(customerData);
+      setItems(itemData);
     } catch (err) {
       setError((err as Error).message);
-      return;
-    }
-
-    const [customersResult, itemsResult] = await Promise.allSettled([apiFetch<Customer[]>("/customers"), apiFetch<Item[]>("/items")]);
-
-    if (customersResult.status === "fulfilled") {
-      setCustomers(customersResult.value);
-    } else if (!(customersResult.reason as Error).message.toLowerCase().includes("not authorized")) {
-      setError((customersResult.reason as Error).message);
-    }
-
-    if (itemsResult.status === "fulfilled") {
-      setItems(itemsResult.value);
-    } else if (!(itemsResult.reason as Error).message.toLowerCase().includes("not authorized")) {
-      setError((itemsResult.reason as Error).message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -194,153 +219,218 @@ export default function InvoicesPage() {
     loadData();
   }, []);
 
-  const filteredInvoices = useMemo(() => invoices, [invoices]);
+  const isOverdue = (invoice: Invoice) => invoice.amount_due > 0 && invoice.status !== "VOID" && invoice.status !== "PAID" && invoice.due_date < todayISO;
+  const isSentUnpaid = (invoice: Invoice) => ["SENT", "PARTIALLY_PAID", "SHIPPED"].includes(invoice.status) && invoice.amount_due > 0;
+  const isPaid = (invoice: Invoice) => invoice.status === "PAID" || (invoice.amount_due === 0 && invoice.status !== "VOID");
 
-  const addLine = () => setLines((prev) => [...prev, { ...emptyLine }]);
+  const queueBuckets = useMemo(() => {
+    const drafts = invoices.filter((inv) => inv.status === "DRAFT");
+    const overdue = invoices.filter(isOverdue);
+    const sentUnpaid = invoices.filter(isSentUnpaid);
+    const paid = invoices.filter(isPaid);
+    const voidInvoices = invoices.filter((inv) => inv.status === "VOID");
+    const needsAttention = invoices.filter((inv) => inv.status === "DRAFT" || isOverdue(inv));
+    return { drafts, overdue, sentUnpaid, paid, voidInvoices, needsAttention, all: invoices };
+  }, [invoices]);
 
-  const removeLine = (index: number) => {
-    setLines((prev) => prev.filter((_, idx) => idx !== index));
+  const kpis = useMemo(() => {
+    const openBalance = invoices.filter((inv) => inv.status !== "VOID").reduce((sum, inv) => sum + inv.amount_due, 0);
+    const overdueBalance = queueBuckets.overdue.reduce((sum, inv) => sum + inv.amount_due, 0);
+    const sentUnpaidBalance = queueBuckets.sentUnpaid.reduce((sum, inv) => sum + inv.amount_due, 0);
+    const paidMtd = queueBuckets.paid.filter((inv) => inv.issue_date.slice(0, 7) === todayISO.slice(0, 7));
+    const paidMtdAmount = paidMtd.reduce((sum, inv) => sum + inv.total, 0);
+
+    return [
+      { key: "all", label: "Open Balance", value: currency(openBalance), meta: `${invoices.filter((i) => i.amount_due > 0).length} open` },
+      { key: "overdue", label: "Overdue", value: currency(overdueBalance), meta: `${queueBuckets.overdue.length} invoices` },
+      { key: "drafts", label: "Drafts", value: String(queueBuckets.drafts.length), meta: "Needs review" },
+      { key: "sent-unpaid", label: "Sent / Unpaid", value: currency(sentUnpaidBalance), meta: `${queueBuckets.sentUnpaid.length} invoices` },
+      { key: "paid", label: "Paid (MTD)", value: currency(paidMtdAmount), meta: `${paidMtd.length} invoices` },
+      { key: "void", label: "Void", value: String(queueBuckets.voidInvoices.length), meta: "Cancelled" }
+    ] as KpiTile[];
+  }, [invoices, queueBuckets]);
+
+  const filtered = useMemo(() => {
+    let source: Invoice[] = [];
+    if (queue === "drafts") source = queueBuckets.drafts;
+    else if (queue === "overdue") source = queueBuckets.overdue;
+    else if (queue === "sent-unpaid") source = queueBuckets.sentUnpaid;
+    else if (queue === "paid") source = queueBuckets.paid;
+    else if (queue === "void") source = queueBuckets.voidInvoices;
+    else if (queue === "all") source = queueBuckets.all;
+    else source = queueBuckets.needsAttention;
+
+    if (statusFilter) source = source.filter((inv) => inv.status === statusFilter);
+    if (q.trim()) {
+      const needle = q.toLowerCase();
+      source = source.filter((inv) => inv.invoice_number.toLowerCase().includes(needle) || inv.customer_name.toLowerCase().includes(needle));
+    }
+
+    return source.sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+  }, [queue, queueBuckets, q, statusFilter]);
+
+  const trendData = useMemo(() => {
+    const monthBuckets: Record<string, { month: string; amount: number; count: number }> = {};
+    const today = new Date();
+    for (let i = 11; i >= 0; i -= 1) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      monthBuckets[key] = { month: fmtMonth(d), amount: 0, count: 0 };
+    }
+    invoices.forEach((inv) => {
+      const key = inv.issue_date.slice(0, 7);
+      if (monthBuckets[key]) {
+        monthBuckets[key].amount += inv.total;
+        monthBuckets[key].count += 1;
+      }
+    });
+    return Object.values(monthBuckets);
+  }, [invoices]);
+
+  const arAging = useMemo(() => {
+    const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
+    invoices.forEach((inv) => {
+      if (inv.amount_due <= 0 || inv.status === "VOID") return;
+      const diff = Math.floor((new Date(todayISO).getTime() - new Date(inv.due_date).getTime()) / 86400000);
+      if (diff <= 0) buckets.current += inv.amount_due;
+      else if (diff <= 30) buckets.d1_30 += inv.amount_due;
+      else if (diff <= 60) buckets.d31_60 += inv.amount_due;
+      else if (diff <= 90) buckets.d61_90 += inv.amount_due;
+      else buckets.d90p += inv.amount_due;
+    });
+    return [
+      { label: "Current", value: buckets.current },
+      { label: "1-30", value: buckets.d1_30 },
+      { label: "31-60", value: buckets.d31_60 },
+      { label: "61-90", value: buckets.d61_90 },
+      { label: "90+", value: buckets.d90p }
+    ];
+  }, [invoices]);
+
+  const queueMeta = [
+    { key: "needs-attention", label: "Needs Attention", count: queueBuckets.needsAttention.length },
+    { key: "drafts", label: "Drafts", count: queueBuckets.drafts.length },
+    { key: "overdue", label: "Overdue", count: queueBuckets.overdue.length },
+    { key: "sent-unpaid", label: "Sent / Unpaid", count: queueBuckets.sentUnpaid.length },
+    { key: "paid", label: "Paid", count: queueBuckets.paid.length },
+    { key: "void", label: "Void", count: queueBuckets.voidInvoices.length },
+    { key: "all", label: "All Invoices", count: queueBuckets.all.length }
+  ] as const;
+
+  const openDetail = async (invoiceId: number) => {
+    try {
+      setDetailLoading(true);
+      const data = await apiFetch<InvoiceDetail>(`/invoices/${invoiceId}`);
+      setDetail(data);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
-  const updateLine = (index: number, updated: Partial<LineItem>) => {
-    setLines((prev) => prev.map((line, idx) => (idx === index ? { ...line, ...updated } : line)));
+  const exportSelectionCsv = () => {
+    const targets = invoices.filter((inv) => selected.includes(inv.id));
+    const rows = [["Invoice #", "Customer", "Status", "Issue Date", "Due Date", "Total", "Balance"], ...targets.map((inv) => [inv.invoice_number, inv.customer_name, inv.status, inv.issue_date, inv.due_date, String(inv.total), String(inv.amount_due)])];
+    const csv = rows.map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `invoice-export-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const loadSuppliersForItem = async (itemId: number) => {
-    if (supplierOptions[itemId]) {
-      return supplierOptions[itemId];
-    }
-    const data = await apiFetch<SupplierLink[]>(`/items/${itemId}/suppliers`);
-    setSupplierOptions((prev) => ({ ...prev, [itemId]: data }));
-    return data;
-  };
-
-  const resolveLineCost = (itemId: number, supplierId?: number) => {
-    const suppliers = supplierOptions[itemId] ?? [];
-    const matched = suppliers.find((link) => link.supplier_id === supplierId);
-    if (matched) {
-      return matched.landed_cost.toString();
-    }
-    const preferred = suppliers.find((link) => link.is_preferred);
-    if (preferred) {
-      return preferred.landed_cost.toString();
-    }
-    const item = items.find((entry) => entry.id === itemId);
-    if (item?.preferred_landed_cost != null) {
-      return item.preferred_landed_cost.toString();
-    }
-    return "";
-  };
-
-  const handleItemChange = async (index: number, itemId: string) => {
-    const item = items.find((entry) => entry.id === Number(itemId));
-    if (!item) {
-      updateLine(index, {
-        item_id: undefined,
-        description: "",
-        unit_price: "",
-        unit_cost: "",
-        supplier_id: undefined,
-        override_cost: false,
-        landed_unit_cost: "0",
-        margin_threshold_percent: 20
-      });
+  const runBulk = async (action: "send" | "void" | "paid" | "reminder" | "export") => {
+    if (selected.length === 0) return;
+    if (action === "export") {
+      exportSelectionCsv();
       return;
     }
+    if (action === "reminder") {
+      setInfoBanner("Send Reminder is ready for integration (placeholder).");
+      return;
+    }
+
+    try {
+      setBulkBusy(true);
+      setInfoBanner("");
+      await Promise.all(
+        selected.map(async (id) => {
+          const invoice = invoices.find((entry) => entry.id === id);
+          if (!invoice) return;
+          if (action === "send" && invoice.status === "DRAFT") {
+            await apiFetch(`/invoices/${id}/send`, { method: "POST" });
+          }
+          if (action === "void" && !["PAID", "PARTIALLY_PAID", "SHIPPED"].includes(invoice.status)) {
+            await apiFetch(`/invoices/${id}/void`, { method: "POST" });
+          }
+          if (action === "paid" && invoice.amount_due > 0) {
+            await apiFetch(`/payments`, {
+              method: "POST",
+              body: JSON.stringify({
+                invoice_id: invoice.id,
+                amount: invoice.amount_due,
+                payment_date: todayISO,
+                method: "Workbench",
+                notes: "Bulk Mark Paid"
+              })
+            });
+          }
+        })
+      );
+      setSelected([]);
+      await loadData();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const updateLine = (index: number, updated: Partial<LineItemForm>) => setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...updated } : line)));
+
+  const loadSuppliersForItem = async (itemId: number) => {
+    if (supplierOptions[itemId]) return supplierOptions[itemId];
+    const links = await apiFetch<SupplierLink[]>(`/items/${itemId}/suppliers`);
+    setSupplierOptions((prev) => ({ ...prev, [itemId]: links }));
+    return links;
+  };
+
+  const handleItemChange = async (index: number, itemIdRaw: string) => {
+    const itemId = Number(itemIdRaw);
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) return;
     updateLine(index, {
       item_id: item.id,
       description: item.name,
-      unit_price: item.unit_price.toString(),
+      unit_price: String(item.unit_price),
       supplier_id: item.preferred_supplier_id ?? undefined,
-      unit_cost: item.preferred_landed_cost != null ? item.preferred_landed_cost.toString() : "",
-      landed_unit_cost: item.preferred_landed_cost != null ? item.preferred_landed_cost.toString() : "0",
-      override_cost: false
+      unit_cost: item.preferred_landed_cost != null ? String(item.preferred_landed_cost) : "",
+      landed_unit_cost: item.preferred_landed_cost != null ? String(item.preferred_landed_cost) : "0"
     });
     try {
       const customerIdParam = form.customer_id ? `?customer_id=${form.customer_id}` : "";
-      const pricingContext = await apiFetch<PricingContextResponse>(`/items/${item.id}/pricing-context${customerIdParam}`);
+      const pricing = await apiFetch<PricingContextResponse>(`/items/${item.id}/pricing-context${customerIdParam}`);
       updateLine(index, {
-        landed_unit_cost: String(pricingContext.landed_unit_cost),
-        margin_threshold_percent: pricingContext.margin_threshold_percent,
-        unit_price: String(pricingContext.recommended_price),
-        unit_cost: String(pricingContext.landed_unit_cost)
+        unit_price: String(pricing.recommended_price),
+        unit_cost: String(pricing.landed_unit_cost),
+        landed_unit_cost: String(pricing.landed_unit_cost),
+        margin_threshold_percent: pricing.margin_threshold_percent
       });
-
-      const suppliersForItem = await loadSuppliersForItem(item.id);
-      if (suppliersForItem.length > 0) {
-        const preferred = suppliersForItem.find((link) => link.is_preferred);
-        const supplierId = item.preferred_supplier_id ?? preferred?.supplier_id;
-        if (supplierId) {
-          const selectedSupplierCost = suppliersForItem.find((link) => link.supplier_id === supplierId)?.landed_cost.toString();
-          updateLine(index, {
-            supplier_id: supplierId,
-            unit_cost: selectedSupplierCost ?? "",
-            landed_unit_cost: selectedSupplierCost ?? "0"
-          });
-        }
+      const suppliers = await loadSuppliersForItem(item.id);
+      const preferred = suppliers.find((s) => s.is_preferred);
+      if (preferred) {
+        updateLine(index, {
+          supplier_id: preferred.supplier_id,
+          unit_cost: String(preferred.landed_cost),
+          landed_unit_cost: String(preferred.landed_cost)
+        });
       }
     } catch (err) {
       setError((err as Error).message);
     }
-  };
-
-  const totals = useMemo(() => {
-    return lines.reduce(
-      (acc, line) => {
-        const quantity = formatNumber(line.quantity);
-        const unitPrice = formatNumber(line.unit_price);
-        const discount = formatNumber(line.discount);
-        const taxRate = formatNumber(line.tax_rate);
-        const lineSubtotal = quantity * unitPrice - discount;
-        const lineTax = lineSubtotal * taxRate;
-        const lineTotal = lineSubtotal + lineTax;
-        acc.subtotal += lineSubtotal;
-        acc.tax += lineTax;
-        acc.total += lineTotal;
-        return acc;
-      },
-      { subtotal: 0, tax: 0, total: 0 }
-    );
-  }, [lines]);
-
-  const dueDateInvalid =
-    Boolean(form.issue_date) && Boolean(form.due_date) && form.due_date < form.issue_date;
-
-  const handleIssueDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextIssueDate = event.target.value;
-    const termsDays = parseTermsDays(form.terms);
-    let nextDueDate = form.due_date;
-    let nextDueAuto = dueDateWasAuto;
-
-    if (nextIssueDate && termsDays !== null && (dueDateWasAuto || !form.due_date)) {
-      nextDueDate = addDaysToDateString(nextIssueDate, termsDays);
-      nextDueAuto = true;
-    }
-
-    setForm({ ...form, issue_date: nextIssueDate, due_date: nextDueDate });
-    setDueDateWasAuto(nextDueAuto);
-  };
-
-  const handleDueDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, due_date: event.target.value });
-    setDueDateWasAuto(false);
-  };
-
-  const handleTermsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextTerms = event.target.value;
-    const termsDays = parseTermsDays(nextTerms);
-    let nextDueDate = form.due_date;
-    let nextDueAuto = dueDateWasAuto;
-
-    if (!nextTerms.trim()) {
-      nextDueAuto = false;
-    } else if (termsDays !== null && form.issue_date && (dueDateWasAuto || !form.due_date)) {
-      nextDueDate = addDaysToDateString(form.issue_date, termsDays);
-      nextDueAuto = true;
-    }
-
-    setForm({ ...form, terms: nextTerms, due_date: nextDueDate });
-    setDueDateWasAuto(nextDueAuto);
   };
 
   const createInvoice = async () => {
@@ -348,450 +438,370 @@ export default function InvoicesPage() {
       setError("Customer, issue date, and due date are required.");
       return;
     }
-    if (dueDateInvalid) {
-      setError("Due date cannot be earlier than the invoice date.");
-      return;
-    }
-    const payload = {
-      customer_id: Number(form.customer_id),
-      issue_date: form.issue_date,
-      due_date: form.due_date,
-      notes: form.notes || null,
-      terms: form.terms || null,
-      line_items: lines.map((line) => ({
-        item_id: line.item_id ?? null,
-        description: line.description || null,
-        quantity: Number(line.quantity),
-        unit_price: Number(line.unit_price),
-        unit_cost: line.unit_cost ? Number(line.unit_cost) : null,
-        supplier_id: line.supplier_id ?? null,
-        landed_unit_cost: Number(line.landed_unit_cost || 0),
-        discount: Number(line.discount || 0),
-        tax_rate: Number(line.tax_rate || 0)
-      }))
-    };
     try {
-      await apiFetch<InvoiceList>("/invoices", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      setForm({
-        customer_id: "",
-        issue_date: formatDateForInput(new Date()),
-        due_date: "",
-        notes: "",
-        terms: ""
-      });
-      setDueDateWasAuto(false);
+      const payload = {
+        customer_id: Number(form.customer_id),
+        issue_date: form.issue_date,
+        due_date: form.due_date,
+        notes: form.notes || null,
+        terms: form.terms || null,
+        line_items: lines.map((line) => ({
+          item_id: line.item_id ?? null,
+          description: line.description || null,
+          quantity: Number(line.quantity),
+          unit_price: Number(line.unit_price),
+          unit_cost: line.unit_cost ? Number(line.unit_cost) : null,
+          supplier_id: line.supplier_id ?? null,
+          landed_unit_cost: Number(line.landed_unit_cost || 0),
+          discount: Number(line.discount || 0),
+          tax_rate: Number(line.tax_rate || 0)
+        }))
+      };
+
+      const created = await apiFetch<Invoice>("/invoices", { method: "POST", body: JSON.stringify(payload) });
+      setCreateOpen(false);
+      setForm({ customer_id: "", issue_date: todayISO, due_date: "", notes: "", terms: "" });
       setLines([{ ...emptyLine }]);
-      setError("");
-      loadData();
+      setDueDateWasAuto(false);
+      setParam({ queue: "drafts", q: created.invoice_number });
+      await loadData();
+      await openDetail(created.id);
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
+  const totals = useMemo(
+    () => lines.reduce((acc, line) => {
+      const qty = Number(line.quantity || 0);
+      const price = Number(line.unit_price || 0);
+      const discount = Number(line.discount || 0);
+      const taxRate = Number(line.tax_rate || 0);
+      const sub = qty * price - discount;
+      const tax = sub * taxRate;
+      return { subtotal: acc.subtotal + sub, tax: acc.tax + tax, total: acc.total + sub + tax };
+    }, { subtotal: 0, tax: 0, total: 0 }),
+    [lines]
+  );
+
+  const dueDateInvalid = form.issue_date && form.due_date && form.due_date < form.issue_date;
+
+  if (loading) {
+    return (
+      <section className="space-y-6">
+        <div className="app-card p-6 animate-pulse h-24" />
+        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, idx) => <div key={idx} className="app-card h-24 animate-pulse" />)}
+        </div>
+        <div className="app-card h-80 animate-pulse" />
+      </section>
+    );
+  }
+
   return (
-    <section className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Invoices</p>
-          <h1 className="text-3xl font-semibold">Invoice workflow</h1>
-          <p className="text-muted">Create, send, and monitor every invoice lifecycle.</p>
+          <h1 className="text-3xl font-semibold">Invoice Workbench</h1>
+          <p className="text-muted">Create, send, and manage the invoice lifecycle.</p>
         </div>
-        <button className="app-button" onClick={() => document.getElementById("invoice-form")?.scrollIntoView()}>
-          <Plus className="h-4 w-4" /> New invoice
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
+          <button className="app-button" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Invoice</button>
+        </div>
       </div>
 
-      {error && <p className="text-sm text-danger">{error}</p>}
+      {error && <div className="app-card border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</div>}
+      {infoBanner && <div className="app-card border-warning/30 bg-warning/5 p-3 text-sm text-warning">{infoBanner}</div>}
 
-      <div className="app-card p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Invoice list</h2>
-          <button className="app-button-ghost text-xs">Export</button>
-        </div>
-        <div className="sticky top-0 z-10 mt-4 grid gap-3 bg-surface/95 pb-4 backdrop-blur md:grid-cols-3">
-          <select
-            className="app-select"
-            value={filters.status}
-            onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-          >
-            <option value="">All statuses</option>
-            <option value="DRAFT">Draft</option>
-            <option value="SENT">Sent</option>
-            <option value="PARTIALLY_PAID">Partially paid</option>
-            <option value="SHIPPED">Shipped</option>
-            <option value="PAID">Paid</option>
-            <option value="VOID">Void</option>
-          </select>
-          <select
-            className="app-select"
-            value={filters.customer_id}
-            onChange={(event) => setFilters({ ...filters, customer_id: event.target.value })}
-          >
-            <option value="">All customers</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
-          <input
-            className="app-input"
-            type="date"
-            value={filters.start_date}
-            onChange={(event) => setFilters({ ...filters, start_date: event.target.value })}
-          />
-          <input
-            className="app-input"
-            type="date"
-            value={filters.end_date}
-            onChange={(event) => setFilters({ ...filters, end_date: event.target.value })}
-          />
-          <input
-            className="app-input"
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Min total"
-            value={filters.min_total}
-            onChange={(event) => setFilters({ ...filters, min_total: event.target.value })}
-          />
-          <input
-            className="app-input"
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Max total"
-            value={filters.max_total}
-            onChange={(event) => setFilters({ ...filters, max_total: event.target.value })}
-          />
-          <button
-            className="app-button"
-            onClick={async () => {
-              try {
-                const data = await loadInvoices();
-                setInvoices(data);
-              } catch (err) {
-                setError((err as Error).message);
-              }
-            }}
-          >
-            Apply filters
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {kpis.map((tile) => (
+          <button key={tile.label} className={`app-card p-4 text-left ${queue === tile.key ? "ring-2 ring-primary/40" : ""}`} onClick={() => setParam({ queue: tile.key })}>
+            <p className="text-xs uppercase tracking-wide text-muted">{tile.label}</p>
+            <p className="mt-2 text-xl font-semibold tabular-nums">{tile.value}</p>
+            <p className="text-xs text-muted">{tile.meta}</p>
           </button>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="app-card p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-semibold">Invoice trend (12 months)</p>
+            <p className="text-xs text-muted">Amount billed</p>
+          </div>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: number) => currency(value)} />
+                <Line type="monotone" dataKey="amount" stroke="#2563eb" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-        <div className="mt-4 overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-widest text-muted">
-              <tr>
-                <th className="py-3">Invoice</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Total</th>
-                <th>Balance</th>
-                <th className="text-right">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInvoices.map((invoice) => (
-                <tr
-                  key={invoice.id}
-                  className="app-table-row border-t cursor-pointer hover:bg-secondary/40"
-                  onClick={() => navigate(`/invoices/${invoice.id}`)}
-                >
-                  <td className="py-3 font-medium">
-                    <button
-                      type="button"
-                      className="hover:underline"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        navigate(`/invoices/${invoice.id}`);
-                      }}
-                    >
-                      {invoice.invoice_number}
-                    </button>
-                  </td>
-                  <td className="text-muted">{invoice.customer_name}</td>
-                  <td>
-                    <span className={`app-badge ${statusStyles[invoice.status] ?? "border-border bg-secondary"}`}>
-                      {invoice.status.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="text-muted tabular-nums">{currency(invoice.total)}</td>
-                  <td className="text-muted tabular-nums">{currency(invoice.amount_due)}</td>
-                  <td className="text-right">
-                    <div className="inline-flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="app-button-ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigate(`/invoices/${invoice.id}`);
-                        }}
-                      >
-                        View
-                      </button>
-                      <button
-                        type="button"
-                        className="app-button-ghost"
-                        aria-label="More actions"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                        }}
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredInvoices.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-10 text-center text-muted">
-                    <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
-                      <div className="h-14 w-14 rounded-2xl bg-secondary" />
-                      <p className="font-semibold">No invoices found</p>
-                      <p className="text-sm text-muted">Try adjusting your filters or create a new invoice.</p>
-                      <button
-                        className="app-button"
-                        onClick={() => document.getElementById("invoice-form")?.scrollIntoView()}
-                      >
-                        Create invoice
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="app-card p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-semibold">A/R Aging</p>
+            <p className="text-xs text-muted">Outstanding balance</p>
+          </div>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={arAging}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: number) => currency(value)} />
+                <Bar dataKey="value" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
-      <div id="invoice-form" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
-        <div className="app-card p-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">Create invoice</h2>
-          <span className="app-badge border-primary/30 bg-primary/10 text-primary">New document</span>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <select
-            className="app-select"
-            value={form.customer_id}
-            onChange={(event) => setForm({ ...form, customer_id: event.target.value })}
-          >
-            <option value="">Select customer *</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
-          <label className="space-y-2 text-sm font-medium">
-            <span className="text-muted">Invoice date</span>
-            <input
-              className="app-input"
-              type="date"
-              value={form.issue_date}
-              onChange={handleIssueDateChange}
-              placeholder="Invoice date"
-            />
-          </label>
-          <label className="space-y-2 text-sm font-medium">
-            <span className="text-muted">Due date</span>
-            <input
-              className="app-input"
-              type="date"
-              value={form.due_date}
-              onChange={handleDueDateChange}
-              placeholder="Due date"
-            />
-            {dueDateInvalid && <span className="text-xs text-danger">Due date must be on or after invoice date.</span>}
-          </label>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <input
-            className="app-input"
-            placeholder="Notes"
-            value={form.notes}
-            onChange={(event) => setForm({ ...form, notes: event.target.value })}
-          />
-          <input
-            className="app-input"
-            placeholder="Terms"
-            value={form.terms}
-            onChange={handleTermsChange}
-          />
-        </div>
-
-        <div className="space-y-3">
-          <div className="grid grid-cols-[1.1fr_1fr_1.1fr_0.5fr_0.6fr_0.6fr_0.6fr_0.6fr_auto] gap-2 text-xs uppercase tracking-widest text-muted">
-            <span>Item</span>
-            <span>Supplier</span>
-            <span>Description</span>
-            <span>Qty</span>
-            <span>Unit price</span>
-            <span>Cost</span>
-            <span>Discount</span>
-            <span>Tax rate</span>
-            <span />
-          </div>
-          {lines.map((line, index) => (
-            <div
-              key={index}
-              className="grid grid-cols-[1.1fr_1fr_1.1fr_0.5fr_0.6fr_0.6fr_0.6fr_0.6fr_auto] gap-2"
-            >
-              <select
-                className="app-select"
-                value={line.item_id ?? ""}
-                onChange={(event) => handleItemChange(index, event.target.value)}
-              >
-                <option value="">Custom</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="app-select"
-                value={line.supplier_id ?? ""}
-                onChange={(event) => {
-                  const supplierId = event.target.value ? Number(event.target.value) : undefined;
-                  if (!line.item_id) {
-                    return;
-                  }
-                  const nextCost = line.override_cost
-                    ? line.unit_cost
-                    : resolveLineCost(line.item_id, supplierId);
-                  updateLine(index, {
-                    supplier_id: supplierId,
-                    unit_cost: nextCost
-                  });
-                }}
-                disabled={!line.item_id || (supplierOptions[line.item_id]?.length ?? 0) === 0}
-              >
-                <option value="">Preferred</option>
-                {(line.item_id ? supplierOptions[line.item_id] ?? [] : []).map((supplier) => (
-                  <option key={supplier.supplier_id} value={supplier.supplier_id}>
-                    {supplier.supplier_name}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="app-input"
-                placeholder="Description"
-                value={line.description}
-                onChange={(event) => updateLine(index, { description: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                value={line.quantity}
-                onChange={(event) => updateLine(index, { quantity: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={line.unit_price}
-                onChange={(event) => updateLine(index, { unit_price: event.target.value })}
-              />
-              <div className="space-y-1">
-                <input
-                  className="app-input"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={line.unit_cost}
-                  disabled={!line.override_cost}
-                  onChange={(event) => updateLine(index, { unit_cost: event.target.value })}
-                />
-                <label className="flex items-center gap-1 text-xs text-muted">
-                  <input
-                    type="checkbox"
-                    checked={line.override_cost}
-                    onChange={(event) => {
-                      const override = event.target.checked;
-                      const nextCost =
-                        !override && line.item_id
-                          ? resolveLineCost(line.item_id, line.supplier_id)
-                          : line.unit_cost;
-                      updateLine(index, {
-                        override_cost: override,
-                        unit_cost: nextCost
-                      });
-                    }}
-                  />
-                  Override
-                </label>
-              </div>
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={line.discount}
-                onChange={(event) => updateLine(index, { discount: event.target.value })}
-              />
-              <input
-                className="app-input"
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={line.tax_rate}
-                onChange={(event) => updateLine(index, { tax_rate: event.target.value })}
-              />
-              <button className="app-button-ghost text-danger" onClick={() => removeLine(index)} disabled={lines.length === 1}>
-                Remove
+      <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="app-card p-3">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Work Queues</p>
+          <div className="space-y-1">
+            {queueMeta.map((entry) => (
+              <button key={entry.key} className={`w-full rounded-xl px-3 py-2 text-left text-sm ${queue === entry.key ? "bg-primary/10 text-primary" : "hover:bg-secondary"}`} onClick={() => setParam({ queue: entry.key })}>
+                <span className="font-medium">{entry.label}</span>
+                <span className="ml-2 text-muted">{entry.count}</span>
               </button>
-              <div className="col-span-full text-xs text-muted">
-                {(() => {
-                  const qty = Number(line.quantity || 0);
-                  const sell = Number(line.unit_price || 0);
-                  const landed = Number(line.landed_unit_cost || 0);
-                  const marginDollars = (sell - landed) * qty;
-                  const marginPercent = sell > 0 ? ((sell - landed) / sell) * 100 : 0;
-                  return (
-                    <span className={marginPercent < line.margin_threshold_percent ? "text-danger" : ""}>
-                      Landed unit cost: {currency(landed)} • Margin: {currency(marginDollars)} ({marginPercent.toFixed(1)}%)
-                      {marginPercent < line.margin_threshold_percent ? ` • Below ${line.margin_threshold_percent}% target` : ""}
-                    </span>
-                  );
-                })()}
-              </div>
-            </div>
-          ))}
-          <div>
-            <button className="app-button-ghost text-sm" onClick={addLine}>
-              + Add line
-            </button>
+            ))}
           </div>
-        </div>
+        </aside>
 
-        <div className="flex flex-wrap justify-between gap-4">
-          <div className="text-sm text-muted">
-            <div>Subtotal: {currency(totals.subtotal)}</div>
-            <div>Tax: {currency(totals.tax)}</div>
-            <div className="font-semibold text-foreground">Total: {currency(totals.total)}</div>
+        <div className="app-card p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input className="app-input pl-9" value={q} placeholder="Search invoice # or customer" onChange={(e) => setParam({ q: e.target.value || null })} />
+            </div>
+            <select className="app-select w-44" value={statusFilter} onChange={(e) => setParam({ status: e.target.value || null })}>
+              <option value="">All statuses</option>
+              {["DRAFT", "SENT", "PARTIALLY_PAID", "SHIPPED", "PAID", "VOID"].map((status) => <option key={status} value={status}>{status.replace(/_/g, " ")}</option>)}
+            </select>
+            <button className="app-button-ghost" onClick={() => setParam({ density: density === "compact" ? "comfortable" : "compact" })}>{density === "compact" ? "Comfortable" : "Compact"}</button>
+            <div className="relative">
+              <button className="app-button-ghost" onClick={() => setIsColumnsOpen((s) => !s)}>Columns <ChevronDown className="h-4 w-4" /></button>
+              {isColumnsOpen && (
+                <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-border bg-surface p-2 shadow-glow">
+                  {COLUMNS.map((column) => (
+                    <label key={column} className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-secondary">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.includes(column)}
+                        onChange={() => setVisibleColumns((prev) => prev.includes(column) ? prev.filter((c) => c !== column) : [...prev, column])}
+                      />
+                      <span>{column.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <button className="app-button" onClick={createInvoice} disabled={dueDateInvalid}>
-            Create invoice
-          </button>
+
+          {selected.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+              <span className="font-medium">{selected.length} selected</span>
+              <button className="app-button-ghost" disabled={bulkBusy} onClick={() => runBulk("send")}><Send className="h-4 w-4" /> Mark Sent</button>
+              <button className="app-button-ghost" disabled={bulkBusy} onClick={() => runBulk("paid")}><CheckCircle2 className="h-4 w-4" /> Mark Paid</button>
+              <button className="app-button-ghost" disabled={bulkBusy} onClick={() => runBulk("void")}><XCircle className="h-4 w-4" /> Void</button>
+              <button className="app-button-ghost" onClick={() => runBulk("export")}><Download className="h-4 w-4" /> Export</button>
+              <button className="app-button-ghost" onClick={() => runBulk("reminder")}><AlertTriangle className="h-4 w-4" /> Send Reminder</button>
+            </div>
+          )}
+
+          <div className="mt-4 overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-surface text-left text-xs uppercase tracking-widest text-muted">
+                <tr>
+                  <th className="py-2"><input type="checkbox" checked={filtered.length > 0 && selected.length === filtered.length} onChange={(e) => setSelected(e.target.checked ? filtered.map((inv) => inv.id) : [])} /></th>
+                  {visibleColumns.includes("invoice_number") && <th className="py-2">Invoice #</th>}
+                  {visibleColumns.includes("customer") && <th>Customer</th>}
+                  {visibleColumns.includes("status") && <th>Status</th>}
+                  {visibleColumns.includes("issue_date") && <th>Invoice Date</th>}
+                  {visibleColumns.includes("due_date") && <th>Due Date</th>}
+                  {visibleColumns.includes("total") && <th>Total</th>}
+                  {visibleColumns.includes("balance") && <th>Balance</th>}
+                  {visibleColumns.includes("updated") && <th>Updated</th>}
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((invoice) => (
+                  <tr key={invoice.id} className={`border-t ${density === "compact" ? "h-10" : "h-14"} hover:bg-secondary/40`}>
+                    <td><input type="checkbox" checked={selected.includes(invoice.id)} onChange={(e) => setSelected((prev) => e.target.checked ? [...new Set([...prev, invoice.id])] : prev.filter((id) => id !== invoice.id))} /></td>
+                    {visibleColumns.includes("invoice_number") && <td className="font-medium"><button className="hover:underline" onClick={() => openDetail(invoice.id)}>{invoice.invoice_number}</button></td>}
+                    {visibleColumns.includes("customer") && <td>{invoice.customer_name}</td>}
+                    {visibleColumns.includes("status") && <td><span className={`app-badge ${statusStyles[invoice.status] ?? "border-border bg-secondary"}`}>{invoice.status.replace(/_/g, " ")}</span></td>}
+                    {visibleColumns.includes("issue_date") && <td>{formatDate(invoice.issue_date)}</td>}
+                    {visibleColumns.includes("due_date") && <td className={isOverdue(invoice) ? "text-danger" : ""}>{formatDate(invoice.due_date)}</td>}
+                    {visibleColumns.includes("total") && <td className="tabular-nums">{currency(invoice.total)}</td>}
+                    {visibleColumns.includes("balance") && <td className="tabular-nums">{currency(invoice.amount_due)}</td>}
+                    {visibleColumns.includes("updated") && <td className="text-muted">{formatDate(invoice.issue_date)}</td>}
+                    <td className="text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <button className="app-button-ghost" onClick={() => openDetail(invoice.id)}>View</button>
+                        <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>Edit</Link>
+                        <button className="app-button-ghost" onClick={() => setInfoBanner("Duplicate action will be wired in next iteration.")}>Duplicate</button>
+                        <Link className="app-button-ghost" to={`/payments?invoiceId=${invoice.id}`}>Record Payment</Link>
+                        <button className="app-button-ghost" onClick={() => runBulk("void")}><MoreHorizontal className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {!filtered.length && (
+              <div className="rounded-2xl border border-dashed border-border py-16 text-center">
+                <p className="text-lg font-semibold">No invoices in this queue</p>
+                <p className="text-sm text-muted">Adjust filters or create a new invoice to get started.</p>
+                <button className="app-button mt-4" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Invoice</button>
+              </div>
+            )}
+          </div>
         </div>
-        </div>
-        <CustomerInsightsPanel customerId={selectedCustomerId} />
       </div>
 
-      <button
-        className="fixed bottom-8 right-8 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-glow transition hover:-translate-y-1"
-        onClick={() => document.getElementById("invoice-form")?.scrollIntoView({ behavior: "smooth" })}
-      >
-        <Plus className="h-4 w-4" /> Create
-      </button>
+      {(detail || detailLoading) && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/20">
+          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-border bg-surface p-5 shadow-glow">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted">Invoice Detail</p>
+                <h2 className="text-xl font-semibold">{detail?.invoice_number ?? "Loading..."}</h2>
+              </div>
+              <button className="app-button-ghost" onClick={() => setDetail(null)}>Close</button>
+            </div>
+            {detailLoading && <div className="mt-4 h-40 animate-pulse rounded-xl bg-secondary" />}
+            {detail && !detailLoading && (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="app-card p-3"><p className="text-xs text-muted">Customer</p><p className="font-medium">{detail.customer_name ?? detail.customer?.name ?? "—"}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Balance</p><p className="font-medium tabular-nums">{currency(detail.amount_due)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Status</p><span className={`app-badge ${statusStyles[detail.status] ?? "border-border bg-secondary"}`}>{detail.status.replace(/_/g, " ")}</span></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Due Date</p><p className="font-medium">{formatDate(detail.due_date)}</p></div>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="font-semibold">Line items</h3>
+                  <div className="mt-2 space-y-2">
+                    {(detail.line_items ?? detail.lines ?? []).slice(0, 5).map((line) => (
+                      <div key={line.id} className="rounded-xl border border-border p-3 text-sm">
+                        <p className="font-medium">{line.description || "Line item"}</p>
+                        <p className="text-xs text-muted">Qty {line.quantity} × {currency(line.unit_price)} · {currency(line.line_total)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="font-semibold">Activity timeline</h3>
+                  <ul className="mt-2 space-y-2 text-sm">
+                    <li className="rounded-lg bg-secondary p-2">Created · {formatDate(detail.issue_date)}</li>
+                    {["SENT", "PARTIALLY_PAID", "SHIPPED", "PAID"].includes(detail.status) && <li className="rounded-lg bg-secondary p-2">Sent · lifecycle progressed</li>}
+                    {detail.payments && detail.payments.length > 0 && <li className="rounded-lg bg-secondary p-2">Paid · {detail.payments.length} payment(s)</li>}
+                  </ul>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <Link className="app-button-ghost" to={`/invoices/${detail.id}`}><ExternalLink className="h-4 w-4" /> View full</Link>
+                  <Link className="app-button-ghost" to={`/invoices/${detail.id}`}>Edit</Link>
+                  <Link className="app-button-ghost" to={`/payments?invoiceId=${detail.id}`}>Record payment</Link>
+                  <button className="app-button-ghost" onClick={() => runBulk("send")}>Send</button>
+                  <button className="app-button-ghost" onClick={() => runBulk("void")}>Void</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {createOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+          <div className="h-full w-full max-w-4xl overflow-y-auto border-l border-border bg-surface p-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-muted">Create</p>
+                <h2 className="text-2xl font-semibold">New Invoice</h2>
+              </div>
+              <button className="app-button-ghost" onClick={() => setCreateOpen(false)}>Close</button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <select className="app-select" value={form.customer_id} onChange={(e) => setForm((prev) => ({ ...prev, customer_id: e.target.value }))}>
+                <option value="">Select customer *</option>
+                {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+              </select>
+              <input className="app-input" type="date" value={form.issue_date} onChange={(e) => {
+                const nextIssue = e.target.value;
+                const termsDays = parseTermsDays(form.terms);
+                if (termsDays !== null && (dueDateWasAuto || !form.due_date)) {
+                  setForm((prev) => ({ ...prev, issue_date: nextIssue, due_date: addDays(nextIssue, termsDays) }));
+                  setDueDateWasAuto(true);
+                  return;
+                }
+                setForm((prev) => ({ ...prev, issue_date: nextIssue }));
+              }} />
+              <input className="app-input" type="date" value={form.due_date} onChange={(e) => {
+                setForm((prev) => ({ ...prev, due_date: e.target.value }));
+                setDueDateWasAuto(false);
+              }} />
+              <input className="app-input" placeholder="Terms (e.g., Net 30)" value={form.terms} onChange={(e) => {
+                const nextTerms = e.target.value;
+                const termsDays = parseTermsDays(nextTerms);
+                if (termsDays !== null && form.issue_date && (dueDateWasAuto || !form.due_date)) {
+                  setForm((prev) => ({ ...prev, terms: nextTerms, due_date: addDays(form.issue_date, termsDays) }));
+                  setDueDateWasAuto(true);
+                  return;
+                }
+                setForm((prev) => ({ ...prev, terms: nextTerms }));
+              }} />
+              <input className="app-input md:col-span-2" placeholder="Notes" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+            </div>
+
+            {dueDateInvalid && <p className="mt-2 text-sm text-danger">Due date must be on or after invoice date.</p>}
+
+            <div className="mt-5 space-y-3">
+              {lines.map((line, idx) => (
+                <div key={idx} className="rounded-xl border border-border p-3">
+                  <div className="grid gap-2 md:grid-cols-6">
+                    <select className="app-select" value={line.item_id ?? ""} onChange={(e) => handleItemChange(idx, e.target.value)}>
+                      <option value="">Item</option>
+                      {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </select>
+                    <input className="app-input" placeholder="Description" value={line.description} onChange={(e) => updateLine(idx, { description: e.target.value })} />
+                    <input className="app-input" type="number" min="0" step="0.01" placeholder="Qty" value={line.quantity} onChange={(e) => updateLine(idx, { quantity: e.target.value })} />
+                    <input className="app-input" type="number" min="0" step="0.01" placeholder="Unit price" value={line.unit_price} onChange={(e) => updateLine(idx, { unit_price: e.target.value })} />
+                    <input className="app-input" type="number" min="0" step="0.01" placeholder="Discount" value={line.discount} onChange={(e) => updateLine(idx, { discount: e.target.value })} />
+                    <div className="flex gap-2">
+                      <input className="app-input" type="number" min="0" step="0.01" placeholder="Tax" value={line.tax_rate} onChange={(e) => updateLine(idx, { tax_rate: e.target.value })} />
+                      <button className="app-button-ghost" onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}>Remove</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button className="app-button-ghost" onClick={() => setLines((prev) => [...prev, { ...emptyLine }])}>+ Add line item</button>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between rounded-xl bg-secondary p-4">
+              <div className="text-sm text-muted">Subtotal {currency(totals.subtotal)} · Tax {currency(totals.tax)}</div>
+              <div className="text-lg font-semibold">Total {currency(totals.total)}</div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="app-button-ghost" onClick={() => setCreateOpen(false)}>Cancel</button>
+              <button className="app-button" onClick={createInvoice}>Create invoice</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -114,13 +114,19 @@ function KpiCard({
 
 export default function SalesRequestsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const query = new URLSearchParams(location.search);
+  const initialItemFilter = Number(query.get("item_id") || 0) || undefined;
+  const initialItemNameFilter = query.get("item_name") || "";
 
   // View & pagination state
   const [currentView, setCurrentView] = useState("active_pipeline");
   const [page, setPage] = useState(0);
 
   // Filter state
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialItemNameFilter);
+  const [itemIdFilter, setItemIdFilter] = useState<number | undefined>(initialItemFilter);
   const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -142,6 +148,7 @@ export default function SalesRequestsPage() {
   const filters: SalesRequestFilters = useMemo(
     () => ({
       search: search || undefined,
+      item_id: itemIdFilter,
       status: activeView.statusPreset,
       sort_by: sortBy,
       sort_dir: sortDir,
@@ -151,7 +158,7 @@ export default function SalesRequestsPage() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    [search, activeView, sortBy, sortDir, dateFrom, dateTo, page]
+    [search, itemIdFilter, activeView, sortBy, sortDir, dateFrom, dateTo, page]
   );
 
   // Data hooks
@@ -181,7 +188,7 @@ export default function SalesRequestsPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [search, dateFrom, dateTo, sortBy, sortDir]);
+  }, [search, itemIdFilter, dateFrom, dateTo, sortBy, sortDir]);
 
   // View change handler
   const handleViewChange = (viewId: string) => {
@@ -218,6 +225,7 @@ export default function SalesRequestsPage() {
     setDateFrom("");
     setDateTo("");
     setSearch("");
+    setItemIdFilter(undefined);
     setPage(0);
   };
 
@@ -247,6 +255,13 @@ export default function SalesRequestsPage() {
           {notice}
         </section>
       )}
+
+      {itemIdFilter ? (
+        <section className="app-card flex items-center justify-between gap-3 p-3 text-sm">
+          <p>Filtered to item: <span className="font-medium">{initialItemNameFilter || `#${itemIdFilter}`}</span></p>
+          <button className="app-button-secondary" onClick={() => setItemIdFilter(undefined)}>Clear item filter</button>
+        </section>
+      ) : null}
 
       {/* Create form */}
       {showCreate && (

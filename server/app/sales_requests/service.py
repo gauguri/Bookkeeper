@@ -682,6 +682,7 @@ def get_sales_requests_enriched(
     db: Session,
     *,
     search: Optional[str] = None,
+    item_id: Optional[int] = None,
     status_filter: Optional[List[str]] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
@@ -711,6 +712,15 @@ def get_sales_requests_enriched(
         query = query.filter(
             func.lower(SalesRequest.request_number).like(like)
             | func.lower(SalesRequest.customer_name).like(like)
+        )
+    if item_id:
+        query = query.filter(
+            db.query(SalesRequestLine.id)
+            .filter(
+                SalesRequestLine.sales_request_id == SalesRequest.id,
+                SalesRequestLine.item_id == item_id,
+            )
+            .exists()
         )
     if status_filter:
         query = query.filter(SalesRequest.status.in_(status_filter))

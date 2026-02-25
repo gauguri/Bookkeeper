@@ -142,6 +142,7 @@ def get_sales_requests_view_summary_endpoint(view: str, db: Session = Depends(ge
 @router.get("/enriched", response_model=schemas.PaginatedSalesRequestList)
 def get_sales_requests_enriched_endpoint(
     search: Optional[str] = None,
+    item_id: Optional[int] = Query(None, ge=1),
     status: Optional[str] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
@@ -161,6 +162,7 @@ def get_sales_requests_enriched_endpoint(
     return get_sales_requests_enriched(
         db,
         search=search,
+        item_id=item_id,
         status_filter=status_list,
         sort_by=sort_by,
         sort_dir=sort_dir,

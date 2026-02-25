@@ -141,6 +141,7 @@ export type PaginatedSalesRequestList = {
 
 export type SalesRequestFilters = {
   search?: string;
+  item_id?: number;
   status?: string[];
   sort_by?: string;
   sort_dir?: "asc" | "desc";
@@ -172,6 +173,7 @@ export function useSalesRequestsSummary() {
 export function useSalesRequestsEnriched(filters: SalesRequestFilters = {}) {
   const qs = buildQuery({
     search: filters.search,
+    item_id: filters.item_id != null ? String(filters.item_id) : undefined,
     status: filters.status?.join(","),
     sort_by: filters.sort_by,
     sort_dir: filters.sort_dir,

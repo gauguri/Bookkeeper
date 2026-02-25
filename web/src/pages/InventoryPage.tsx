@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 
 type InventoryRow = {
@@ -27,6 +28,11 @@ type ReservationDetail = {
   qty_reserved: number;
 };
 
+type PopoverPosition = {
+  top: number;
+  left: number;
+};
+
 type InventoryForm = {
   item_id: string;
   quantity_on_hand: string;
@@ -41,31 +47,99 @@ const emptyForm: InventoryForm = {
 
 /* ---------- Reservation popover ---------- */
 
-function ReservedCell({ itemId, reservedQty }: { itemId: number; reservedQty: number }) {
+function ReservedCell({
+  itemId,
+  itemName,
+  reservedQty,
+}: {
+  itemId: number;
+  itemName: string;
+  reservedQty: number;
+}) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [reservations, setReservations] = useState<ReservationDetail[] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
-  const ref = useRef<HTMLTableCellElement>(null);
+  const [position, setPosition] = useState<PopoverPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const popoverId = useId();
 
   useEffect(() => {
     if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const width = 280;
+      const height = 260;
+      const gap = 8;
+      const viewportPadding = 8;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      let left = rect.right + gap;
+      let top = rect.top;
+
+      if (left + width > viewportWidth - viewportPadding) {
+        left = rect.left;
+        top = rect.bottom + gap;
+      }
+      if (left + width > viewportWidth - viewportPadding) {
+        left = Math.max(viewportPadding, viewportWidth - width - viewportPadding);
+      }
+      if (top + height > viewportHeight - viewportPadding) {
+        top = Math.max(viewportPadding, viewportHeight - height - viewportPadding);
+      }
+
+      setPosition({ left, top });
     };
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    popoverRef.current?.focus();
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      triggerRef.current?.focus();
+    }
   }, [open]);
 
   const handleClick = async () => {
     if (reservedQty <= 0) return;
     setOpen((prev) => !prev);
-    if (reservations !== null) return; // already loaded
+    if (reservations !== null) return;
     setLoading(true);
+    setLoadError("");
     try {
       const data = await apiFetch<ReservationDetail[]>(`/inventory/reservations/${itemId}`);
       setReservations(data);
-    } catch {
-      setReservations([]);
+    } catch (err) {
+      setLoadError((err as Error).message || "Could not load reservations.");
     } finally {
       setLoading(false);
     }
@@ -77,13 +151,30 @@ function ReservedCell({ itemId, reservedQty }: { itemId: number; reservedQty: nu
     return null;
   };
 
+  const openSource = (reservation: ReservationDetail) => {
+    const url = sourceUrl(reservation);
+    if (url) {
+      setOpen(false);
+      navigate(url);
+    }
+  };
+
+  const openSalesRequestsFiltered = () => {
+    setOpen(false);
+    navigate(`/sales-requests?item_id=${itemId}&item_name=${encodeURIComponent(itemName)}`);
+  };
+
   return (
-    <td className="px-4 py-3 relative" ref={ref}>
+    <td className="px-4 py-3">
       {reservedQty > 0 ? (
         <button
+          ref={triggerRef}
           type="button"
           className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
           onClick={handleClick}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? popoverId : undefined}
         >
           {reservedQty.toFixed(2)}
         </button>
@@ -91,35 +182,59 @@ function ReservedCell({ itemId, reservedQty }: { itemId: number; reservedQty: nu
         <span>{reservedQty.toFixed(2)}</span>
       )}
 
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border bg-white shadow-lg">
-          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted border-b">
-            Reservations
+      {open && position && createPortal(
+        <div
+          id={popoverId}
+          ref={popoverRef}
+          role="dialog"
+          aria-modal="false"
+          aria-label="Reservations"
+          tabIndex={-1}
+          className="fixed z-40 w-[280px] rounded-xl border bg-white shadow-xl outline-none"
+          style={{ left: `${position.left}px`, top: `${position.top}px` }}
+        >
+          <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted">
+            RESERVATIONS
           </div>
+
           {loading ? (
-            <div className="px-3 py-3 text-xs text-muted">Loading…</div>
+            <div className="space-y-2 p-3">
+              <div className="app-skeleton h-4 w-40" />
+              <div className="app-skeleton h-4 w-52" />
+              <div className="app-skeleton h-4 w-32" />
+            </div>
+          ) : loadError ? (
+            <div className="px-3 py-4 text-xs text-rose-600">{loadError}</div>
           ) : !reservations || reservations.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-muted">No active reservations</div>
+            <div className="px-3 py-4 text-xs text-muted">No reservations.</div>
           ) : (
-            <ul className="divide-y">
-              {reservations.map((r, i) => {
-                const url = sourceUrl(r);
-                return (
-                  <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
-                    {url ? (
-                      <Link to={url} className="font-medium text-primary hover:underline">
-                        {r.source_label}
-                      </Link>
-                    ) : (
-                      <span className="font-medium">{r.source_label}</span>
-                    )}
+            <ul className="max-h-[240px] divide-y overflow-y-auto">
+              {reservations.map((r, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => openSource(r)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--pl-hover)]"
+                  >
+                    <span className="font-medium">{r.source_label}</span>
                     <span className="tabular-nums text-muted">{Number(r.qty_reserved).toFixed(2)}</span>
-                  </li>
-                );
-              })}
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
-        </div>
+
+          <div className="flex justify-end border-t px-3 py-2">
+            <button
+              type="button"
+              className="text-xs font-medium text-primary hover:underline"
+              onClick={openSalesRequestsFiltered}
+            >
+              View all
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
     </td>
   );
@@ -300,7 +415,7 @@ export default function InventoryPage() {
                 <tr key={row.id} className="border-t border-muted/20">
                   <td className="px-4 py-3 font-medium">{row.item_name}</td>
                   <td className="px-4 py-3">{Number(row.quantity_on_hand).toFixed(2)}</td>
-                  <ReservedCell itemId={row.item_id} reservedQty={reservedQty} />
+                  <ReservedCell itemId={row.item_id} itemName={row.item_name} reservedQty={reservedQty} />
                   <td className="px-4 py-3">{Number(matchedItem?.available_qty ?? row.quantity_on_hand).toFixed(2)}</td>
                   <td className="px-4 py-3">${Number(row.landed_unit_cost).toFixed(2)}</td>
                   <td className="px-4 py-3">${Number(row.total_value).toFixed(2)}</td>

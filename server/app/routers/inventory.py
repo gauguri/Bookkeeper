@@ -35,6 +35,10 @@ def _safe_decimal(value: Decimal | float | int | None) -> Decimal:
     return Decimal(value or 0)
 
 
+def _q2(value: Decimal | float | int | None) -> Decimal:
+    return _safe_decimal(value).quantize(Decimal("0.01"))
+
+
 def _avg_usage_by_item(db: Session, item_ids: list[int], usage_days: int) -> dict[int, Decimal]:
     if not item_ids:
         return {}
@@ -86,23 +90,23 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
     rows: list[schemas.InventoryItemRow] = []
     for item in items:
         inv = inv_by_id.get(item.id)
-        on_hand = _safe_decimal(inv.quantity_on_hand if inv else item.on_hand_qty)
-        landed_cost = _safe_decimal(inv.landed_unit_cost if inv else item.preferred_landed_cost)
-        reserved = _safe_decimal(reserved_by_id.get(item.id, Decimal("0")))
+        on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
+        landed_cost = _q2(inv.landed_unit_cost if inv else item.preferred_landed_cost)
+        reserved = _q2(reserved_by_id.get(item.id, Decimal("0")))
         available = on_hand - reserved
-        avg_daily_usage = _safe_decimal(avg_usage_by_id.get(item.id, Decimal("0")))
+        avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))
         preferred = item.preferred_supplier_link
         lead_time = int(preferred.lead_time_days if preferred and preferred.lead_time_days else 14)
-        safety_stock = _safe_decimal(item.safety_stock_qty)
-        reorder_point = _safe_decimal(item.reorder_point)
+        safety_stock = _q2(item.safety_stock_qty)
+        reorder_point = _q2(item.reorder_point)
         if reorder_point <= 0:
             reorder_point = (avg_daily_usage * Decimal(lead_time)) + safety_stock
-        target_days = _safe_decimal(item.target_days_supply or 30)
-        inbound = _safe_decimal(inbound_by_item.get(item.id, Decimal("0")))
+        target_days = _q2(item.target_days_supply or 30)
+        inbound = _q2(inbound_by_item.get(item.id, Decimal("0")))
         projected_on_hand = on_hand - reserved + inbound
         desired_on_hand = avg_daily_usage * target_days
-        suggested_reorder_qty = max(Decimal("0"), desired_on_hand - projected_on_hand)
-        days_of_supply = Decimal("0") if avg_daily_usage <= 0 else max(Decimal("0"), available / avg_daily_usage)
+        suggested_reorder_qty = _q2(max(Decimal("0"), desired_on_hand - projected_on_hand))
+        days_of_supply = Decimal("0.00") if avg_daily_usage <= 0 else _q2(max(Decimal("0"), available / avg_daily_usage))
 
         last_move = last_movement.get(item.id)
         dead_stock = bool(last_move and (now - last_move).days > 120)
@@ -142,7 +146,7 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
                 preferred_supplier_id=item.preferred_supplier_id,
                 last_receipt=last_receipt.get(item.id),
                 last_issue=last_issue.get(item.id),
-                total_value=(on_hand * landed_cost),
+                total_value=_q2(on_hand * landed_cost),
                 inbound_qty=inbound,
                 health_flag=health_flag,
             )
@@ -257,7 +261,7 @@ def delete_inventory_record(inventory_id: int, db: Session = Depends(get_db)):
 def get_inventory_summary(usage_days: int = Query(90, ge=7, le=365), db: Session = Depends(get_db)):
     rows = _build_inventory_rows(db, usage_days=usage_days)
     return schemas.InventorySummaryResponse(
-        inventory_value=sum(row.total_value for row in rows),
+        inventory_value=_q2(sum(row.total_value for row in rows)),
         low_stock_items=len([row for row in rows if row.available <= row.reorder_point]),
         stockouts=len([row for row in rows if row.available <= 0]),
         at_risk_items=len([row for row in rows if row.days_of_supply > 0 and row.days_of_supply < row.lead_time_days]),
@@ -344,7 +348,7 @@ def get_inventory_analytics(db: Session = Depends(get_db)):
         )
         delta = sum(_safe_decimal(entry.qty_delta) for entry in receipt_movements + issue_movements)
         current_total = sum((row.total_value for row in rows), Decimal("0"))
-        value_trend.append(schemas.InventoryTrendPoint(period=month_start.strftime("%b"), value=max(Decimal("0"), current_total + delta)))
+        value_trend.append(schemas.InventoryTrendPoint(period=month_start.strftime("%b"), value=_q2(max(Decimal("0"), current_total + delta))))
 
     health_breakdown = [
         schemas.InventoryHealthPoint(name="Healthy", value=len([row for row in rows if row.health_flag == "healthy"])),
@@ -354,7 +358,7 @@ def get_inventory_analytics(db: Session = Depends(get_db)):
     ]
 
     top_consumption = sorted(rows, key=lambda row: row.avg_daily_usage, reverse=True)[:10]
-    top_consumption_payload = [schemas.InventoryConsumptionPoint(item=row.item, value=row.avg_daily_usage * Decimal("30")) for row in top_consumption]
+    top_consumption_payload = [schemas.InventoryConsumptionPoint(item=row.item, value=_q2(row.avg_daily_usage * Decimal("30"))) for row in top_consumption]
 
     net_flow: list[schemas.InventoryFlowPoint] = []
     for i in range(5, -1, -1):
@@ -364,7 +368,7 @@ def get_inventory_analytics(db: Session = Depends(get_db)):
         receipts = sum((_safe_decimal(m.qty_delta) for m in month_moves if _safe_decimal(m.qty_delta) > 0), Decimal("0"))
         issues = abs(sum((_safe_decimal(m.qty_delta) for m in month_moves if _safe_decimal(m.qty_delta) < 0), Decimal("0")))
         reserved = sum((row.reserved for row in rows), Decimal("0"))
-        net_flow.append(schemas.InventoryFlowPoint(period=month_start.strftime("%b"), receipts=receipts, issues=issues, reserved=reserved))
+        net_flow.append(schemas.InventoryFlowPoint(period=month_start.strftime("%b"), receipts=_q2(receipts), issues=_q2(issues), reserved=_q2(reserved)))
 
     return schemas.InventoryAnalyticsResponse(
         value_trend=value_trend,

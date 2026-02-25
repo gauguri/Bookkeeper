@@ -56,6 +56,11 @@ const SECTION_EMPTY_COPY: Record<Section, string> = {
 };
 
 const STAGE_COLORS = [CHART_COLORS[0], CHART_COLORS[1], CHART_COLORS[2], CHART_COLORS[3], CHART_COLORS[4], CHART_COLORS[5]];
+const CONVERSION_COLORS = {
+  quotes: "#3b82f6",
+  orders: "#f59e0b",
+  invoices: "#10b981",
+} as const;
 
 export default function SalesCommandCenterPage() {
   const navigate = useNavigate();
@@ -302,9 +307,9 @@ export default function SalesCommandCenterPage() {
                   <YAxis tickFormatter={formatCompact} {...AXIS_STYLE} />
                   <Tooltip {...TOOLTIP_STYLE} formatter={(value: number) => value.toLocaleString()} />
                   <Legend iconType="circle" iconSize={8} />
-                  <Bar dataKey="quotes" stackId="conv" fill={STAGE_COLORS[0]} name="Quotes" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="orders" stackId="conv" fill={STAGE_COLORS[1]} name="Orders" />
-                  <Bar dataKey="invoices" stackId="conv" fill={STAGE_COLORS[2]} name="Invoices" />
+                  <Bar dataKey="quotes" stackId="conv" fill={CONVERSION_COLORS.quotes} name="Quotes" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="orders" stackId="conv" fill={CONVERSION_COLORS.orders} name="Orders" />
+                  <Bar dataKey="invoices" stackId="conv" fill={CONVERSION_COLORS.invoices} name="Invoices" />
                 </BarChart>
               </ResponsiveContainer>
             </div>

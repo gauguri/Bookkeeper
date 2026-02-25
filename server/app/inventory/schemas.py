@@ -90,6 +90,12 @@ class InventorySummaryResponse(BaseModel):
     at_risk_items: int
     excess_dead_stock: int
     reserved_pressure_items: int
+    total_on_hand_qty: DecimalValue = Field(default=Decimal("0"))
+    total_reserved_qty: DecimalValue = Field(default=Decimal("0"))
+    total_available_qty: DecimalValue = Field(default=Decimal("0"))
+    total_value: DecimalValue = Field(default=Decimal("0"))
+    total_inbound_qty: DecimalValue = Field(default=Decimal("0"))
+    total_backordered_qty: DecimalValue = Field(default=Decimal("0"))
 
 
 class InventoryQueueCount(BaseModel):
@@ -162,11 +168,16 @@ class InventoryItemDetailResponse(BaseModel):
     movements: list[dict]
     reservations: list[ReservationDetailResponse]
     reorder_explanation: str
+    projected_available: DecimalValue = Field(default=Decimal("0"))
+    target_stock: DecimalValue = Field(default=Decimal("0"))
+    last_updated: Optional[datetime] = None
+    consumption_trend: list[dict] = Field(default_factory=list)
 
 
 class InventoryPlanningUpdate(BaseModel):
     reorder_point_qty: Optional[DecimalValue] = Field(default=None, ge=0)
     safety_stock_qty: Optional[DecimalValue] = Field(default=None, ge=0)
+    lead_time_days: Optional[int] = Field(default=None, ge=1, le=365)
     target_days_supply: Optional[DecimalValue] = Field(default=None, ge=1)
 
 

@@ -38,6 +38,12 @@ type Summary = {
   at_risk_items: number;
   excess_dead_stock: number;
   reserved_pressure_items: number;
+  total_on_hand_qty: number;
+  total_reserved_qty: number;
+  total_available_qty: number;
+  total_value: number;
+  total_inbound_qty: number;
+  total_backordered_qty: number;
 };
 
 type ItemRow = {
@@ -58,6 +64,7 @@ type ItemRow = {
   last_receipt?: string | null;
   last_issue?: string | null;
   total_value: number;
+  inbound_qty: number;
   health_flag: string;
 };
 
@@ -72,11 +79,34 @@ type AnalyticsResponse = {
 };
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
-type Detail = { item: ItemRow; movements: { id: number; reason: string; qty_delta: number; created_at: string }[]; reservations: Reservation[]; reorder_explanation: string };
+type Detail = {
+  item: ItemRow;
+  movements: { id: number; reason: string; qty_delta: number; created_at: string }[];
+  reservations: Reservation[];
+  reorder_explanation: string;
+  projected_available: number;
+  target_stock: number;
+  last_updated?: string | null;
+  consumption_trend: { date: string; consumption: number }[];
+};
+
+type PlanningPayload = {
+  reorder_point_qty: number;
+  safety_stock_qty: number;
+  lead_time_days: number;
+  target_days_supply: number;
+};
 
 const queueFlagMap: Record<string, string> = { low_stock: "low_stock", stockout: "stockouts", at_risk: "at_risk", excess: "excess", reserved_pressure: "reserved_pressure" };
-
-const formatNumber = (value: number) => Number.isFinite(value) ? formatCompact(value) : "0";
+const formatNumber = (value: number) => (Number.isFinite(value) ? formatCompact(value) : "0");
+const healthPillMap: Record<string, string> = {
+  healthy: "bg-success/10 text-success",
+  low_stock: "bg-warning/10 text-warning",
+  stockout: "bg-danger/10 text-danger",
+  excess: "bg-primary/10 text-primary",
+  at_risk: "bg-warning/10 text-warning",
+  reserved_pressure: "bg-warning/10 text-warning",
+};
 
 export default function InventoryPage() {
   const navigate = useNavigate();
@@ -93,6 +123,12 @@ export default function InventoryPage() {
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [editingPlanning, setEditingPlanning] = useState(false);
+  const [planningSaving, setPlanningSaving] = useState(false);
+  const [planningForm, setPlanningForm] = useState<PlanningPayload>({ reorder_point_qty: 0, safety_stock_qty: 0, lead_time_days: 14, target_days_supply: 30 });
   const [popover, setPopover] = useState<{ itemId: number; x: number; y: number } | null>(null);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [compact, setCompact] = useState(false);
@@ -105,12 +141,35 @@ export default function InventoryPage() {
   });
 
   const queue = searchParams.get("queue") || "needs_attention";
+  const breakdownFilter = searchParams.get("breakdown") || "all";
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
 
   const setQueue = (nextQueue: string) => {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set("queue", nextQueue);
+      next.delete("breakdown");
       return next;
+    }, { replace: false });
+  };
+
+  const setBreakdown = (next: string) => {
+    setSearchParams((current) => {
+      const nextParams = new URLSearchParams(current);
+      if (next === "all") {
+        nextParams.delete("breakdown");
+      } else {
+        nextParams.set("breakdown", next);
+        nextParams.set("queue", "all");
+      }
+      return nextParams;
     }, { replace: false });
   };
 
@@ -165,39 +224,98 @@ export default function InventoryPage() {
   }, [summary]);
 
   const topConsumptionData = useMemo(
-    () => [...(analytics?.top_consumption ?? [])].sort((a, b) => b.value - a.value),
-    [analytics?.top_consumption],
+    () => [...(analytics?.top_consumption ?? [])].sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 10),
+    [analytics],
   );
   const topConsumptionColors = useMemo(
-    () => topConsumptionData.map((_, index) => CATEGORY_COLORS[index % CATEGORY_COLORS.length]),
+    () => topConsumptionData.map((_, index) => CATEGORY_COLORS[index % CATEGORY_COLORS.length] ?? CHART_COLORS[index % CHART_COLORS.length]),
     [topConsumptionData],
   );
 
-  const openDetail = async (itemId: number) => {
-    const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
-    setDetail(payload);
-  };
+  const breakdownData = useMemo(() => {
+    if (!summary) return [];
+    return [
+      { key: "on_hand", label: "On Hand", value: Number(summary.total_on_hand_qty ?? 0), color: CHART_COLORS[0] },
+      { key: "reserved", label: "Reserved", value: Number(summary.total_reserved_qty ?? 0), color: CHART_COLORS[3] },
+      { key: "available", label: "Available", value: Number(summary.total_available_qty ?? 0), color: CHART_COLORS[1] },
+      { key: "inbound", label: "Inbound", value: Number(summary.total_inbound_qty ?? 0), color: CHART_COLORS[2] },
+      { key: "backordered", label: "Backordered", value: Number(summary.total_backordered_qty ?? 0), color: CHART_COLORS[4] },
+    ];
+  }, [summary]);
 
-  const openReservations = async (itemId: number, event: MouseEvent<HTMLButtonElement>) => {
-    setPopover({ itemId, x: event.clientX + 8, y: event.clientY + 8 });
-    const payload = await apiFetch<Reservation[]>(`/inventory/reservations/${itemId}`);
-    setReservations(payload);
-  };
+  const displayedItems = useMemo(() => {
+    const all = itemsData?.items ?? [];
+    if (breakdownFilter === "reserved") return all.filter((row) => Number(row.reserved) > 0);
+    if (breakdownFilter === "available") return all.filter((row) => Number(row.available) <= Number(row.reorder_point) || Number(row.available) <= 0);
+    if (breakdownFilter === "inbound") return all.filter((row) => Number(row.inbound_qty) > 0);
+    if (breakdownFilter === "backordered") return all.filter((row) => Number(row.available) < 0);
+    return all;
+  }, [itemsData?.items, breakdownFilter]);
 
   const createPOForSelection = () => {
-    const selected = (itemsData?.items ?? []).filter((row) => selectedIds.includes(row.id) && row.preferred_supplier_id && row.suggested_reorder_qty > 0);
+    if (!selectedIds.length) return;
     navigate("/purchasing/purchase-orders/new", {
       state: {
-        prefillLines: selected.map((row) => ({ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) })),
+        prefillLines: selectedIds.map((itemId) => ({
+          item_id: itemId,
+          quantity: 0,
+        })),
       },
     });
   };
 
-  if (overviewLoading && tableLoading && !summary && !analytics && !itemsData) {
+  const openDetail = async (itemId: number) => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
+      setDetail(payload);
+      setEditingPlanning(false);
+      setPlanningForm({
+        reorder_point_qty: Number(payload.item.reorder_point ?? 0),
+        safety_stock_qty: Number(payload.item.safety_stock ?? 0),
+        lead_time_days: Number(payload.item.lead_time_days ?? 14),
+        target_days_supply: 30,
+      });
+    } catch (err) {
+      setDetailError((err as Error).message);
+      setDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const savePlanning = async () => {
+    if (!detail) return;
+    setPlanningSaving(true);
+    setDetailError("");
+    try {
+      await apiFetch<ItemRow>(`/inventory/items/${detail.item.id}/planning`, {
+        method: "PUT",
+        body: JSON.stringify(planningForm),
+      });
+      await openDetail(detail.item.id);
+      void loadTable();
+    } catch (err) {
+      setDetailError((err as Error).message);
+    } finally {
+      setPlanningSaving(false);
+    }
+  };
+
+  const openReservations = async (itemId: number, event: MouseEvent) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopover({ itemId, x: rect.left, y: rect.bottom + 8 });
+    const payload = await apiFetch<Reservation[]>(`/inventory/reservations/${itemId}`);
+    setReservations(payload);
+  };
+
+  if (overviewLoading && !summary) {
     return (
       <section className="space-y-6">
-        <div className="app-card h-24 animate-pulse" />
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">{Array.from({ length: 6 }).map((_, idx) => <div key={idx} className="app-card h-24 animate-pulse" />)}</div>
+        <div className="h-20 animate-pulse rounded-2xl bg-secondary" />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">{Array.from({ length: 6 }).map((_, idx) => <div key={idx} className="app-card h-24 animate-pulse" />)}</div>
         <div className="grid gap-4 lg:grid-cols-2">{Array.from({ length: 4 }).map((_, idx) => <div key={idx} className="app-card h-72 animate-pulse" />)}</div>
       </section>
     );
@@ -245,6 +363,38 @@ export default function InventoryPage() {
         ))}
       </div>
 
+      <div className="app-card p-4">
+        <div className="mb-3 flex items-center justify-between"><p className="font-semibold">Current Inventory Breakdown</p><p className="text-xs text-muted">Click any segment to filter the inventory grid.</p></div>
+        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <div className="h-40">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[Object.fromEntries(breakdownData.map((segment) => [segment.key, segment.value]))]} layout="vertical" margin={{ left: 12, right: 12, top: 8, bottom: 8 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" hide />
+                <Tooltip formatter={(value: number, _name, payload) => [formatNumber(Number(value)), payload?.payload?.label]} />
+                {breakdownData.map((segment) => (
+                  <Bar key={segment.key} dataKey={segment.key} name={segment.label} stackId="inventory" fill={segment.color} onClick={() => setBreakdown(segment.key)} radius={[4, 4, 4, 4]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "all" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("all")}>
+              <p className="text-xs uppercase tracking-wide text-muted">Total On Hand</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_on_hand_qty ?? 0))}</p>
+            </button>
+            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "reserved" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("reserved")}>
+              <p className="text-xs uppercase tracking-wide text-muted">Total Reserved</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_reserved_qty ?? 0))}</p>
+            </button>
+            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "available" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("available")}>
+              <p className="text-xs uppercase tracking-wide text-muted">Total Available</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_available_qty ?? 0))}</p>
+            </button>
+            <div className="rounded-xl border border-border p-3 text-left">
+              <p className="text-xs uppercase tracking-wide text-muted">Total Inventory Value</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatCurrency(Number(summary?.total_value ?? 0))}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>
         <div className="app-card p-4"><p className="mb-2 font-semibold">Stock Health Breakdown</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={analytics?.health_breakdown ?? []} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85}>{(analytics?.health_breakdown ?? []).map((_, idx) => <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div></div>
@@ -277,16 +427,16 @@ export default function InventoryPage() {
           <div className="relative overflow-auto">
             {tableLoading && <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-1 animate-pulse bg-primary/30" />}
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-surface text-xs uppercase text-muted"><tr><th className="px-3 py-2"><input type="checkbox" onChange={(e) => setSelectedIds(e.target.checked ? (itemsData?.items ?? []).map((x) => x.id) : [])} /></th><th className="px-3 py-2">Item</th><th className="px-3 py-2">On Hand</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">ROP</th>{visibleCols.safety_stock && <th className="px-3 py-2">Safety</th>}{visibleCols.lead_time_days && <th className="px-3 py-2">Lead Time</th>}{visibleCols.avg_daily_usage && <th className="px-3 py-2">Avg Usage</th>}<th className="px-3 py-2">DOS</th><th className="px-3 py-2">ROQ</th><th className="px-3 py-2">Supplier</th>{visibleCols.last_receipt && <th className="px-3 py-2">Last Receipt</th>}{visibleCols.last_issue && <th className="px-3 py-2">Last Issue</th>}<th className="px-3 py-2">Total Value</th><th className="px-3 py-2">Actions</th></tr></thead>
+              <thead className="sticky top-0 bg-surface text-xs uppercase text-muted"><tr><th className="px-3 py-2"><input type="checkbox" onChange={(e) => setSelectedIds(e.target.checked ? displayedItems.map((x) => x.id) : [])} /></th><th className="px-3 py-2">Item</th><th className="px-3 py-2">On Hand</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">ROP</th>{visibleCols.safety_stock && <th className="px-3 py-2">Safety</th>}{visibleCols.lead_time_days && <th className="px-3 py-2">Lead Time</th>}{visibleCols.avg_daily_usage && <th className="px-3 py-2">Avg Usage</th>}<th className="px-3 py-2">DOS</th><th className="px-3 py-2">ROQ</th><th className="px-3 py-2">Supplier</th>{visibleCols.last_receipt && <th className="px-3 py-2">Last Receipt</th>}{visibleCols.last_issue && <th className="px-3 py-2">Last Issue</th>}<th className="px-3 py-2">Total Value</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
-                {(itemsData?.items ?? []).map((row) => (
-                  <tr key={row.id} className={`border-t border-muted/20 ${compact ? "text-xs" : ""}`}>
-                    <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={(e) => setSelectedIds((prev) => e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id))} /></td>
-                    <td className="px-3 py-2"><button className="font-medium hover:underline" onClick={() => openDetail(row.id)}>{row.item}</button><p className="text-xs text-muted">{row.sku ?? "—"}</p></td>
+                {displayedItems.map((row) => (
+                  <tr key={row.id} className={`cursor-pointer border-t border-muted/20 ${compact ? "text-xs" : ""}`} onClick={() => void openDetail(row.id)}>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={(e) => setSelectedIds((prev) => e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id))} /></td>
+                    <td className="px-3 py-2"><button className="font-medium hover:underline" onClick={(e) => { e.stopPropagation(); void openDetail(row.id); }}>{row.item}</button><p className="text-xs text-muted">{row.sku ?? "—"}</p></td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.on_hand)}</td>
-                    <td className="px-3 py-2 tabular-nums"><button className="text-primary underline" onClick={(e) => openReservations(row.id, e)}>{formatNumber(row.reserved)}</button></td>
+                    <td className="px-3 py-2 tabular-nums"><button className="text-primary underline" onClick={(e) => { e.stopPropagation(); void openReservations(row.id, e); }}>{formatNumber(row.reserved)}</button></td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.available)}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatNumber(row.reorder_point)}</td>
+                    <td className="px-3 py-2 tabular-nums font-semibold">{formatNumber(row.reorder_point)}</td>
                     {visibleCols.safety_stock && <td className="px-3 py-2 tabular-nums">{formatNumber(row.safety_stock)}</td>}
                     {visibleCols.lead_time_days && <td className="px-3 py-2">{row.lead_time_days}d</td>}
                     {visibleCols.avg_daily_usage && <td className="px-3 py-2 tabular-nums">{formatNumber(row.avg_daily_usage)}</td>}
@@ -296,12 +446,12 @@ export default function InventoryPage() {
                     {visibleCols.last_receipt && <td className="px-3 py-2">{row.last_receipt ? new Date(row.last_receipt).toLocaleDateString() : "—"}</td>}
                     {visibleCols.last_issue && <td className="px-3 py-2">{row.last_issue ? new Date(row.last_issue).toLocaleDateString() : "—"}</td>}
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.total_value)}</td>
-                    <td className="px-3 py-2"><div className="flex gap-1"><button className="app-button-ghost" onClick={() => openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => setQueue(queueFlagMap[row.health_flag] ?? queue)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><button className="app-button-ghost" onClick={() => void openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => setQueue(queueFlagMap[row.health_flag] ?? queue)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!(itemsData?.items?.length) && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><p className="text-lg font-semibold">No items in this queue</p><p className="text-sm text-muted">Try another queue or adjust filters.</p></div>}
+            {!displayedItems.length && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><p className="text-lg font-semibold">No items in this view</p><p className="text-sm text-muted">Try another queue or clear the breakdown filter.</p></div>}
           </div>
         </div>
       </div>
@@ -314,19 +464,67 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {detail && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/20">
-          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-border bg-surface p-5">
-            <div className="flex items-start justify-between"><div><p className="text-xs uppercase tracking-wide text-muted">Item Detail</p><h2 className="text-xl font-semibold">{detail.item.item}</h2></div><button className="app-button-ghost" onClick={() => setDetail(null)}>Close</button></div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="app-card p-3"><p className="text-xs text-muted">On hand</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.on_hand)}</p></div>
-              <div className="app-card p-3"><p className="text-xs text-muted">Available</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.available)}</p></div>
-              <div className="app-card p-3"><p className="text-xs text-muted">Reserved</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.reserved)}</p></div>
-              <div className="app-card p-3"><p className="text-xs text-muted">Days of supply</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.days_of_supply)}</p></div>
-            </div>
-            <div className="mt-4 app-card p-3 text-sm"><p className="font-semibold">Reorder recommendation</p><p className="mt-1 text-muted">{detail.reorder_explanation}</p></div>
-            <div className="mt-4 app-card p-3"><p className="font-semibold">Recent movements</p><div className="mt-2 space-y-2">{detail.movements.map((movement) => <div key={movement.id} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-sm"><span>{movement.reason}</span><span className="tabular-nums">{formatNumber(movement.qty_delta)}</span></div>)}</div></div>
-            <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchasing/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => navigate("/items")}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/inventory")}>Transfer</button></div>
+      {detailOpen && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/25" onClick={() => setDetailOpen(false)}>
+          <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-surface p-5" onClick={(event) => event.stopPropagation()}>
+            {detailLoading && <div className="space-y-3">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="h-16 animate-pulse rounded-xl bg-secondary" />)}</div>}
+            {!detailLoading && detailError && <div className="app-card border-danger/30 bg-danger/5 p-3 text-sm text-danger">{detailError}</div>}
+            {!detailLoading && detail && (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted">Item Detail</p>
+                    <h2 className="text-2xl font-semibold">{detail.item.item}</h2>
+                    <p className="text-sm text-muted">{detail.item.sku ?? "No SKU"}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${healthPillMap[detail.item.health_flag] ?? healthPillMap.healthy}`}>{detail.item.health_flag.replace("_", " ")}</p>
+                    <button className="mt-2 block text-xs text-muted hover:text-foreground" onClick={() => setDetailOpen(false)}>Close</button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchasing/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => navigate("/items")}>Adjust</button><button className="app-button-ghost" onClick={() => setEditingPlanning((v) => !v)}>{editingPlanning ? "Cancel planning edit" : "Edit planning"}</button></div>
+
+                <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted">Reorder point (ROP)</p>
+                  <p className="text-3xl font-semibold tabular-nums">{formatNumber(detail.item.reorder_point)}</p>
+                  <p className="mt-2 text-xs text-muted">ROP = (Avg Daily Usage × Lead Time) + Safety Stock</p>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="app-card p-3"><p className="text-xs text-muted">Safety Stock</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.safety_stock)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Lead Time (days)</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.lead_time_days)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Avg Daily Usage ({usageDays}d)</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.avg_daily_usage)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Days of Supply</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.days_of_supply)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Projected Available</p><p className="font-semibold tabular-nums">{formatNumber(detail.projected_available)}</p><p className="mt-1 text-xs text-muted">Projected Available = On Hand − Reserved + Inbound</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Suggested Reorder Qty</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.suggested_reorder_qty)}</p><p className="mt-1 text-xs text-muted">Suggested Order Qty = max(0, Target Stock − Projected Available)</p></div>
+                </div>
+
+                {editingPlanning && (
+                  <div className="mt-4 app-card p-4">
+                    <p className="font-semibold">Edit planning fields</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="text-sm">ROP<input className="app-input mt-1" type="number" min={0} value={planningForm.reorder_point_qty} onChange={(event) => setPlanningForm((prev) => ({ ...prev, reorder_point_qty: Number(event.target.value) }))} /></label>
+                      <label className="text-sm">Safety Stock<input className="app-input mt-1" type="number" min={0} value={planningForm.safety_stock_qty} onChange={(event) => setPlanningForm((prev) => ({ ...prev, safety_stock_qty: Number(event.target.value) }))} /></label>
+                      <label className="text-sm">Lead Time (days)<input className="app-input mt-1" type="number" min={1} value={planningForm.lead_time_days} onChange={(event) => setPlanningForm((prev) => ({ ...prev, lead_time_days: Number(event.target.value) }))} /></label>
+                      <label className="text-sm">Target Days Supply<input className="app-input mt-1" type="number" min={1} value={planningForm.target_days_supply} onChange={(event) => setPlanningForm((prev) => ({ ...prev, target_days_supply: Number(event.target.value) }))} /></label>
+                    </div>
+                    <button className="app-button mt-3" onClick={() => void savePlanning()} disabled={planningSaving}>{planningSaving ? "Saving…" : "Save planning"}</button>
+                  </div>
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="app-card p-3"><p className="text-xs text-muted">On hand</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.on_hand)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Available</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.available)}</p></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Reserved</p><button className="font-semibold tabular-nums text-primary underline" onClick={(event) => void openReservations(detail.item.id, event)}>{formatNumber(detail.item.reserved)}</button></div>
+                  <div className="app-card p-3"><p className="text-xs text-muted">Inbound</p><p className="font-semibold tabular-nums">{formatNumber(detail.item.inbound_qty)}</p></div>
+                </div>
+                <p className="mt-2 text-xs text-muted">Last updated: {detail.last_updated ? new Date(detail.last_updated).toLocaleString() : "No recent activity"}</p>
+
+                <div className="mt-4 app-card p-3 text-sm"><p className="font-semibold">Reorder recommendation</p><p className="mt-1 text-muted">{detail.reorder_explanation}</p></div>
+                <div className="mt-4 app-card p-3"><p className="font-semibold">Consumption trend (90 days)</p><div className="mt-2 h-48"><ResponsiveContainer width="100%" height="100%"><LineChart data={detail.consumption_trend}><CartesianGrid {...GRID_STYLE} /><XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })} /><YAxis {...AXIS_STYLE} /><Tooltip formatter={(v: number) => formatNumber(v)} labelFormatter={(v) => new Date(v).toLocaleDateString()} /><Line type="monotone" dataKey="consumption" stroke={CHART_COLORS[0]} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></div></div>
+              </>
+            )}
           </div>
         </div>
       )}

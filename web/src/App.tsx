@@ -39,6 +39,7 @@ import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
+import PurchaseOrderCreatePage from "./pages/purchasing/PurchaseOrderCreatePage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
 import ItemProfilePage from "./pages/ItemProfilePage";
 import AnalyticsDashboard from "./pages/analytics/AnalyticsDashboard";
@@ -222,6 +223,9 @@ export default function App() {
             <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
             <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
+            <Route path="/purchasing/purchase-orders/new" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrderCreatePage /></ProtectedRoute>} />
+            <Route path="/purchase-orders" element={<Navigate to="/purchasing/purchase-orders" replace />} />
+            <Route path="/purchase-orders/new" element={<Navigate to="/purchasing/purchase-orders/new" replace />} />
             <Route path="/inventory" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><InventoryPage /></ProtectedRoute>} />
             <Route path="/operations/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />

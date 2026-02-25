@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ApiRequestError,
   createPurchaseOrder,
@@ -88,6 +89,7 @@ const actionButtonClass = "app-button h-10 min-w-[110px] justify-center";
 const disabledDeleteButtonClass = `${actionButtonClass} cursor-not-allowed opacity-50`;
 
 export default function PurchaseOrdersPage() {
+  const navigate = useNavigate();
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderListRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -317,7 +319,7 @@ export default function PurchaseOrdersPage() {
           <h2 className="text-2xl font-semibold">Purchase Orders</h2>
           <p className="text-sm text-muted">Create, edit, and send supplier purchase orders.</p>
         </div>
-        <button className="app-button" onClick={startCreate}>Create Purchase Order</button>
+        <button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create Purchase Order</button>
       </header>
 
       {error ? <p className="text-sm text-rose-500">{error}</p> : null}

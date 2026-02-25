@@ -1,5 +1,6 @@
 import { Bar, BarChart, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCurrency } from "../../utils/formatters";
+import { CATEGORY_COLORS } from "../../utils/chartPalette";
 
 type Props = {
   trend: { day: string; balance: number }[];
@@ -9,7 +10,7 @@ type Props = {
   onCategoryClick: (category: string) => void;
 };
 
-const colors = ["#2563eb", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#22c55e"];
+const colors = CATEGORY_COLORS;
 
 export default function BankingCharts({ trend, categories, progress, loading, onCategoryClick }: Props) {
   if (loading) {

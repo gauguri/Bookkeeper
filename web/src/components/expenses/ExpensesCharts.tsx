@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type LegendProps } from "recharts";
 import { Entry } from "./types";
 import { formatCurrency, formatPercent } from "../../utils/formatters";
 import { getCategoricalColor, getHoverColor, getSelectedStroke, getSourceColor, NEUTRALS, PL_POSITIVE } from "../../theme/chartPalette";
@@ -21,6 +21,12 @@ const sourceLabelByType: Record<string, string> = {
   PAYROLL: "Payroll",
   BILL: "Bill",
   REIMBURSEMENT: "Reimbursement",
+};
+
+
+const categoryLegendFormatter: LegendProps["formatter"] = (value) => {
+  const safeLabel = typeof value === "string" ? value : String(value);
+  return <span className="text-xs font-medium text-slate-600">{safeLabel}</span>;
 };
 
 const rangeLabel: Record<Props["dateRange"], string> = {
@@ -123,12 +129,19 @@ export default function ExpensesCharts({ entries, loading, dateRange, onFilter }
                 })}
               </Pie>
               <Tooltip
-                formatter={(value: number, _name, payload) => {
+                formatter={(value: number, _name, item) => {
                   const pct = categoryTotal > 0 ? (Number(value) / categoryTotal) * 100 : 0;
-                  return [`${formatCurrency(Number(value), true)} (${formatPercent(pct)})`, payload?.name];
+                  const category = item?.name ?? "Category";
+                  return [formatCurrency(Number(value), true), `${category} • ${formatPercent(pct)}`];
                 }}
+                contentStyle={{ borderRadius: 10, border: `1px solid ${NEUTRALS.grid}` }}
               />
-              <Legend wrapperStyle={{ fontSize: 11, color: NEUTRALS.legend }} />
+              <Legend
+                iconType="circle"
+                iconSize={9}
+                formatter={categoryLegendFormatter}
+                wrapperStyle={{ fontSize: 11, color: NEUTRALS.legend, paddingTop: 6 }}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>

@@ -1,3 +1,5 @@
+import { CATEGORY_COLORS, getCategoryColor } from "../utils/chartPalette";
+
 export const PL_POSITIVE = "#3b82f6";
 export const PL_NEGATIVE = "#dc2626";
 
@@ -8,16 +10,7 @@ export const NEUTRALS = {
   muted: "#94a3b8",
 } as const;
 
-const ENTERPRISE_CATEGORICAL = [
-  PL_POSITIVE,
-  "#1d4ed8",
-  "#0f766e",
-  "#334155",
-  "#0ea5e9",
-  "#64748b",
-  "#0369a1",
-  "#14b8a6",
-] as const;
+const ENTERPRISE_CATEGORICAL = CATEGORY_COLORS;
 
 export const MONOCHROME_SERIES = [
   PL_POSITIVE,
@@ -39,7 +32,7 @@ export const SOURCE_COLOR_MAP: Record<string, string> = {
 };
 
 export function getCategoricalColor(index: number): string {
-  return ENTERPRISE_CATEGORICAL[index % ENTERPRISE_CATEGORICAL.length];
+  return getCategoryColor(index);
 }
 
 export function getSourceColor(source: string, index = 0): string {

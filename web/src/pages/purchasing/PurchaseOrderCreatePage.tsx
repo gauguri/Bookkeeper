@@ -6,6 +6,13 @@ import { formatCurrency } from "../../utils/formatters";
 
 type Supplier = { id: number; name: string; email?: string | null; phone?: string | null; lead_time_days?: number | null };
 type Item = { id: number; name: string; sku?: string | null; preferred_supplier_id?: number | null; preferred_landed_cost?: number | null };
+type SupplierItem = {
+  item_id: number;
+  item_name: string;
+  sku?: string | null;
+  supplier_sku?: string | null;
+  default_unit_cost?: number | null;
+};
 type CreateLine = { item_id: string; quantity: string; unit_cost: string };
 type InventoryPrefillLine = { item_id: number; quantity?: number; qty?: number };
 type LocationState = { prefillLines?: InventoryPrefillLine[]; supplierId?: number | null };
@@ -20,6 +27,11 @@ export default function PurchaseOrderCreatePage() {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [supplierItems, setSupplierItems] = useState<SupplierItem[]>([]);
+  const [supplierItemsLoading, setSupplierItemsLoading] = useState(false);
+  const [lineSearch, setLineSearch] = useState<Record<number, string>>({});
+  const [supplierChangeWarning, setSupplierChangeWarning] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -84,18 +96,63 @@ export default function PurchaseOrderCreatePage() {
   }, [items, state.prefillLines, state.supplierId]);
 
   useEffect(() => {
+    if (!supplierChangeWarning) return;
+    const timer = window.setTimeout(() => setSupplierChangeWarning(""), 4000);
+    return () => window.clearTimeout(timer);
+  }, [supplierChangeWarning]);
+
+  useEffect(() => {
     if (!form.supplier_id) {
+      setSupplierItems([]);
       setForm((prev) => ({ ...prev, supplier_contact: "", supplier_email: "", expected_lead_time: "" }));
       return;
     }
+
     const supplier = suppliers.find((entry) => entry.id === Number(form.supplier_id));
-    if (!supplier) return;
-    setForm((prev) => ({
-      ...prev,
-      supplier_contact: supplier.phone ?? "",
-      supplier_email: supplier.email ?? "",
-      expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : prev.expected_lead_time
-    }));
+    if (supplier) {
+      setForm((prev) => ({
+        ...prev,
+        supplier_contact: supplier.phone ?? "",
+        supplier_email: supplier.email ?? "",
+        expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : prev.expected_lead_time
+      }));
+    }
+
+    let cancelled = false;
+    setSupplierItemsLoading(true);
+    setSubmitError("");
+
+    apiFetch<SupplierItem[]>(`/suppliers/${form.supplier_id}/items`)
+      .then((data) => {
+        if (cancelled) return;
+        setSupplierItems(data);
+        const allowed = new Set(data.map((item) => String(item.item_id)));
+        let removedCount = 0;
+        setForm((prev) => {
+          const nextLines = prev.lines.map((line) => {
+            if (!line.item_id || allowed.has(line.item_id)) return line;
+            removedCount += 1;
+            return { ...line, item_id: "", unit_cost: "0" };
+          });
+          return { ...prev, lines: nextLines };
+        });
+        if (removedCount > 0) {
+          setSupplierChangeWarning("Item removed because it is not supplied by the selected supplier.");
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSupplierItems([]);
+        setSubmitError((err as Error).message || "Unable to load supplier items.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSupplierItemsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [form.supplier_id, suppliers]);
 
   const validationErrors = useMemo(() => {
@@ -159,9 +216,18 @@ export default function PurchaseOrderCreatePage() {
 
   const noSuppliers = !loading && !loadError && suppliers.length === 0;
   const noItems = !loading && !loadError && items.length === 0;
+  const supplierSelected = Boolean(form.supplier_id);
+  const hasMappedItems = supplierItems.length > 0;
+  const supplierItemsEmpty = supplierSelected && !supplierItemsLoading && !hasMappedItems;
 
   return (
     <section className="space-y-6">
+      {supplierChangeWarning ? (
+        <div className="fixed right-4 top-4 z-50 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-lg">
+          {supplierChangeWarning}
+        </div>
+      ) : null}
+
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Purchasing</p>
@@ -169,8 +235,8 @@ export default function PurchaseOrderCreatePage() {
           <p className="text-muted">Create, send, and track supplier orders.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="app-button-secondary" disabled={savingDraft || submitting || loading || noSuppliers || noItems} onClick={() => void submit("draft")}>{savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save Draft</button>
-          <button className="app-button" disabled={savingDraft || submitting || loading || noSuppliers || noItems} onClick={() => void submit("submit")}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Submit</button>
+          <button className="app-button-secondary" disabled={savingDraft || submitting || loading || noSuppliers || noItems || supplierItemsEmpty} onClick={() => void submit("draft")}>{savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save Draft</button>
+          <button className="app-button" disabled={savingDraft || submitting || loading || noSuppliers || noItems || supplierItemsEmpty} onClick={() => void submit("submit")}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Submit</button>
           <button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders")}>Cancel</button>
         </div>
       </header>
@@ -258,40 +324,85 @@ export default function PurchaseOrderCreatePage() {
               <h2 className="text-lg font-semibold">Line Items</h2>
               <button className="app-button-secondary" onClick={addLine}><Plus className="h-4 w-4" /> Add another line</button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-xs uppercase text-muted">
-                  <tr><th className="py-2">Item</th><th className="py-2">Qty</th><th className="py-2">Unit cost</th><th className="py-2">Line total</th><th className="py-2" /></tr>
-                </thead>
-                <tbody>
-                  {form.lines.map((line, index) => {
-                    const lineTotal = Number(line.quantity || 0) * Number(line.unit_cost || 0);
-                    return (
-                      <tr key={`line-${index}`} className="border-t border-border/50">
-                        <td className="py-2 pr-2">
-                          <select
-                            className="app-select w-full"
-                            value={line.item_id}
-                            onChange={(event) => {
-                              const selectedId = Number(event.target.value);
-                              const selectedItem = items.find((item) => item.id === selectedId);
-                              setLine(index, { item_id: event.target.value, unit_cost: line.unit_cost === "0" && selectedItem?.preferred_landed_cost != null ? String(selectedItem.preferred_landed_cost) : line.unit_cost });
-                            }}
-                          >
-                            <option value="">Select item</option>
-                            {items.map((item) => <option key={item.id} value={item.id}>{item.name}{item.sku ? ` (${item.sku})` : ""}</option>)}
-                          </select>
-                        </td>
-                        <td className="py-2 pr-2"><input className="app-input w-24" type="number" min="0" step="0.01" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} /></td>
-                        <td className="py-2 pr-2"><input className="app-input w-32" type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => setLine(index, { unit_cost: event.target.value })} /></td>
-                        <td className="py-2 font-medium">{formatCurrency(lineTotal)}</td>
-                        <td className="py-2 text-right"><button className="app-button-ghost" onClick={() => removeLine(index)}><Trash2 className="h-4 w-4" /></button></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+
+            {!supplierSelected ? (
+              <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted">Select supplier first.</div>
+            ) : null}
+
+            {supplierSelected && supplierItemsLoading ? (
+              <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted">Loading supplier items…</div>
+            ) : null}
+
+            {supplierItemsEmpty ? (
+              <div className="rounded-md border border-dashed border-border p-8 text-center">
+                <p className="text-lg font-semibold">No items are linked to this supplier yet.</p>
+                <p className="mt-1 text-sm text-muted">Link supplier-item mappings before creating a PO for this supplier.</p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <Link className="app-button inline-flex" to="/purchasing/suppliers">Link items to supplier</Link>
+                  <button className="app-button-ghost" onClick={() => setForm((prev) => ({ ...prev, supplier_id: "" }))}>Change supplier</button>
+                </div>
+              </div>
+            ) : null}
+
+            {supplierSelected && !supplierItemsLoading && hasMappedItems ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs uppercase text-muted">
+                    <tr><th className="py-2">Item</th><th className="py-2">Qty</th><th className="py-2">Unit cost</th><th className="py-2">Line total</th><th className="py-2" /></tr>
+                  </thead>
+                  <tbody>
+                    {form.lines.map((line, index) => {
+                      const lineTotal = Number(line.quantity || 0) * Number(line.unit_cost || 0);
+                      const query = (lineSearch[index] ?? "").toLowerCase();
+                      const filteredItems = supplierItems.filter((item) => {
+                        const option = `${item.item_name} ${item.sku ?? ""} ${item.supplier_sku ?? ""}`.toLowerCase();
+                        return option.includes(query);
+                      });
+
+                      return (
+                        <tr key={`line-${index}`} className="border-t border-border/50 align-top">
+                          <td className="py-2 pr-2">
+                            <input
+                              className="app-input mb-2 w-full"
+                              placeholder="Search items"
+                              value={lineSearch[index] ?? ""}
+                              onChange={(event) => setLineSearch((prev) => ({ ...prev, [index]: event.target.value }))}
+                            />
+                            <select
+                              className="app-select w-full"
+                              disabled={!supplierSelected}
+                              value={line.item_id}
+                              onChange={(event) => {
+                                const selectedId = Number(event.target.value);
+                                const selectedItem = supplierItems.find((item) => item.item_id === selectedId);
+                                setLine(index, {
+                                  item_id: event.target.value,
+                                  unit_cost: selectedItem?.default_unit_cost != null ? String(selectedItem.default_unit_cost) : line.unit_cost
+                                });
+                              }}
+                            >
+                              <option value="">Select item</option>
+                              {filteredItems.map((item) => (
+                                <option key={item.item_id} value={item.item_id}>
+                                  {item.item_name}
+                                  {item.sku ? ` (${item.sku})` : ""}
+                                  {item.supplier_sku ? ` • Supplier SKU: ${item.supplier_sku}` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 pr-2"><input className="app-input w-24" type="number" min="0" step="0.01" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} /></td>
+                          <td className="py-2 pr-2"><input className="app-input w-32" type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => setLine(index, { unit_cost: event.target.value })} /></td>
+                          <td className="py-2 font-medium">{formatCurrency(lineTotal)}</td>
+                          <td className="py-2 text-right"><button className="app-button-ghost" onClick={() => removeLine(index)}><Trash2 className="h-4 w-4" /></button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
             <div className="flex justify-end border-t border-border/50 pt-3 text-sm">
               <div className="space-y-1 text-right">
                 <p className="text-muted">Subtotal: <span className="font-semibold text-foreground">{formatCurrency(totals.subtotal)}</span></p>

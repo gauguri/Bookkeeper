@@ -212,13 +212,21 @@ export default function SalesCommandCenterPage() {
   );
 
   const pipelineWaterfall = useMemo(
-    () => [
-      { label: "Pipeline", value: Number(summary?.pipeline_value || 0), type: "total" },
-      { label: "Won 30d", value: Number(summary?.won_last_30d || 0), type: "decrease" },
-      { label: "Quotes Pending", value: Number(summary?.quotes_pending_approval || 0) * 1500, type: "increase" },
-      { label: "Orders Pending", value: Number(summary?.orders_pending_fulfillment || 0) * 2000, type: "increase" },
-      { label: "Open", value: Number(summary?.pipeline_value || 0), type: "subtotal" },
-    ],
+    () => {
+      const pipelineTotal = Number(summary?.pipeline_value || 0);
+      const wonLast30d = Number(summary?.won_last_30d || 0);
+      const quotesPending = Number(summary?.quotes_pending_approval || 0) * 1500;
+      const ordersPending = Number(summary?.orders_pending_fulfillment || 0) * 2000;
+      const openTotal = pipelineTotal - wonLast30d + quotesPending + ordersPending;
+
+      return [
+        { label: "Pipeline", value: pipelineTotal, type: "total" },
+        { label: "Won 30d", value: wonLast30d, type: "decrease" },
+        { label: "Quotes Pending", value: quotesPending, type: "increase" },
+        { label: "Orders Pending", value: ordersPending, type: "increase" },
+        { label: "Open", value: openTotal, type: "subtotal" },
+      ];
+    },
     [summary],
   );
 

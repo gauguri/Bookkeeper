@@ -9,7 +9,7 @@ import {
   X,
   AlertTriangle,
 } from "lucide-react";
-import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../../api";
 import { ListResponse, SalesAccount, SalesOpportunity, SalesOrder, SalesQuote } from "../../components/sales/types";
 import { formatCompact, formatCurrency } from "../../utils/formatters";
@@ -61,6 +61,13 @@ const CONVERSION_COLORS = {
   orders: "#f59e0b",
   invoices: "#10b981",
 } as const;
+
+type ConversionStageDatum = {
+  stage: "Quotes" | "Orders" | "Invoices";
+  count: number;
+  color: string;
+  conversionFromPrevious: number | null;
+};
 
 export default function SalesCommandCenterPage() {
   const navigate = useNavigate();
@@ -230,6 +237,36 @@ export default function SalesCommandCenterPage() {
     [summary],
   );
 
+  const conversionChartData = useMemo<ConversionStageDatum[]>(() => {
+    const quotesCount = Number(conversion?.quotes || 0);
+    const ordersCount = Number(conversion?.orders || 0);
+    const invoicesCount = Number(conversion?.invoices || 0);
+
+    return [
+      {
+        stage: "Quotes",
+        count: quotesCount,
+        color: CONVERSION_COLORS.quotes,
+        conversionFromPrevious: null,
+      },
+      {
+        stage: "Orders",
+        count: ordersCount,
+        color: CONVERSION_COLORS.orders,
+        conversionFromPrevious: quotesCount > 0 ? ordersCount / quotesCount : null,
+      },
+      {
+        stage: "Invoices",
+        count: invoicesCount,
+        color: CONVERSION_COLORS.invoices,
+        conversionFromPrevious: ordersCount > 0 ? invoicesCount / ordersCount : null,
+      },
+    ];
+  }, [conversion]);
+
+  const ordersToQuotesRatio = conversionChartData[1]?.conversionFromPrevious;
+  const invoicesToOrdersRatio = conversionChartData[2]?.conversionFromPrevious;
+
   const listingContent = (
     <>
       {section !== "dashboard" && (
@@ -309,17 +346,39 @@ export default function SalesCommandCenterPage() {
             <div className="app-card p-4">
               <h3 className="mb-4 text-sm font-semibold">Quotes vs Orders vs Invoices</h3>
               <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={[{ label: "Flow", quotes: conversion?.quotes || 0, orders: conversion?.orders || 0, invoices: conversion?.invoices || 0 }]} margin={CHART_MARGIN}>
+                <BarChart data={conversionChartData} margin={CHART_MARGIN}>
                   <CartesianGrid {...GRID_STYLE} />
-                  <XAxis dataKey="label" {...AXIS_STYLE} />
+                  <XAxis dataKey="stage" {...AXIS_STYLE} />
                   <YAxis tickFormatter={formatCompact} {...AXIS_STYLE} />
-                  <Tooltip {...TOOLTIP_STYLE} formatter={(value: number) => value.toLocaleString()} />
-                  <Legend iconType="circle" iconSize={8} />
-                  <Bar dataKey="quotes" stackId="conv" fill={CONVERSION_COLORS.quotes} name="Quotes" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="orders" stackId="conv" fill={CONVERSION_COLORS.orders} name="Orders" />
-                  <Bar dataKey="invoices" stackId="conv" fill={CONVERSION_COLORS.invoices} name="Invoices" />
+                  <Tooltip
+                    {...TOOLTIP_STYLE}
+                    formatter={(value: number) => value.toLocaleString()}
+                    labelFormatter={(_, payload) => {
+                      const point = payload?.[0]?.payload as ConversionStageDatum | undefined;
+                      if (!point) return "";
+                      const conversionText =
+                        point.conversionFromPrevious == null
+                          ? "N/A"
+                          : `${(point.conversionFromPrevious * 100).toFixed(1)}%`;
+                      return `${point.stage} · Count ${point.count.toLocaleString()} · Conversion ${conversionText}`;
+                    }}
+                  />
+                  <Legend iconType="circle" iconSize={8} payload={conversionChartData.map((row) => ({ value: row.stage, type: "circle", color: row.color }))} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={72}>
+                    {conversionChartData.map((entry) => (
+                      <Cell key={entry.stage} fill={entry.color} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-muted sm:grid-cols-2">
+                <p>
+                  Orders / Quotes: {ordersToQuotesRatio == null ? "N/A" : `${(ordersToQuotesRatio * 100).toFixed(1)}%`}
+                </p>
+                <p>
+                  Invoices / Orders: {invoicesToOrdersRatio == null ? "N/A" : `${(invoicesToOrdersRatio * 100).toFixed(1)}%`}
+                </p>
+              </div>
             </div>
           </div>
         </>

@@ -29,6 +29,17 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+const warnedKpis = new Set<string>();
+
+function guardNaNDisplay(value: string, kpiKey: string): string {
+  if (!value.includes("NaN")) return value;
+  if (!warnedKpis.has(kpiKey)) {
+    warnedKpis.add(kpiKey);
+    console.warn(`[KpiTile] Replaced invalid KPI display for ${kpiKey}`);
+  }
+  return "$0.00";
+}
+
 const DirectionIcon = ({ direction }: { direction: string }) => {
   if (direction === "up") return <TrendingUp className="h-3.5 w-3.5" />;
   if (direction === "down") return <TrendingDown className="h-3.5 w-3.5" />;
@@ -49,6 +60,8 @@ export default function KpiTile({ kpi, onClick, invertDirection = false }: Props
     }
   };
 
+  const displayValue = guardNaNDisplay(formatKpiValue(kpi.current_value, kpi.unit), kpi.kpi_key);
+
   return (
     <button
       onClick={handleClick}
@@ -58,7 +71,7 @@ export default function KpiTile({ kpi, onClick, invertDirection = false }: Props
         <p className="text-xs font-medium uppercase tracking-wider text-muted">{kpi.label}</p>
         <Sparkline values={kpi.sparkline} />
       </div>
-      <p className="text-2xl font-bold">{formatKpiValue(kpi.current_value, kpi.unit)}</p>
+      <p className="text-2xl font-bold">{displayValue}</p>
       <div className="flex items-center gap-2">
         <span className={`flex items-center gap-1 text-sm font-medium ${dirColorClass}`}>
           <DirectionIcon direction={kpi.direction} />

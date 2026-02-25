@@ -15,6 +15,7 @@ import {
 import { CHART_MARGIN, TOOLTIP_STYLE, GRID_STYLE, AXIS_STYLE } from "../../utils/chartHelpers";
 import { COLOR, CHART_COLORS } from "../../utils/colorScales";
 import { formatCurrency, formatCompact } from "../../utils/formatters";
+import { toNumberSafe } from "../../utils/numberSafe";
 
 type DataPoint = {
   period: string;
@@ -68,12 +69,16 @@ export default function TrendChart({
   showGrid = true,
   forecastData,
 }: Props) {
-  const combined = forecastData ? [...data, ...forecastData] : data;
+  const normalizedData = data.map((point) => ({ ...point, value: toNumberSafe(point.value), forecast: point.forecast == null ? undefined : toNumberSafe(point.forecast), previous: point.previous == null ? undefined : toNumberSafe(point.previous) }));
+  const normalizedForecastData = forecastData?.map((point) => ({ ...point, value: toNumberSafe(point.value), forecast: point.forecast == null ? undefined : toNumberSafe(point.forecast), previous: point.previous == null ? undefined : toNumberSafe(point.previous) }));
+  const combined = normalizedForecastData ? [...normalizedData, ...normalizedForecastData] : normalizedData;
+  const hasData = combined.some((point) => point.value !== 0 || toNumberSafe(point.forecast) !== 0);
 
   return (
     <div className="app-card p-4">
       {title && <h3 className="mb-4 text-sm font-semibold">{title}</h3>}
-      <ResponsiveContainer width="100%" height={height}>
+      {hasData ? (
+        <ResponsiveContainer width="100%" height={height}>
         {type === "bar" ? (
           <BarChart data={combined} margin={CHART_MARGIN}>
             {showGrid && <CartesianGrid {...GRID_STYLE} />}
@@ -146,6 +151,9 @@ export default function TrendChart({
           </AreaChart>
         )}
       </ResponsiveContainer>
+      ) : (
+        <div className="flex h-[280px] items-center justify-center text-sm text-muted">No data available.</div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { CHART_COLORS } from "../../utils/colorScales";
 import { formatCurrency, formatPercent } from "../../utils/formatters";
+import { sumBySafe, toNumberSafe } from "../../utils/numberSafe";
 
 type DataItem = {
   category: string;
@@ -24,15 +25,18 @@ export default function DistributionChart({
   centerValue,
   colors = CHART_COLORS,
 }: Props) {
-  const total = data.reduce((sum, d) => sum + d.value, 0);
-  const sortedData = [...data].sort((a, b) => b.value - a.value);
+  const normalizedData = data.map((row) => ({ ...row, value: toNumberSafe(row.value) }));
+  const total = sumBySafe(normalizedData, (d) => d.value);
+  const sortedData = [...normalizedData].sort((a, b) => b.value - a.value);
+  const hasData = total > 0;
 
   return (
     <div className="app-card p-4">
       {title && <h3 className="mb-4 text-sm font-semibold">{title}</h3>}
       <div className="flex items-center gap-6">
         <div className="relative" style={{ width: height, height }}>
-          <ResponsiveContainer width="100%" height="100%">
+          {hasData ? (
+            <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={sortedData}
@@ -60,6 +64,9 @@ export default function DistributionChart({
               />
             </PieChart>
           </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted">No data available.</div>
+          )}
           {(centerLabel || centerValue) && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               {centerValue && <span className="text-xl font-bold">{centerValue}</span>}

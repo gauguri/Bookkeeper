@@ -15,6 +15,7 @@ import {
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
+import { sumBySafe, toNumberSafe } from "../utils/numberSafe";
 
 type Customer = { id: number; name: string; terms?: string | null };
 type Item = {
@@ -234,11 +235,11 @@ export default function InvoicesPage() {
   }, [invoices]);
 
   const kpis = useMemo(() => {
-    const openBalance = invoices.filter((inv) => inv.status !== "VOID").reduce((sum, inv) => sum + inv.amount_due, 0);
-    const overdueBalance = queueBuckets.overdue.reduce((sum, inv) => sum + inv.amount_due, 0);
-    const sentUnpaidBalance = queueBuckets.sentUnpaid.reduce((sum, inv) => sum + inv.amount_due, 0);
+    const openBalance = sumBySafe(invoices.filter((inv) => inv.status !== "VOID"), (inv) => inv.amount_due);
+    const overdueBalance = sumBySafe(queueBuckets.overdue, (inv) => inv.amount_due);
+    const sentUnpaidBalance = sumBySafe(queueBuckets.sentUnpaid, (inv) => inv.amount_due);
     const paidMtd = queueBuckets.paid.filter((inv) => inv.issue_date.slice(0, 7) === todayISO.slice(0, 7));
-    const paidMtdAmount = paidMtd.reduce((sum, inv) => sum + inv.total, 0);
+    const paidMtdAmount = sumBySafe(paidMtd, (inv) => inv.total);
 
     return [
       { key: "all", label: "Open Balance", value: currency(openBalance), meta: `${invoices.filter((i) => i.amount_due > 0).length} open` },
@@ -280,7 +281,7 @@ export default function InvoicesPage() {
     invoices.forEach((inv) => {
       const key = inv.issue_date.slice(0, 7);
       if (monthBuckets[key]) {
-        monthBuckets[key].amount += inv.total;
+        monthBuckets[key].amount += toNumberSafe(inv.total);
         monthBuckets[key].count += 1;
       }
     });
@@ -290,13 +291,14 @@ export default function InvoicesPage() {
   const arAging = useMemo(() => {
     const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
     invoices.forEach((inv) => {
-      if (inv.amount_due <= 0 || inv.status === "VOID") return;
+      const amountDue = toNumberSafe(inv.amount_due);
+      if (amountDue <= 0 || inv.status === "VOID") return;
       const diff = Math.floor((new Date(todayISO).getTime() - new Date(inv.due_date).getTime()) / 86400000);
-      if (diff <= 0) buckets.current += inv.amount_due;
-      else if (diff <= 30) buckets.d1_30 += inv.amount_due;
-      else if (diff <= 60) buckets.d31_60 += inv.amount_due;
-      else if (diff <= 90) buckets.d61_90 += inv.amount_due;
-      else buckets.d90p += inv.amount_due;
+      if (diff <= 0) buckets.current += amountDue;
+      else if (diff <= 30) buckets.d1_30 += amountDue;
+      else if (diff <= 60) buckets.d31_60 += amountDue;
+      else if (diff <= 90) buckets.d61_90 += amountDue;
+      else buckets.d90p += amountDue;
     });
     return [
       { label: "Current", value: buckets.current },

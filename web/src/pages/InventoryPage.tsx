@@ -14,6 +14,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
 import CurrentInventoryBreakdownCard from "../components/inventory/CurrentInventoryBreakdownCard";
+import InventoryValueCompositionCard from "../components/inventory/InventoryValueCompositionCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
 import { CATEGORY_COLORS } from "../utils/chartPalette";
@@ -52,6 +53,7 @@ type ItemRow = {
   last_receipt?: string | null;
   last_issue?: string | null;
   total_value: number;
+  landed_unit_cost?: number | null;
   inbound_qty: number;
   health_flag: string;
 };
@@ -130,6 +132,8 @@ export default function InventoryPage() {
 
   const queue = searchParams.get("queue") || "needs_attention";
   const breakdownFilter = searchParams.get("breakdown") || "all";
+  const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
+  const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
   const mismatchLogged = useRef(false);
 
   useEffect(() => {
@@ -145,6 +149,8 @@ export default function InventoryPage() {
       const next = new URLSearchParams(current);
       next.set("queue", nextQueue);
       next.delete("breakdown");
+      next.delete("abc_item");
+      next.delete("abc_class");
       return next;
     }, { replace: false });
   };
@@ -158,6 +164,34 @@ export default function InventoryPage() {
         nextParams.set("breakdown", next);
       }
       return nextParams;
+    }, { replace: false });
+  };
+
+
+  const setAbcItemFilter = (itemId: number) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("abc_item", String(itemId));
+      next.delete("abc_class");
+      return next;
+    }, { replace: false });
+  };
+
+  const setAbcClassFilter = (classification: "A" | "B" | "C") => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("abc_class", classification);
+      next.delete("abc_item");
+      return next;
+    }, { replace: false });
+  };
+
+  const clearAbcFilters = () => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("abc_item");
+      next.delete("abc_class");
+      return next;
     }, { replace: false });
   };
 
@@ -246,13 +280,36 @@ export default function InventoryPage() {
     return Math.abs(Number(summary.total_on_hand_qty ?? 0) - (Number(summary.total_reserved_qty ?? 0) + Number(summary.total_available_qty ?? 0))) > 0.01;
   }, [summary]);
 
+  const abcClassByItemId = useMemo(() => {
+    const sorted = [...normalizedItems]
+      .map((row) => ({ id: row.id, value: Math.max(0, Number(row.total_value ?? 0)) }))
+      .sort((a, b) => b.value - a.value);
+    const total = sorted.reduce((sum, row) => sum + row.value, 0);
+    let running = 0;
+    const mapping = new Map<number, "A" | "B" | "C">();
+    sorted.forEach((row) => {
+      running += row.value;
+      const cumulativePct = total > 0 ? (running / total) * 100 : 0;
+      const klass = cumulativePct <= 80 ? "A" : cumulativePct <= 95 ? "B" : "C";
+      mapping.set(row.id, klass);
+    });
+    return mapping;
+  }, [normalizedItems]);
+
   const displayedItems = useMemo(() => {
     const all = normalizedItems;
-    if (breakdownFilter === "reserved") return all.filter((row) => Number(row.reserved) > 0);
-    if (breakdownFilter === "available") return all.filter((row) => Number(row.available_for_filter) > 0);
-    if (breakdownFilter === "inbound") return all.filter((row) => Number(row.inbound_qty) > 0);
-    return all;
-  }, [normalizedItems, breakdownFilter]);
+    const breakdownFiltered = breakdownFilter === "reserved"
+      ? all.filter((row) => Number(row.reserved) > 0)
+      : breakdownFilter === "available"
+        ? all.filter((row) => Number(row.available_for_filter) > 0)
+        : breakdownFilter === "inbound"
+          ? all.filter((row) => Number(row.inbound_qty) > 0)
+          : all;
+
+    if (Number.isFinite(abcItemFilter) && abcItemFilter > 0) return breakdownFiltered.filter((row) => row.id === abcItemFilter);
+    if (["A", "B", "C"].includes(abcClassFilter)) return breakdownFiltered.filter((row) => abcClassByItemId.get(row.id) === abcClassFilter);
+    return breakdownFiltered;
+  }, [normalizedItems, breakdownFilter, abcItemFilter, abcClassFilter, abcClassByItemId]);
 
   const createPOForSelection = () => {
     if (!selectedIds.length) return;
@@ -365,12 +422,22 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      <CurrentInventoryBreakdownCard
-        summary={summary}
-        activeFilter={(["all", "reserved", "available", "inbound"].includes(breakdownFilter) ? breakdownFilter : "all") as "all" | "reserved" | "available" | "inbound"}
-        onFilterChange={setBreakdown}
-        mismatch={hasTotalsMismatch}
-      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CurrentInventoryBreakdownCard
+          summary={summary}
+          activeFilter={(["all", "reserved", "available", "inbound"].includes(breakdownFilter) ? breakdownFilter : "all") as "all" | "reserved" | "available" | "inbound"}
+          onFilterChange={setBreakdown}
+          mismatch={hasTotalsMismatch}
+        />
+        <InventoryValueCompositionCard
+          items={normalizedItems}
+          activeItemId={Number.isFinite(abcItemFilter) && abcItemFilter > 0 ? abcItemFilter : null}
+          activeClass={["A", "B", "C"].includes(abcClassFilter) ? (abcClassFilter as "A" | "B" | "C") : null}
+          onItemSelect={setAbcItemFilter}
+          onClassSelect={setAbcClassFilter}
+          onClearFilters={clearAbcFilters}
+        />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>
@@ -399,6 +466,18 @@ export default function InventoryPage() {
                 <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
                   Filtered: {breakdownFilter}
                   <button className="underline" onClick={() => setBreakdown("all")}>✕ Clear</button>
+                </span>
+              )}
+              {Number.isFinite(abcItemFilter) && abcItemFilter > 0 && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                  Filtered: selected item
+                  <button className="underline" onClick={clearAbcFilters}>✕ Clear</button>
+                </span>
+              )}
+              {["A", "B", "C"].includes(abcClassFilter) && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                  Filtered: Class {abcClassFilter}
+                  <button className="underline" onClick={clearAbcFilters}>✕ Clear</button>
                 </span>
               )}
               {tableLoading && <span className="text-xs text-muted">Updating queue…</span>}
@@ -434,7 +513,7 @@ export default function InventoryPage() {
                 ))}
               </tbody>
             </table>
-            {!displayedItems.length && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><p className="text-lg font-semibold">No items in this view</p><p className="text-sm text-muted">Try another queue or clear the breakdown filter.</p></div>}
+            {!displayedItems.length && <div className="rounded-2xl border border-dashed border-border py-16 text-center"><p className="text-lg font-semibold">No items in this view</p><p className="text-sm text-muted">Try another queue or clear the active composition filters.</p></div>}
           </div>
         </div>
       </div>

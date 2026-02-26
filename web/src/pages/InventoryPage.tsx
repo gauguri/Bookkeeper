@@ -19,6 +19,7 @@ import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
 import { CATEGORY_COLORS } from "../utils/chartPalette";
 import { formatCompact, formatCurrency } from "../utils/formatters";
+import { computeAbcClassification } from "../utils/inventoryAbc";
 
 type Summary = {
   inventory_value: number;
@@ -281,19 +282,8 @@ export default function InventoryPage() {
   }, [summary]);
 
   const abcClassByItemId = useMemo(() => {
-    const sorted = [...normalizedItems]
-      .map((row) => ({ id: row.id, value: Math.max(0, Number(row.total_value ?? 0)) }))
-      .sort((a, b) => b.value - a.value);
-    const total = sorted.reduce((sum, row) => sum + row.value, 0);
-    let running = 0;
-    const mapping = new Map<number, "A" | "B" | "C">();
-    sorted.forEach((row) => {
-      running += row.value;
-      const cumulativePct = total > 0 ? (running / total) * 100 : 0;
-      const klass = cumulativePct <= 80 ? "A" : cumulativePct <= 95 ? "B" : "C";
-      mapping.set(row.id, klass);
-    });
-    return mapping;
+    const classified = computeAbcClassification(normalizedItems);
+    return new Map(classified.map((row) => [row.id, row.abc_class]));
   }, [normalizedItems]);
 
   const displayedItems = useMemo(() => {

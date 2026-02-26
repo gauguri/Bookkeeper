@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -10,22 +10,10 @@ import {
   Settings2,
   ShoppingCart,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
+import CurrentInventoryBreakdownCard from "../components/inventory/CurrentInventoryBreakdownCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
 import { CATEGORY_COLORS } from "../utils/chartPalette";
@@ -142,6 +130,7 @@ export default function InventoryPage() {
 
   const queue = searchParams.get("queue") || "needs_attention";
   const breakdownFilter = searchParams.get("breakdown") || "all";
+  const mismatchLogged = useRef(false);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -167,7 +156,6 @@ export default function InventoryPage() {
         nextParams.delete("breakdown");
       } else {
         nextParams.set("breakdown", next);
-        nextParams.set("queue", "all");
       }
       return nextParams;
     }, { replace: false });
@@ -232,25 +220,39 @@ export default function InventoryPage() {
     [topConsumptionData],
   );
 
-  const breakdownData = useMemo(() => {
-    if (!summary) return [];
-    return [
-      { key: "on_hand", label: "On Hand", value: Number(summary.total_on_hand_qty ?? 0), color: CHART_COLORS[0] },
-      { key: "reserved", label: "Reserved", value: Number(summary.total_reserved_qty ?? 0), color: CHART_COLORS[3] },
-      { key: "available", label: "Available", value: Number(summary.total_available_qty ?? 0), color: CHART_COLORS[1] },
-      { key: "inbound", label: "Inbound", value: Number(summary.total_inbound_qty ?? 0), color: CHART_COLORS[2] },
-      { key: "backordered", label: "Backordered", value: Number(summary.total_backordered_qty ?? 0), color: CHART_COLORS[4] },
-    ];
+  const normalizedItems = useMemo(() => {
+    const allItems = itemsData?.items ?? [];
+    let hasMismatch = false;
+    const rows = allItems.map((row) => {
+      const onHand = Number(row.on_hand);
+      const reserved = Number(row.reserved);
+      const expectedAvailable = Math.max(0, onHand - reserved);
+      const mismatch = Math.abs(Number(row.available) - expectedAvailable) > 0.01;
+      if (mismatch) hasMismatch = true;
+      return {
+        ...row,
+        available_for_filter: mismatch ? expectedAvailable : Number(row.available),
+      };
+    });
+    if (hasMismatch && !mismatchLogged.current) {
+      console.warn("Inventory totals mismatch detected. Using max(0, on_hand - reserved) for availability filtering.");
+      mismatchLogged.current = true;
+    }
+    return rows;
+  }, [itemsData?.items]);
+
+  const hasTotalsMismatch = useMemo(() => {
+    if (!summary) return false;
+    return Math.abs(Number(summary.total_on_hand_qty ?? 0) - (Number(summary.total_reserved_qty ?? 0) + Number(summary.total_available_qty ?? 0))) > 0.01;
   }, [summary]);
 
   const displayedItems = useMemo(() => {
-    const all = itemsData?.items ?? [];
+    const all = normalizedItems;
     if (breakdownFilter === "reserved") return all.filter((row) => Number(row.reserved) > 0);
-    if (breakdownFilter === "available") return all.filter((row) => Number(row.available) <= Number(row.reorder_point) || Number(row.available) <= 0);
+    if (breakdownFilter === "available") return all.filter((row) => Number(row.available_for_filter) > 0);
     if (breakdownFilter === "inbound") return all.filter((row) => Number(row.inbound_qty) > 0);
-    if (breakdownFilter === "backordered") return all.filter((row) => Number(row.available) < 0);
     return all;
-  }, [itemsData?.items, breakdownFilter]);
+  }, [normalizedItems, breakdownFilter]);
 
   const createPOForSelection = () => {
     if (!selectedIds.length) return;
@@ -363,37 +365,12 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      <div className="app-card p-4">
-        <div className="mb-3 flex items-center justify-between"><p className="font-semibold">Current Inventory Breakdown</p><p className="text-xs text-muted">Click any segment to filter the inventory grid.</p></div>
-        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-          <div className="h-40">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={[Object.fromEntries(breakdownData.map((segment) => [segment.key, segment.value]))]} layout="vertical" margin={{ left: 12, right: 12, top: 8, bottom: 8 }}>
-                <XAxis type="number" hide />
-                <YAxis type="category" dataKey="name" hide />
-                <Tooltip formatter={(value: number, _name, payload) => [formatNumber(Number(value)), payload?.payload?.label]} />
-                {breakdownData.map((segment) => (
-                  <Bar key={segment.key} dataKey={segment.key} name={segment.label} stackId="inventory" fill={segment.color} onClick={() => setBreakdown(segment.key)} radius={[4, 4, 4, 4]} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "all" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("all")}>
-              <p className="text-xs uppercase tracking-wide text-muted">Total On Hand</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_on_hand_qty ?? 0))}</p>
-            </button>
-            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "reserved" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("reserved")}>
-              <p className="text-xs uppercase tracking-wide text-muted">Total Reserved</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_reserved_qty ?? 0))}</p>
-            </button>
-            <button className={`rounded-xl border p-3 text-left ${breakdownFilter === "available" ? "border-primary/40 bg-primary/5" : "border-border"}`} onClick={() => setBreakdown("available")}>
-              <p className="text-xs uppercase tracking-wide text-muted">Total Available</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(Number(summary?.total_available_qty ?? 0))}</p>
-            </button>
-            <div className="rounded-xl border border-border p-3 text-left">
-              <p className="text-xs uppercase tracking-wide text-muted">Total Inventory Value</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatCurrency(Number(summary?.total_value ?? 0))}</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <CurrentInventoryBreakdownCard
+        summary={summary}
+        activeFilter={(["all", "reserved", "available", "inbound"].includes(breakdownFilter) ? breakdownFilter : "all") as "all" | "reserved" | "available" | "inbound"}
+        onFilterChange={setBreakdown}
+        mismatch={hasTotalsMismatch}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>
@@ -418,6 +395,12 @@ export default function InventoryPage() {
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold">Inventory Items Grid</h3>
             <div className="flex items-center gap-2">
+              {breakdownFilter !== "all" && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                  Filtered: {breakdownFilter}
+                  <button className="underline" onClick={() => setBreakdown("all")}>✕ Clear</button>
+                </span>
+              )}
               {tableLoading && <span className="text-xs text-muted">Updating queue…</span>}
               <button className="app-button-ghost" onClick={() => setCompact((v) => !v)}><Boxes className="h-4 w-4" /> {compact ? "Comfort" : "Compact"}</button>
               <details className="relative"><summary className="app-button-ghost list-none"><Settings2 className="h-4 w-4" /> Columns</summary><div className="absolute right-0 z-10 mt-1 w-52 rounded-xl border bg-surface p-2 shadow-xl">{Object.keys(visibleCols).map((key) => <label key={key} className="flex items-center gap-2 px-2 py-1 text-sm"><input type="checkbox" checked={visibleCols[key]} onChange={(e) => setVisibleCols((prev) => ({ ...prev, [key]: e.target.checked }))} />{key.replace(/_/g, " ")}</label>)}</div></details>

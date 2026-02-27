@@ -33,7 +33,7 @@ export default {
         muted: "hsl(var(--muted))"
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"]
+        sans: ["DM Sans", "Inter", "system-ui", "sans-serif"]
       },
       boxShadow: {
         soft: "0 10px 40px -20px rgba(15, 23, 42, 0.35)",

@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetch, createPurchaseOrder, PurchaseOrderPayload, sendPurchaseOrder } from "../../api";
@@ -38,6 +38,12 @@ export default function PurchaseOrderCreatePage() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Quick Add Supplier
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddForm, setQuickAddForm] = useState({ name: "", email: "", phone: "", address: "" });
+  const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [quickAddError, setQuickAddError] = useState("");
+
   const [form, setForm] = useState({
     supplier_id: "",
     supplier_contact: "",
@@ -67,6 +73,34 @@ export default function PurchaseOrderCreatePage() {
   useEffect(() => {
     void loadCreateDependencies();
   }, []);
+
+  const createQuickSupplier = async () => {
+    if (!quickAddForm.name.trim()) {
+      setQuickAddError("Supplier name is required.");
+      return;
+    }
+    setQuickAddSaving(true);
+    setQuickAddError("");
+    try {
+      const created = await apiFetch<Supplier>("/suppliers", {
+        method: "POST",
+        body: JSON.stringify({
+          name: quickAddForm.name.trim(),
+          email: quickAddForm.email.trim() || null,
+          phone: quickAddForm.phone.trim() || null,
+          address: quickAddForm.address.trim() || null,
+        }),
+      });
+      setSuppliers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setForm((prev) => ({ ...prev, supplier_id: String(created.id) }));
+      setQuickAddOpen(false);
+      setQuickAddForm({ name: "", email: "", phone: "", address: "" });
+    } catch (err) {
+      setQuickAddError((err as Error).message || "Failed to create supplier.");
+    } finally {
+      setQuickAddSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!items.length) return;
@@ -205,7 +239,7 @@ export default function PurchaseOrderCreatePage() {
     try {
       const created = await createPurchaseOrder<{ id: number }>(payload);
       if (mode === "submit") await sendPurchaseOrder(created.id);
-      navigate("/purchasing/purchase-orders");
+      navigate("/purchasing/po-hub");
     } catch (err) {
       setSubmitError((err as Error).message || "Unable to save purchase order.");
     } finally {
@@ -230,6 +264,9 @@ export default function PurchaseOrderCreatePage() {
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
+          <button className="mb-2 inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-foreground" onClick={() => navigate("/purchasing/po-hub")}>
+            <ArrowLeft className="h-4 w-4" /> Back to Procurement Hub
+          </button>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Purchasing</p>
           <h1 className="text-3xl font-semibold">Create Purchase Order</h1>
           <p className="text-muted">Create, send, and track supplier orders.</p>
@@ -237,7 +274,7 @@ export default function PurchaseOrderCreatePage() {
         <div className="flex flex-wrap items-center gap-2">
           <button className="app-button-secondary" disabled={savingDraft || submitting || loading || noSuppliers || noItems || supplierItemsEmpty} onClick={() => void submit("draft")}>{savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save Draft</button>
           <button className="app-button" disabled={savingDraft || submitting || loading || noSuppliers || noItems || supplierItemsEmpty} onClick={() => void submit("submit")}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Submit</button>
-          <button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders")}>Cancel</button>
+          <button className="app-button-ghost" onClick={() => navigate("/purchasing/po-hub")}>Cancel</button>
         </div>
       </header>
 
@@ -249,7 +286,7 @@ export default function PurchaseOrderCreatePage() {
           <p className="text-sm text-muted">{loadError}</p>
           <div className="flex gap-2">
             <button className="app-button" onClick={() => void loadCreateDependencies()}>Retry</button>
-            <button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders")}>Back to Purchase Orders</button>
+            <button className="app-button-ghost" onClick={() => navigate("/purchasing/po-hub")}>Back to Procurement Hub</button>
           </div>
         </section>
       ) : null}
@@ -278,10 +315,60 @@ export default function PurchaseOrderCreatePage() {
         </section>
       ) : null}
 
+      {/* Quick Add Supplier Overlay */}
+      {quickAddOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4" onClick={() => setQuickAddOpen(false)}>
+          <div className="app-card w-full max-w-md space-y-5 p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Quick Add</p>
+                <h3 className="text-lg font-semibold">New Supplier</h3>
+              </div>
+              <button type="button" className="app-button-ghost" onClick={() => setQuickAddOpen(false)}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {quickAddError && <p className="text-sm text-danger">{quickAddError}</p>}
+            <div className="space-y-3">
+              <label className="block space-y-1 text-sm font-medium">
+                Name <span className="text-danger">*</span>
+                <input className="app-input w-full" value={quickAddForm.name} onChange={(e) => setQuickAddForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Supplier name" autoFocus />
+              </label>
+              <label className="block space-y-1 text-sm font-medium">
+                Email
+                <input className="app-input w-full" type="email" value={quickAddForm.email} onChange={(e) => setQuickAddForm((prev) => ({ ...prev, email: e.target.value }))} placeholder="name@supplier.com" />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1 text-sm font-medium">
+                  Phone
+                  <input className="app-input w-full" value={quickAddForm.phone} onChange={(e) => setQuickAddForm((prev) => ({ ...prev, phone: e.target.value }))} placeholder="Phone number" />
+                </label>
+                <label className="block space-y-1 text-sm font-medium">
+                  Address
+                  <input className="app-input w-full" value={quickAddForm.address} onChange={(e) => setQuickAddForm((prev) => ({ ...prev, address: e.target.value }))} placeholder="Business address" />
+                </label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <button type="button" className="app-button-secondary" onClick={() => setQuickAddOpen(false)}>Cancel</button>
+              <button type="button" className="app-button" onClick={() => void createQuickSupplier()} disabled={quickAddSaving}>
+                {quickAddSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {quickAddSaving ? "Creating..." : "Create Supplier"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loading && !loadError && !noSuppliers && !noItems ? (
         <>
           <section className={cardClass}>
-            <h2 className="text-lg font-semibold">Supplier</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Supplier</h2>
+              <button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-primary transition hover:underline" onClick={() => { setQuickAddOpen(true); setQuickAddError(""); setQuickAddForm({ name: "", email: "", phone: "", address: "" }); }}>
+                <Plus className="h-3.5 w-3.5" /> Quick Add Supplier
+              </button>
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-1 text-sm font-medium">Supplier *
                 <select className="app-select w-full" value={form.supplier_id} onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}>

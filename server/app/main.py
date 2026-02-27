@@ -12,6 +12,7 @@ from .routers import (
     dashboard,
     health,
     inventory,
+    inv_management,
     journal_entries,
     pricing,
     purchase_orders,
@@ -48,6 +49,7 @@ app.include_router(purchase_orders.router)
 app.include_router(chart_of_accounts.router)
 app.include_router(journal_entries.router)
 app.include_router(control.router)
+app.include_router(inv_management.router)
 
 
 @app.get("/")

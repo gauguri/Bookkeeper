@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -14,7 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -961,3 +962,755 @@ class KpiAlert(Base):
     notification_method = Column(String(20), nullable=False, default="in_app")
 
     user = relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# SAP-Level Inventory Management Models
+# ---------------------------------------------------------------------------
+
+
+class InvItemCategory(Base):
+    """Hierarchical item category tree with materialized path."""
+    __tablename__ = "inv_item_categories"
+
+    id = Column(Integer, primary_key=True)
+    parent_id = Column(Integer, ForeignKey("inv_item_categories.id"), nullable=True)
+    name = Column(String(200), nullable=False)
+    code = Column(String(50), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    level = Column(Integer, nullable=False, default=0)
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    inherited_properties = Column(JSONB, nullable=True)
+    path = Column(String(500), nullable=False, default="/")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    parent = relationship("InvItemCategory", remote_side=[id], backref="children")
+
+    __table_args__ = (
+        Index("ix_inv_item_categories_parent", "parent_id"),
+        Index("ix_inv_item_categories_path", "path"),
+        Index("ix_inv_item_categories_code", "code"),
+    )
+
+
+class InvUom(Base):
+    """Unit of Measure master."""
+    __tablename__ = "inv_uom"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20), nullable=False, unique=True)
+    name = Column(String(100), nullable=False)
+    category = Column(String(20), nullable=False, default="quantity")
+    is_base = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("ix_inv_uom_category", "category"),
+    )
+
+
+class InvUomConversion(Base):
+    """UoM conversion factors, global or item-specific."""
+    __tablename__ = "inv_uom_conversions"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    from_uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=False)
+    to_uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=False)
+    conversion_factor = Column(Numeric(20, 10), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    item = relationship("Item")
+    from_uom = relationship("InvUom", foreign_keys=[from_uom_id])
+    to_uom = relationship("InvUom", foreign_keys=[to_uom_id])
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "from_uom_id", "to_uom_id", name="uq_inv_uom_conversion"),
+    )
+
+
+class InvWarehouse(Base):
+    """Warehouse master."""
+    __tablename__ = "inv_warehouses"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
+    warehouse_type = Column(String(30), nullable=False, default="standard")
+    address_line1 = Column(String(255), nullable=True)
+    address_line2 = Column(String(255), nullable=True)
+    city = Column(String(100), nullable=True)
+    state = Column(String(100), nullable=True)
+    country = Column(String(100), nullable=True)
+    postal_code = Column(String(20), nullable=True)
+    latitude = Column(Numeric(10, 7), nullable=True)
+    longitude = Column(Numeric(10, 7), nullable=True)
+    contact_person = Column(String(200), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    operating_hours = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    zones = relationship("InvZone", back_populates="warehouse", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_inv_warehouses_type", "warehouse_type"),
+    )
+
+
+class InvZone(Base):
+    """Zone within a warehouse."""
+    __tablename__ = "inv_zones"
+
+    id = Column(Integer, primary_key=True)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(20), nullable=False)
+    name = Column(String(200), nullable=False)
+    zone_type = Column(String(30), nullable=False, default="storage")
+    temperature_min = Column(Numeric(6, 2), nullable=True)
+    temperature_max = Column(Numeric(6, 2), nullable=True)
+    humidity_min = Column(Numeric(5, 2), nullable=True)
+    humidity_max = Column(Numeric(5, 2), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    warehouse = relationship("InvWarehouse", back_populates="zones")
+    aisles = relationship("InvAisle", back_populates="zone", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("warehouse_id", "code", name="uq_inv_zone_code"),
+        Index("ix_inv_zones_warehouse", "warehouse_id"),
+    )
+
+
+class InvAisle(Base):
+    """Aisle within a zone."""
+    __tablename__ = "inv_aisles"
+
+    id = Column(Integer, primary_key=True)
+    zone_id = Column(Integer, ForeignKey("inv_zones.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(20), nullable=False)
+    name = Column(String(200), nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    zone = relationship("InvZone", back_populates="aisles")
+    racks = relationship("InvRack", back_populates="aisle", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("zone_id", "code", name="uq_inv_aisle_code"),
+    )
+
+
+class InvRack(Base):
+    """Rack within an aisle."""
+    __tablename__ = "inv_racks"
+
+    id = Column(Integer, primary_key=True)
+    aisle_id = Column(Integer, ForeignKey("inv_aisles.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(20), nullable=False)
+    name = Column(String(200), nullable=False)
+    max_weight = Column(Numeric(10, 2), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    aisle = relationship("InvAisle", back_populates="racks")
+    shelves = relationship("InvShelf", back_populates="rack", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("aisle_id", "code", name="uq_inv_rack_code"),
+    )
+
+
+class InvShelf(Base):
+    """Shelf within a rack."""
+    __tablename__ = "inv_shelves"
+
+    id = Column(Integer, primary_key=True)
+    rack_id = Column(Integer, ForeignKey("inv_racks.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(20), nullable=False)
+    name = Column(String(200), nullable=False)
+    level_number = Column(Integer, nullable=False, default=1)
+    max_weight = Column(Numeric(10, 2), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    rack = relationship("InvRack", back_populates="shelves")
+    bins = relationship("InvBin", back_populates="shelf", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("rack_id", "code", name="uq_inv_shelf_code"),
+    )
+
+
+class InvBin(Base):
+    """Storage bin — the most granular location."""
+    __tablename__ = "inv_bins"
+
+    id = Column(Integer, primary_key=True)
+    shelf_id = Column(Integer, ForeignKey("inv_shelves.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(30), nullable=False)
+    name = Column(String(200), nullable=False)
+    bin_type = Column(String(20), nullable=False, default="standard")
+    max_weight = Column(Numeric(10, 2), nullable=True)
+    max_volume = Column(Numeric(10, 2), nullable=True)
+    length = Column(Numeric(10, 2), nullable=True)
+    width = Column(Numeric(10, 2), nullable=True)
+    height = Column(Numeric(10, 2), nullable=True)
+    is_occupied = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    is_restricted = Column(Boolean, nullable=False, default=False)
+    restricted_to_category_id = Column(Integer, ForeignKey("inv_item_categories.id"), nullable=True)
+    restricted_to_item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    current_utilization_pct = Column(Numeric(5, 2), nullable=True, default=0)
+
+    shelf = relationship("InvShelf", back_populates="bins")
+
+    __table_args__ = (
+        UniqueConstraint("shelf_id", "code", name="uq_inv_bin_code"),
+        Index("ix_inv_bins_type", "bin_type"),
+        Index("ix_inv_bins_occupied", "is_occupied"),
+    )
+
+
+class InvBatch(Base):
+    """Batch / Lot tracking."""
+    __tablename__ = "inv_batches"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    batch_number = Column(String(100), nullable=False)
+    vendor_batch_number = Column(String(100), nullable=True)
+    manufacturing_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    received_date = Column(Date, nullable=True)
+    country_of_origin = Column(String(100), nullable=True)
+    status = Column(String(20), nullable=False, default="unrestricted")
+    custom_attributes = Column(JSONB, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "batch_number", name="uq_inv_batch_item"),
+        Index("ix_inv_batches_item", "item_id"),
+        Index("ix_inv_batches_expiry", "expiry_date"),
+        Index("ix_inv_batches_status", "status"),
+    )
+
+
+class InvSerial(Base):
+    """Serial number tracking."""
+    __tablename__ = "inv_serials"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    serial_number = Column(String(200), nullable=False)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="in_stock")
+    current_warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    current_bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    warranty_start_date = Column(Date, nullable=True)
+    warranty_end_date = Column(Date, nullable=True)
+    purchase_date = Column(Date, nullable=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+    batch = relationship("InvBatch")
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "serial_number", name="uq_inv_serial_item"),
+        Index("ix_inv_serials_item", "item_id"),
+        Index("ix_inv_serials_status", "status"),
+    )
+
+
+class InvReasonCode(Base):
+    """Reason codes for inventory transactions."""
+    __tablename__ = "inv_reason_codes"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(30), nullable=False, unique=True)
+    description = Column(String(255), nullable=False)
+    transaction_types = Column(JSONB, nullable=False, default=list)
+    requires_approval = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class InvStockOnHand(Base):
+    """Granular stock ledger: stock by item x warehouse x bin x batch x serial x stock_type."""
+    __tablename__ = "inv_stock_on_hand"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=False)
+    zone_id = Column(Integer, ForeignKey("inv_zones.id"), nullable=True)
+    bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    serial_id = Column(Integer, ForeignKey("inv_serials.id"), nullable=True)
+    stock_type = Column(String(30), nullable=False, default="unrestricted")
+    quantity = Column(Numeric(20, 6), nullable=False, default=0)
+    uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=True)
+    last_count_date = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+    warehouse = relationship("InvWarehouse")
+    batch = relationship("InvBatch")
+    serial = relationship("InvSerial")
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "warehouse_id", "bin_id", "batch_id", "serial_id", "stock_type", name="uq_inv_stock_on_hand"),
+        CheckConstraint("quantity >= 0", name="ck_inv_stock_non_negative"),
+        Index("ix_inv_stock_item", "item_id"),
+        Index("ix_inv_stock_warehouse", "warehouse_id"),
+        Index("ix_inv_stock_type", "stock_type"),
+        Index("ix_inv_stock_item_warehouse", "item_id", "warehouse_id"),
+    )
+
+
+class InvTransactionHeader(Base):
+    """Immutable transaction header — never update or delete posted records."""
+    __tablename__ = "inv_transaction_headers"
+
+    id = Column(Integer, primary_key=True)
+    transaction_number = Column(String(30), nullable=False, unique=True)
+    transaction_type = Column(String(30), nullable=False)
+    reference_type = Column(String(30), nullable=True)
+    reference_id = Column(Integer, nullable=True)
+    reference_number = Column(String(50), nullable=True)
+    source_warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    destination_warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    transaction_date = Column(Date, nullable=False)
+    posting_date = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False, default="draft")
+    reversal_of_id = Column(Integer, ForeignKey("inv_transaction_headers.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    lines = relationship("InvTransactionLine", back_populates="header", cascade="all, delete-orphan")
+    source_warehouse = relationship("InvWarehouse", foreign_keys=[source_warehouse_id])
+    destination_warehouse = relationship("InvWarehouse", foreign_keys=[destination_warehouse_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    approver = relationship("User", foreign_keys=[approved_by])
+    reversal_of = relationship("InvTransactionHeader", remote_side=[id])
+
+    __table_args__ = (
+        Index("ix_inv_txn_number", "transaction_number"),
+        Index("ix_inv_txn_type", "transaction_type"),
+        Index("ix_inv_txn_status", "status"),
+        Index("ix_inv_txn_date", "transaction_date"),
+        Index("ix_inv_txn_posting_date", "posting_date"),
+        Index("ix_inv_txn_reference", "reference_type", "reference_id"),
+    )
+
+
+class InvTransactionLine(Base):
+    """Immutable transaction line."""
+    __tablename__ = "inv_transaction_lines"
+
+    id = Column(Integer, primary_key=True)
+    transaction_header_id = Column(Integer, ForeignKey("inv_transaction_headers.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    line_number = Column(Integer, nullable=False, default=1)
+    quantity = Column(Numeric(20, 6), nullable=False)
+    uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=True)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    serial_id = Column(Integer, ForeignKey("inv_serials.id"), nullable=True)
+    source_bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    destination_bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    source_stock_type = Column(String(30), nullable=True)
+    destination_stock_type = Column(String(30), nullable=True)
+    unit_cost = Column(Numeric(20, 6), nullable=True, default=0)
+    total_cost = Column(Numeric(20, 6), nullable=True, default=0)
+    currency_code = Column(String(10), nullable=True, default="USD")
+    reason_code_id = Column(Integer, ForeignKey("inv_reason_codes.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    header = relationship("InvTransactionHeader", back_populates="lines")
+    item = relationship("Item")
+    batch = relationship("InvBatch")
+    serial = relationship("InvSerial")
+    reason_code = relationship("InvReasonCode")
+
+    __table_args__ = (
+        Index("ix_inv_txn_line_header", "transaction_header_id"),
+        Index("ix_inv_txn_line_item", "item_id"),
+    )
+
+
+class InvValuationConfig(Base):
+    """Valuation method configuration per item or global."""
+    __tablename__ = "inv_valuation_configs"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True, unique=True)
+    valuation_method = Column(String(30), nullable=False, default="moving_average")
+    standard_cost = Column(Numeric(20, 6), nullable=True)
+    moving_average_cost = Column(Numeric(20, 6), nullable=True)
+    currency_code = Column(String(10), nullable=False, default="USD")
+    last_valuation_date = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    item = relationship("Item")
+
+
+class InvValuationHistory(Base):
+    """Period-end valuation snapshot."""
+    __tablename__ = "inv_valuation_history"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    period_year = Column(Integer, nullable=False)
+    period_month = Column(Integer, nullable=False)
+    opening_qty = Column(Numeric(20, 6), nullable=False, default=0)
+    opening_value = Column(Numeric(20, 6), nullable=False, default=0)
+    received_qty = Column(Numeric(20, 6), nullable=False, default=0)
+    received_value = Column(Numeric(20, 6), nullable=False, default=0)
+    issued_qty = Column(Numeric(20, 6), nullable=False, default=0)
+    issued_value = Column(Numeric(20, 6), nullable=False, default=0)
+    adjustment_qty = Column(Numeric(20, 6), nullable=False, default=0)
+    adjustment_value = Column(Numeric(20, 6), nullable=False, default=0)
+    closing_qty = Column(Numeric(20, 6), nullable=False, default=0)
+    closing_value = Column(Numeric(20, 6), nullable=False, default=0)
+    valuation_method = Column(String(30), nullable=False)
+    unit_cost = Column(Numeric(20, 6), nullable=False, default=0)
+    currency_code = Column(String(10), nullable=False, default="USD")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "warehouse_id", "period_year", "period_month", name="uq_inv_valuation_period"),
+        Index("ix_inv_valuation_item", "item_id"),
+        Index("ix_inv_valuation_period", "period_year", "period_month"),
+    )
+
+
+class InvLandingCost(Base):
+    """Landed cost allocation on transaction lines."""
+    __tablename__ = "inv_landing_costs"
+
+    id = Column(Integer, primary_key=True)
+    transaction_line_id = Column(Integer, ForeignKey("inv_transaction_lines.id"), nullable=False)
+    cost_type = Column(String(30), nullable=False)
+    amount = Column(Numeric(20, 6), nullable=False)
+    currency_code = Column(String(10), nullable=False, default="USD")
+    allocated_to_items = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    transaction_line = relationship("InvTransactionLine")
+
+
+class InvReservation(Base):
+    """Formal inventory reservation with expiry."""
+    __tablename__ = "inv_reservations"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    serial_id = Column(Integer, ForeignKey("inv_serials.id"), nullable=True)
+    reservation_type = Column(String(10), nullable=False, default="soft")
+    reference_type = Column(String(30), nullable=True)
+    reference_id = Column(Integer, nullable=True)
+    reserved_quantity = Column(Numeric(20, 6), nullable=False)
+    fulfilled_quantity = Column(Numeric(20, 6), nullable=False, default=0)
+    uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=True)
+    status = Column(String(30), nullable=False, default="open")
+    reserved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reserved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expiry_date = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    item = relationship("Item")
+
+    __table_args__ = (
+        Index("ix_inv_reservations_item", "item_id"),
+        Index("ix_inv_reservations_status", "status"),
+        Index("ix_inv_reservations_ref", "reference_type", "reference_id"),
+    )
+
+
+class InvPutawayRule(Base):
+    """Putaway rules for goods receipt."""
+    __tablename__ = "inv_putaway_rules"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    priority = Column(Integer, nullable=False, default=100)
+    rule_type = Column(String(30), nullable=False)
+    criteria = Column(JSONB, nullable=True)
+    target_zone_id = Column(Integer, ForeignKey("inv_zones.id"), nullable=True)
+    target_bin_type = Column(String(20), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class InvPickList(Base):
+    """Pick list header."""
+    __tablename__ = "inv_pick_lists"
+
+    id = Column(Integer, primary_key=True)
+    pick_list_number = Column(String(30), nullable=False, unique=True)
+    pick_type = Column(String(20), nullable=False, default="discrete")
+    reference_type = Column(String(30), nullable=True)
+    reference_id = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, default="created")
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    priority = Column(String(10), nullable=False, default="normal")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    lines = relationship("InvPickListLine", back_populates="pick_list", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_inv_pick_lists_status", "status"),
+    )
+
+
+class InvPickListLine(Base):
+    """Pick list line item."""
+    __tablename__ = "inv_pick_list_lines"
+
+    id = Column(Integer, primary_key=True)
+    pick_list_id = Column(Integer, ForeignKey("inv_pick_lists.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    serial_id = Column(Integer, ForeignKey("inv_serials.id"), nullable=True)
+    from_bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    quantity_requested = Column(Numeric(20, 6), nullable=False)
+    quantity_picked = Column(Numeric(20, 6), nullable=False, default=0)
+    uom_id = Column(Integer, ForeignKey("inv_uom.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    picked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    picked_at = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    pick_list = relationship("InvPickList", back_populates="lines")
+    item = relationship("Item")
+
+
+class InvCountPlan(Base):
+    """Cycle count / physical inventory plan."""
+    __tablename__ = "inv_count_plans"
+
+    id = Column(Integer, primary_key=True)
+    plan_number = Column(String(30), nullable=False, unique=True)
+    plan_type = Column(String(20), nullable=False, default="cycle_count")
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    status = Column(String(20), nullable=False, default="draft")
+    scheduled_date = Column(Date, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    freeze_stock = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    items = relationship("InvCountPlanItem", back_populates="count_plan", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_inv_count_plans_status", "status"),
+    )
+
+
+class InvCountPlanItem(Base):
+    """Individual item to count in a count plan."""
+    __tablename__ = "inv_count_plan_items"
+
+    id = Column(Integer, primary_key=True)
+    count_plan_id = Column(Integer, ForeignKey("inv_count_plans.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    bin_id = Column(Integer, ForeignKey("inv_bins.id"), nullable=True)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    serial_id = Column(Integer, ForeignKey("inv_serials.id"), nullable=True)
+    system_quantity = Column(Numeric(20, 6), nullable=False, default=0)
+    counted_quantity = Column(Numeric(20, 6), nullable=True)
+    variance_quantity = Column(Numeric(20, 6), nullable=True)
+    variance_pct = Column(Numeric(10, 4), nullable=True)
+    variance_value = Column(Numeric(20, 6), nullable=True)
+    count_status = Column(String(20), nullable=False, default="pending")
+    counted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    counted_at = Column(DateTime, nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    adjustment_transaction_id = Column(Integer, ForeignKey("inv_transaction_headers.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    count_plan = relationship("InvCountPlan", back_populates="items")
+    item = relationship("Item")
+
+    __table_args__ = (
+        Index("ix_inv_count_items_plan", "count_plan_id"),
+        Index("ix_inv_count_items_status", "count_status"),
+    )
+
+
+class InvInspectionLot(Base):
+    """Quality inspection lot."""
+    __tablename__ = "inv_inspection_lots"
+
+    id = Column(Integer, primary_key=True)
+    lot_number = Column(String(30), nullable=False, unique=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    transaction_id = Column(Integer, ForeignKey("inv_transaction_headers.id"), nullable=True)
+    inspection_type = Column(String(20), nullable=False, default="goods_receipt")
+    status = Column(String(20), nullable=False, default="created")
+    quantity = Column(Numeric(20, 6), nullable=False)
+    sample_size = Column(Numeric(20, 6), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    item = relationship("Item")
+    batch = relationship("InvBatch")
+    parameters = relationship("InvInspectionParameter", back_populates="inspection_lot", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_inv_inspection_lots_status", "status"),
+        Index("ix_inv_inspection_lots_item", "item_id"),
+    )
+
+
+class InvInspectionParameter(Base):
+    """Inspection parameters for a lot."""
+    __tablename__ = "inv_inspection_parameters"
+
+    id = Column(Integer, primary_key=True)
+    inspection_lot_id = Column(Integer, ForeignKey("inv_inspection_lots.id", ondelete="CASCADE"), nullable=False)
+    parameter_name = Column(String(200), nullable=False)
+    parameter_type = Column(String(20), nullable=False, default="quantitative")
+    target_value = Column(String(200), nullable=True)
+    min_value = Column(Numeric(20, 6), nullable=True)
+    max_value = Column(Numeric(20, 6), nullable=True)
+    actual_value = Column(String(200), nullable=True)
+    result = Column(String(20), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    inspection_lot = relationship("InvInspectionLot", back_populates="parameters")
+
+
+class InvNonConformanceReport(Base):
+    """NCR for quality defects."""
+    __tablename__ = "inv_non_conformance_reports"
+
+    id = Column(Integer, primary_key=True)
+    ncr_number = Column(String(30), nullable=False, unique=True)
+    inspection_lot_id = Column(Integer, ForeignKey("inv_inspection_lots.id"), nullable=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    batch_id = Column(Integer, ForeignKey("inv_batches.id"), nullable=True)
+    defect_type = Column(String(100), nullable=True)
+    severity = Column(String(20), nullable=False, default="minor")
+    description = Column(Text, nullable=True)
+    root_cause = Column(Text, nullable=True)
+    corrective_action = Column(Text, nullable=True)
+    preventive_action = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="open")
+    reported_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    item = relationship("Item")
+    inspection_lot = relationship("InvInspectionLot")
+
+    __table_args__ = (
+        Index("ix_inv_ncr_status", "status"),
+        Index("ix_inv_ncr_item", "item_id"),
+    )
+
+
+class InvReorderAlert(Base):
+    """Automated reorder point alerts."""
+    __tablename__ = "inv_reorder_alerts"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    current_stock = Column(Numeric(20, 6), nullable=False)
+    reorder_level = Column(Numeric(20, 6), nullable=False)
+    suggested_quantity = Column(Numeric(20, 6), nullable=False)
+    status = Column(String(20), nullable=False, default="new")
+    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+
+    item = relationship("Item")
+
+    __table_args__ = (
+        Index("ix_inv_reorder_alerts_status", "status"),
+        Index("ix_inv_reorder_alerts_item", "item_id"),
+    )
+
+
+class InvDemandForecast(Base):
+    """Demand forecast records."""
+    __tablename__ = "inv_demand_forecasts"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("inv_warehouses.id"), nullable=True)
+    period_year = Column(Integer, nullable=False)
+    period_month = Column(Integer, nullable=False)
+    forecast_method = Column(String(40), nullable=False, default="simple_moving_average")
+    forecast_quantity = Column(Numeric(20, 6), nullable=False, default=0)
+    actual_quantity = Column(Numeric(20, 6), nullable=True)
+    forecast_accuracy_pct = Column(Numeric(8, 4), nullable=True)
+    parameters = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    item = relationship("Item")
+
+    __table_args__ = (
+        UniqueConstraint("item_id", "warehouse_id", "period_year", "period_month", name="uq_inv_forecast_period"),
+        Index("ix_inv_forecast_item", "item_id"),
+    )
+
+
+class InvSetting(Base):
+    """Key-value configuration for inventory module."""
+    __tablename__ = "inv_settings"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), nullable=False, unique=True)
+    value = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class InvJournalEntry(Base):
+    """Inventory-specific journal entry stubs for accounting integration."""
+    __tablename__ = "inv_journal_entries"
+
+    id = Column(Integer, primary_key=True)
+    transaction_id = Column(Integer, ForeignKey("inv_transaction_headers.id"), nullable=False)
+    entry_date = Column(Date, nullable=False)
+    debit_account_code = Column(String(50), nullable=False)
+    credit_account_code = Column(String(50), nullable=False)
+    amount = Column(Numeric(20, 6), nullable=False)
+    currency_code = Column(String(10), nullable=False, default="USD")
+    description = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    posted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    transaction = relationship("InvTransactionHeader")
+
+    __table_args__ = (
+        Index("ix_inv_journal_entries_txn", "transaction_id"),
+        Index("ix_inv_journal_entries_status", "status"),
+    )

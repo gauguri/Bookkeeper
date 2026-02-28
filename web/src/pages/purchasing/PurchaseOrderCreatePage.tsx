@@ -303,7 +303,7 @@ export default function PurchaseOrderCreatePage() {
         <section className="app-card border-dashed p-10 text-center">
           <p className="text-lg font-semibold">No suppliers found</p>
           <p className="mt-1 text-sm text-muted">Add a supplier before creating a purchase order.</p>
-          <Link className="app-button mt-4 inline-flex" to="/purchasing/suppliers">Add Supplier</Link>
+          <Link className="app-button mt-4 inline-flex" to="/procurement/suppliers">Add Supplier</Link>
         </section>
       ) : null}
 
@@ -425,7 +425,7 @@ export default function PurchaseOrderCreatePage() {
                 <p className="text-lg font-semibold">No items are linked to this supplier yet.</p>
                 <p className="mt-1 text-sm text-muted">Link supplier-item mappings before creating a PO for this supplier.</p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  <Link className="app-button inline-flex" to="/purchasing/suppliers">Link items to supplier</Link>
+                  <Link className="app-button inline-flex" to="/procurement/suppliers">Link items to supplier</Link>
                   <button className="app-button-ghost" onClick={() => setForm((prev) => ({ ...prev, supplier_id: "" }))}>Change supplier</button>
                 </div>
               </div>

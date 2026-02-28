@@ -10,7 +10,7 @@ export const MODULE_ROUTE_MAP: Record<ModuleKey, string> = {
   [MODULES.PAYMENTS]: "/payments",
   [MODULES.INVENTORY]: "/inventory",
   [MODULES.PURCHASE_ORDERS]: "/purchasing/purchase-orders",
-  [MODULES.SUPPLIERS]: "/purchasing/suppliers",
+  [MODULES.SUPPLIERS]: "/procurement/suppliers",
   [MODULES.CHART_OF_ACCOUNTS]: "/accounts",
   [MODULES.EXPENSES]: "/expenses",
   [MODULES.REPORTS]: "/analytics",
@@ -51,7 +51,7 @@ const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: stri
   { moduleKey: MODULES.BANKING, matches: (pathname) => pathname.startsWith("/banking") },
   { moduleKey: MODULES.IMPORT, matches: (pathname) => pathname.startsWith("/accounts/bulk-import") },
   { moduleKey: MODULES.CHART_OF_ACCOUNTS, matches: (pathname) => pathname.startsWith("/accounts") },
-  { moduleKey: MODULES.SUPPLIERS, matches: (pathname) => pathname.startsWith("/purchasing/suppliers") },
+  { moduleKey: MODULES.SUPPLIERS, matches: (pathname) => pathname.startsWith("/procurement/suppliers") },
   { moduleKey: MODULES.PURCHASE_ORDERS, matches: (pathname) => pathname.startsWith("/purchasing/purchase-orders") || pathname.startsWith("/purchasing/po-hub") },
   { moduleKey: MODULES.INVENTORY, matches: (pathname) => pathname.startsWith("/inventory") || pathname.startsWith("/operations/backlog") || pathname.startsWith("/backlog") },
   { moduleKey: MODULES.CONTROL, matches: (pathname) => pathname.startsWith("/control") }

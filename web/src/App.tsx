@@ -85,7 +85,8 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: MODULES.CHART_OF_ACCOUNTS, children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: MODULES.IMPORT }] }
   ]},
   { title: "Purchasing", items: [
-    { label: "Procurement Hub", to: "/purchasing/po-hub", icon: Sparkles, moduleKey: MODULES.PURCHASE_ORDERS }
+    { label: "Procurement Hub", to: "/purchasing/po-hub", icon: Sparkles, moduleKey: MODULES.PURCHASE_ORDERS },
+    { label: "Suppliers", to: "/procurement/suppliers", icon: Truck, moduleKey: MODULES.SUPPLIERS }
   ]},
   { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: MODULES.INVENTORY }, { label: "Backlog", to: "/operations/backlog", icon: ClipboardList, moduleKey: MODULES.INVENTORY }]},
   { title: "Admin", items: [{ label: "Control", to: "/control", icon: Settings, moduleKey: MODULES.CONTROL }]}
@@ -222,7 +223,9 @@ export default function App() {
             <Route path="/accounts" element={<ProtectedRoute moduleKey={MODULES.CHART_OF_ACCOUNTS}><ChartOfAccountsPage /></ProtectedRoute>} />
             <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
             <Route path="/purchasing/po-hub/*" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><POHubPage /></ProtectedRoute>} />
-            <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/procurement/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/procurement/suppliers/:id" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/purchasing/suppliers" element={<Navigate to="/procurement/suppliers" replace />} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders/new" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrderCreatePage /></ProtectedRoute>} />
             <Route path="/purchase-orders" element={<Navigate to="/purchasing/purchase-orders" replace />} />

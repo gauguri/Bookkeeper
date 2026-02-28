@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -95,9 +95,10 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [summary, setSummary] = useState<SummaryPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [sectionLoading, setSectionLoading] = useState(false);
   const [error, setError] = useState("");
-  const [period, setPeriod] = useState(searchParams.get("range") ?? "mtd");
+  const period = searchParams.get("range") ?? "mtd";
   const [activeTile, setActiveTile] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [sortBy, setSortBy] = useState<"date" | "amount" | "method">("date");
@@ -109,12 +110,16 @@ export default function PaymentsPage() {
   const [allocations, setAllocations] = useState<Record<number, string>>({});
   const [isApplySaving, setIsApplySaving] = useState(false);
   const [showRecord, setShowRecord] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [form, setForm] = useState({ invoice_id: "", amount: "", payment_date: todayISO(), method: "", notes: "" });
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queue = searchParams.get("queue") ?? "needs-attention";
 
   const load = async () => {
     try {
-      setLoading(true);
+      setSectionLoading(true);
       const query = `?queue=${encodeURIComponent(queue)}&date_range=${encodeURIComponent(period)}&page=1&page_size=250`;
       const [rows, overview, universe] = await Promise.all([
         apiFetch<Payment[]>(`/payments${query}`),
@@ -128,16 +133,18 @@ export default function PaymentsPage() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setSectionLoading(false);
     }
   };
 
   useEffect(() => {
+    if (searchParams.get("range") && searchParams.get("queue")) return;
     const next = new URLSearchParams(searchParams);
-    next.set("range", period);
+    if (!next.get("range")) next.set("range", "mtd");
     if (!next.get("queue")) next.set("queue", "needs-attention");
     setSearchParams(next, { replace: true });
-  }, [period]);
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     load();
@@ -207,6 +214,65 @@ export default function PaymentsPage() {
     setSearchParams(next, { replace: true });
   };
 
+
+  const setPeriod = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("range", value);
+    if (!next.get("queue")) next.set("queue", "needs-attention");
+    setSearchParams(next, { replace: true });
+  };
+
+  const exportPayments = () => {
+    const rows = sorted.map((payment) => {
+      const applied = payment.applications.reduce((sum, item) => sum + toNum(item.applied_amount), 0);
+      const unapplied = Math.max(toNum(payment.amount) - applied, 0);
+      return [
+        `PMT-${String(payment.id).padStart(6, "0")}`,
+        payment.payment_date,
+        `Customer #${payment.customer_id}`,
+        payment.method ?? "",
+        toNum(payment.amount).toFixed(2),
+        applied.toFixed(2),
+        unapplied.toFixed(2),
+        payment.invoice_number ?? `Invoice #${payment.invoice_id}`
+      ];
+    });
+    const csv = [
+      ["Payment #", "Date", "Customer", "Method", "Amount", "Applied", "Unapplied", "Reference"],
+      ...rows
+    ]
+      .map((row) => row.map((value) => `"${String(value).replace(/"/g, "\"\"")}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `payments-${queue}-${period}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(href);
+  };
+
+  const importPayments = async () => {
+    if (!importFile) return;
+    try {
+      setIsImporting(true);
+      const content = await importFile.text();
+      await apiFetch("/payments/import", {
+        method: "POST",
+        body: JSON.stringify({ filename: importFile.name, csv: content })
+      });
+      setShowImport(false);
+      setImportFile(null);
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const submitPayment = async () => {
     if (!form.invoice_id || !form.amount || !form.payment_date) {
       setError("Invoice, amount, and payment date are required.");
@@ -259,7 +325,7 @@ export default function PaymentsPage() {
     { key: "all", label: "All Payments" }
   ];
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <section className="space-y-6">
         <div className="app-card h-24 animate-pulse" />
@@ -281,17 +347,23 @@ export default function PaymentsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {(["mtd", "qtd", "ytd", "12m"] as const).map((value) => (
-            <button key={value} className={`app-button-ghost text-xs uppercase ${period === value ? "border-primary text-primary" : ""}`} onClick={() => setPeriod(value)}>
+            <button type="button" key={value} className={`app-button-ghost text-xs uppercase ${period === value ? "border-primary text-primary" : ""}`} onClick={() => setPeriod(value)}>
               {value}
             </button>
           ))}
-          <button className="app-button" onClick={() => setShowRecord(true)}><Plus className="h-4 w-4" /> Record Payment</button>
-          <button className="app-button-ghost"><Upload className="h-4 w-4" /> Import</button>
-          <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
+          <button type="button" className="app-button" onClick={() => setShowRecord(true)}><Plus className="h-4 w-4" /> Record Payment</button>
+          <button type="button" className="app-button-ghost" onClick={() => { setShowImport(true); fileInputRef.current?.click(); }}><Upload className="h-4 w-4" /> Import</button>
+          <button type="button" className="app-button-ghost" onClick={exportPayments}><Download className="h-4 w-4" /> Export</button>
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => {
+            const file = event.target.files?.[0] ?? null;
+            setImportFile(file);
+            if (file) setShowImport(true);
+          }} />
         </div>
       </header>
 
       {error && <div className="app-card border-danger/40 p-4 text-sm text-danger"><AlertTriangle className="mr-2 inline h-4 w-4" />{error}</div>}
+      {sectionLoading && <p className="text-xs text-muted">Refreshing payment insights…</p>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
@@ -300,7 +372,7 @@ export default function PaymentsPage() {
           { key: "exceptions", label: "Exceptions", value: String(summary?.summary.exceptions_count ?? 0), queueKey: "exceptions", icon: AlertTriangle },
           { key: "forecast", label: "Cash Forecast Impact", value: currency(toNum(summary?.summary.cash_forecast_impact)), queueKey: "needs-attention", icon: BarChart3 }
         ].map((tile) => (
-          <button
+          <button type="button"
             key={tile.key}
             onClick={() => {
               setActiveTile(tile.key);
@@ -314,7 +386,7 @@ export default function PaymentsPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-4 xl:grid-cols-2 ${sectionLoading ? "opacity-70" : ""}`}>
         <div className="app-card p-4">
           <p className="mb-3 text-sm font-semibold">Payments Trend (12 months)</p>
           <div className="h-64">
@@ -377,7 +449,7 @@ export default function PaymentsPage() {
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Work Queues</p>
           <div className="space-y-1">
             {queueItems.map((item) => (
-              <button key={item.key} onClick={() => setQueue(item.key)} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${queue === item.key ? "bg-primary/10 text-primary" : "hover:bg-slate-100"}`}>
+              <button type="button" key={item.key} onClick={() => setQueue(item.key)} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${queue === item.key ? "bg-primary/10 text-primary" : "hover:bg-slate-100"}`}>
                 <span>{item.label}</span><span className="tabular-nums text-xs">{queueCounts[item.key as keyof typeof queueCounts] ?? 0}</span>
               </button>
             ))}
@@ -387,20 +459,20 @@ export default function PaymentsPage() {
         <div className="app-card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
             <div className="flex items-center gap-2">
-              <button className="app-button-ghost text-xs"><Filter className="h-4 w-4" /> Filters</button>
-              <button className="app-button-ghost text-xs" onClick={() => setShowColumns((v) => !v)}><ChevronDown className="h-4 w-4" /> Columns</button>
+              <button type="button" className="app-button-ghost text-xs"><Filter className="h-4 w-4" /> Filters</button>
+              <button type="button" className="app-button-ghost text-xs" onClick={() => setShowColumns((v) => !v)}><ChevronDown className="h-4 w-4" /> Columns</button>
               <select className="app-select py-1 text-xs" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)}>
                 <option value="date">Sort: Date</option>
                 <option value="amount">Sort: Amount</option>
                 <option value="method">Sort: Method</option>
               </select>
-              <button className="app-button-ghost text-xs" onClick={() => setCompact((v) => !v)}>{compact ? "Comfortable" : "Compact"}</button>
+              <button type="button" className="app-button-ghost text-xs" onClick={() => setCompact((v) => !v)}>{compact ? "Comfortable" : "Compact"}</button>
             </div>
             <div className="flex items-center gap-2">
-              <button className="app-button-ghost text-xs">Apply to invoices</button>
-              <button className="app-button-ghost text-xs">Mark as verified</button>
-              <button className="app-button-ghost text-xs">Export</button>
-              <button className="app-button-ghost text-xs">Reverse</button>
+              <button type="button" className="app-button-ghost text-xs">Apply to invoices</button>
+              <button type="button" className="app-button-ghost text-xs">Mark as verified</button>
+              <button type="button" className="app-button-ghost text-xs" onClick={exportPayments}>Export</button>
+              <button type="button" className="app-button-ghost text-xs">Reverse</button>
             </div>
           </div>
           {showColumns && <div className="border-b bg-slate-50 px-3 py-2 text-xs text-muted">Columns: Payment #, Date, Customer, Method, Amount, Applied, Unapplied, Status, Reference, Updated, Actions</div>}
@@ -434,7 +506,7 @@ export default function PaymentsPage() {
                       <td className="px-3"><span className={`app-badge ${status === "Applied" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{status}</span></td>
                       <td className="px-3">{payment.invoice_number ?? `Invoice #${payment.invoice_id}`}</td>
                       <td className="px-3">{payment.payment_date}</td>
-                      <td className="px-3 text-right"><button className="app-button-ghost" onClick={(event) => event.stopPropagation()}><MoreHorizontal className="h-4 w-4" /></button></td>
+                      <td className="px-3 text-right"><button type="button" className="app-button-ghost" onClick={(event) => event.stopPropagation()}><MoreHorizontal className="h-4 w-4" /></button></td>
                     </tr>
                   );
                 })}
@@ -452,7 +524,7 @@ export default function PaymentsPage() {
               <p className="text-xs uppercase tracking-widest text-muted">Payment Detail</p>
               <h2 className="text-lg font-semibold">{paymentDetail.payment_number}</h2>
             </div>
-            <button className="app-button-ghost" onClick={() => setSelectedPaymentId(null)}>Close</button>
+            <button type="button" className="app-button-ghost" onClick={() => setSelectedPaymentId(null)}>Close</button>
           </div>
           <div className="space-y-4 overflow-auto p-4">
             <div className="app-card p-4">
@@ -478,14 +550,14 @@ export default function PaymentsPage() {
                       <p className="text-xs text-muted">Due {invoice.due_date} · Balance {currency(toNum(invoice.amount_due))}</p>
                     </div>
                     <input className="app-input w-28 py-1" value={allocations[invoice.id] ?? ""} onChange={(event) => setAllocations((prev) => ({ ...prev, [invoice.id]: event.target.value }))} />
-                    <button className="app-button-ghost text-xs" onClick={() => setAllocations((prev) => ({ ...prev, [invoice.id]: "" }))}>Clear</button>
+                    <button type="button" className="app-button-ghost text-xs" onClick={() => setAllocations((prev) => ({ ...prev, [invoice.id]: "" }))}>Clear</button>
                   </div>
                 ))}
                 {openInvoices.length === 0 && <p className="text-sm text-muted">No open invoices available for this customer.</p>}
               </div>
               <div className="mt-3 flex justify-end gap-2">
-                <button className="app-button-ghost"><Download className="h-4 w-4" /> Export receipt</button>
-                <button className="app-button" onClick={applyPayment} disabled={isApplySaving}><CheckCircle2 className="h-4 w-4" /> {isApplySaving ? "Applying..." : "Confirm Apply"}</button>
+                <button type="button" className="app-button-ghost" onClick={exportPayments}><Download className="h-4 w-4" /> Export receipt</button>
+                <button type="button" className="app-button" onClick={applyPayment} disabled={isApplySaving}><CheckCircle2 className="h-4 w-4" /> {isApplySaving ? "Applying..." : "Confirm Apply"}</button>
               </div>
             </div>
 
@@ -500,12 +572,32 @@ export default function PaymentsPage() {
         </div>
       )}
 
+
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="app-card w-full max-w-xl p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Import Payments CSV</h2>
+              <button type="button" className="app-button-ghost" onClick={() => { setShowImport(false); setImportFile(null); }}>Close</button>
+            </div>
+            <p className="mt-2 text-sm text-muted">Choose a CSV file and upload it without leaving Payments Workbench.</p>
+            <div className="mt-4 rounded border border-dashed p-3 text-sm">
+              {importFile ? <span className="font-medium">{importFile.name}</span> : <span className="text-muted">No file selected.</span>}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="app-button-ghost" onClick={() => fileInputRef.current?.click()}>Choose file</button>
+              <button type="button" className="app-button" onClick={importPayments} disabled={!importFile || isImporting}>{isImporting ? "Importing..." : "Upload"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="app-card w-full max-w-2xl p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">+ Record Payment</h2>
-              <button className="app-button-ghost" onClick={() => setShowRecord(false)}>Close</button>
+              <button type="button" className="app-button-ghost" onClick={() => setShowRecord(false)}>Close</button>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <input className="app-input" placeholder="Invoice ID" value={form.invoice_id} onChange={(event) => setForm({ ...form, invoice_id: event.target.value })} />
@@ -514,7 +606,7 @@ export default function PaymentsPage() {
               <input className="app-input" placeholder="Method" value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })} />
               <input className="app-input md:col-span-2" placeholder="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
             </div>
-            <div className="mt-4 flex justify-end"><button className="app-button" onClick={submitPayment}><Plus className="h-4 w-4" /> Record payment</button></div>
+            <div className="mt-4 flex justify-end"><button type="button" className="app-button" onClick={submitPayment}><Plus className="h-4 w-4" /> Record payment</button></div>
           </div>
         </div>
       )}

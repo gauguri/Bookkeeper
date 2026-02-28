@@ -163,6 +163,63 @@ class PaymentCreate(PaymentBase):
     pass
 
 
+class PaymentApplyRequest(BaseModel):
+    allocations: List[PaymentApplicationCreate]
+
+
+class PaymentWorkbenchItem(BaseModel):
+    id: int
+    payment_number: str
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    customer_id: int
+    customer_name: Optional[str] = None
+    amount: DecimalValue
+    payment_date: date
+    method: Optional[str] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    applied_amount: DecimalValue
+    unapplied_amount: DecimalValue
+    exception_reason: Optional[str] = None
+    updated_at: datetime
+
+
+class PaymentSummaryResponse(BaseModel):
+    payments_received: DecimalValue
+    unapplied_payments: DecimalValue
+    exceptions_count: int
+    avg_days_to_pay: Optional[float] = None
+    refunds_reversals: DecimalValue
+    cash_forecast_impact: DecimalValue
+
+
+class PaymentMethodMixPoint(BaseModel):
+    method: str
+    amount: DecimalValue
+
+
+class PaymentTrendPoint(BaseModel):
+    month: str
+    received: DecimalValue
+    applied: DecimalValue
+    unapplied: DecimalValue
+
+
+class TopCustomerPaymentPoint(BaseModel):
+    customer_id: int
+    customer_name: str
+    amount: DecimalValue
+
+
+class PaymentSummaryAnalytics(BaseModel):
+    summary: PaymentSummaryResponse
+    method_mix: List[PaymentMethodMixPoint]
+    monthly_trend: List[PaymentTrendPoint]
+    top_customers: List[TopCustomerPaymentPoint]
+
+
 class PaymentApplicationResponse(BaseModel):
     invoice_id: int
     applied_amount: DecimalValue
@@ -178,6 +235,10 @@ class PaymentResponse(PaymentBase):
     applications: List[PaymentApplicationResponse]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaymentDetailResponse(PaymentWorkbenchItem):
+    allocations: List[PaymentApplicationResponse]
 
 
 class InvoicePaymentSummary(BaseModel):

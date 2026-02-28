@@ -3,13 +3,15 @@ from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import String, cast, func
 from sqlalchemy.orm import Session
 
 from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory.service import SOURCE_INVOICE, SOURCE_SALES_REQUEST, create_inventory_movement, get_source_reserved_qty_map, release_reservations
-from app.models import Customer, Inventory, Invoice, Item, Payment
+from app.models import Customer, Inventory, Invoice, Item, Payment, PaymentApplication
+from app.sales.calculations import PaymentApplicationInput, validate_payment_applications
 from app.sales_requests.service import (
     update_sales_request_status,
 )
@@ -38,6 +40,59 @@ from app.sales.service import (
 )
 
 router = APIRouter(prefix="/api", tags=["sales"])
+
+
+def _date_range_bounds(range_key: str) -> tuple[date, date]:
+    today = date.today()
+    if range_key == "mtd":
+        start = today.replace(day=1)
+    elif range_key == "qtd":
+        quarter_start_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=quarter_start_month, day=1)
+    elif range_key == "12m":
+        start = date(today.year - 1, today.month, 1)
+    else:  # ytd
+        start = date(today.year, 1, 1)
+    return start, today
+
+
+def _build_payment_workbench_item(payment: Payment) -> schemas.PaymentWorkbenchItem:
+    applied_amount = sum((Decimal(application.applied_amount or 0) for application in payment.applications), Decimal("0.00"))
+    total_amount = Decimal(payment.amount or 0)
+    unapplied_amount = max(total_amount - applied_amount, Decimal("0.00"))
+
+    has_invalid_application = any(application.invoice and application.invoice.status == "VOID" for application in payment.applications)
+    if has_invalid_application:
+        status = "Exception"
+        exception_reason = "Applied to void invoice"
+    elif unapplied_amount == 0:
+        status = "Applied"
+        exception_reason = None
+    elif applied_amount > 0:
+        status = "Partially applied"
+        exception_reason = None
+    else:
+        status = "Unapplied"
+        exception_reason = None
+
+    return schemas.PaymentWorkbenchItem(
+        id=payment.id,
+        payment_number=f"PMT-{payment.id:06d}",
+        invoice_id=payment.invoice_id,
+        invoice_number=payment.invoice.invoice_number if payment.invoice else None,
+        customer_id=payment.customer_id,
+        customer_name=payment.customer.name if payment.customer else None,
+        amount=total_amount,
+        payment_date=payment.payment_date,
+        method=payment.method,
+        reference=payment.reference,
+        notes=payment.notes,
+        status=status,
+        applied_amount=applied_amount,
+        unapplied_amount=unapplied_amount,
+        exception_reason=exception_reason,
+        updated_at=payment.created_at,
+    )
 
 
 @router.get("/customers", response_model=List[schemas.CustomerResponse])
@@ -426,12 +481,45 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
 
 
 @router.get("/payments", response_model=List[schemas.PaymentResponse])
-def get_payments(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.PAYMENTS.value))):
-    payments = (
+def get_payments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(500, ge=1, le=1000),
+    queue: str = Query("all"),
+    search: Optional[str] = Query(None),
+    date_range: str = Query("ytd"),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.PAYMENTS.value)),
+):
+    start_date, end_date = _date_range_bounds(date_range.lower())
+    query = (
         db.query(Payment)
+        .filter(Payment.payment_date >= start_date, Payment.payment_date <= end_date)
         .order_by(Payment.payment_date.desc(), Payment.id.desc())
-        .all()
     )
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.join(Customer, Payment.customer_id == Customer.id).filter(
+            Customer.name.ilike(term)
+            | Payment.method.ilike(term)
+            | Payment.reference.ilike(term)
+            | cast(Payment.id, String).ilike(term)
+        )
+    payments = query.offset((page - 1) * page_size).limit(page_size).all()
+    workbench_items = [_build_payment_workbench_item(payment) for payment in payments]
+    normalized_queue = queue.lower()
+    if normalized_queue in {"needs-attention", "needs_attention"}:
+        workbench_items = [item for item in workbench_items if item.status in {"Unapplied", "Partially applied", "Exception"}]
+    elif normalized_queue == "unapplied":
+        workbench_items = [item for item in workbench_items if item.status == "Unapplied"]
+    elif normalized_queue == "exceptions":
+        workbench_items = [item for item in workbench_items if item.status == "Exception"]
+    elif normalized_queue == "applied":
+        workbench_items = [item for item in workbench_items if item.status == "Applied"]
+    elif normalized_queue in {"refunds", "reversals", "refunds-reversals"}:
+        workbench_items = []
+
+    selected_ids = {item.id for item in workbench_items}
+    selected_payments = [payment for payment in payments if payment.id in selected_ids]
     return [
         schemas.PaymentResponse(
             id=payment.id,
@@ -445,7 +533,145 @@ def get_payments(db: Session = Depends(get_db), _=Depends(require_module(ModuleK
             invoice_number=payment.invoice.invoice_number if payment.invoice else None,
             applications=payment.applications,
         )
-        for payment in payments
+        for payment in selected_payments
+    ]
+
+
+@router.get("/payments/summary", response_model=schemas.PaymentSummaryAnalytics)
+def get_payments_summary(
+    range: str = Query("mtd"),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.PAYMENTS.value)),
+):
+    start_date, end_date = _date_range_bounds(range.lower())
+    payments = (
+        db.query(Payment)
+        .filter(Payment.payment_date >= start_date, Payment.payment_date <= end_date)
+        .order_by(Payment.payment_date.asc())
+        .all()
+    )
+    workbench_items = [_build_payment_workbench_item(payment) for payment in payments]
+    payments_received = sum((Decimal(item.amount) for item in workbench_items), Decimal("0.00"))
+    unapplied_payments = sum((Decimal(item.unapplied_amount) for item in workbench_items), Decimal("0.00"))
+    exceptions_count = sum(1 for item in workbench_items if item.status == "Exception")
+    method_mix: dict[str, Decimal] = {}
+    monthly_trend: dict[str, dict[str, Decimal]] = {}
+    by_customer: dict[int, Decimal] = {}
+    customer_names: dict[int, str] = {}
+    for item in workbench_items:
+        method = item.method or "Other"
+        method_mix[method] = method_mix.get(method, Decimal("0.00")) + Decimal(item.amount)
+        month_key = item.payment_date.strftime("%Y-%m")
+        monthly_bucket = monthly_trend.setdefault(month_key, {"received": Decimal("0.00"), "applied": Decimal("0.00"), "unapplied": Decimal("0.00")})
+        monthly_bucket["received"] += Decimal(item.amount)
+        monthly_bucket["applied"] += Decimal(item.applied_amount)
+        monthly_bucket["unapplied"] += Decimal(item.unapplied_amount)
+        by_customer[item.customer_id] = by_customer.get(item.customer_id, Decimal("0.00")) + Decimal(item.amount)
+        customer_names[item.customer_id] = item.customer_name or f"Customer #{item.customer_id}"
+
+    return schemas.PaymentSummaryAnalytics(
+        summary=schemas.PaymentSummaryResponse(
+            payments_received=payments_received,
+            unapplied_payments=unapplied_payments,
+            exceptions_count=exceptions_count,
+            avg_days_to_pay=None,
+            refunds_reversals=Decimal("0.00"),
+            cash_forecast_impact=payments_received - unapplied_payments,
+        ),
+        method_mix=[schemas.PaymentMethodMixPoint(method=method, amount=amount) for method, amount in method_mix.items()],
+        monthly_trend=[
+            schemas.PaymentTrendPoint(month=month, received=vals["received"], applied=vals["applied"], unapplied=vals["unapplied"])
+            for month, vals in sorted(monthly_trend.items())
+        ],
+        top_customers=[
+            schemas.TopCustomerPaymentPoint(customer_id=customer_id, customer_name=customer_names[customer_id], amount=amount)
+            for customer_id, amount in sorted(by_customer.items(), key=lambda row: row[1], reverse=True)[:8]
+        ],
+    )
+
+
+@router.get("/payments/{payment_id}", response_model=schemas.PaymentDetailResponse)
+def get_payment_detail(payment_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.PAYMENTS.value))):
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found.")
+    base = _build_payment_workbench_item(payment)
+    return schemas.PaymentDetailResponse(**base.model_dump(), allocations=payment.applications)
+
+
+@router.post("/payments/{payment_id}/apply", response_model=schemas.PaymentDetailResponse)
+def apply_payment_to_invoices(
+    payment_id: int,
+    payload: schemas.PaymentApplyRequest,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.PAYMENTS.value)),
+):
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found.")
+    allocations = payload.allocations
+    invoice_ids = [allocation.invoice_id for allocation in allocations]
+    invoices = db.query(Invoice).filter(Invoice.id.in_(invoice_ids)).all()
+    invoice_map = {invoice.id: invoice for invoice in invoices}
+    if len(invoice_map) != len(set(invoice_ids)):
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    for invoice in invoices:
+        if invoice.status == "VOID":
+            raise HTTPException(status_code=400, detail="Payments cannot be applied to void invoices.")
+        if invoice.customer_id != payment.customer_id:
+            raise HTTPException(status_code=400, detail="Invoice does not belong to payment customer.")
+        recalculate_invoice_balance(db, invoice)
+    try:
+        validate_payment_applications(
+            Decimal(payment.amount or 0),
+            [
+                PaymentApplicationInput(
+                    invoice_id=allocation.invoice_id,
+                    invoice_balance=Decimal(invoice_map[allocation.invoice_id].amount_due or 0),
+                    applied_amount=Decimal(allocation.applied_amount),
+                )
+                for allocation in allocations
+            ],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    payment.applications = [
+        PaymentApplication(invoice_id=allocation.invoice_id, applied_amount=allocation.applied_amount) for allocation in allocations
+    ]
+    for invoice in invoices:
+        recalculate_invoice_balance(db, invoice)
+        update_invoice_status(invoice)
+        invoice.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(payment)
+    base = _build_payment_workbench_item(payment)
+    return schemas.PaymentDetailResponse(**base.model_dump(), allocations=payment.applications)
+
+
+@router.get("/customers/{customer_id}/open-invoices", response_model=List[schemas.InvoiceListResponse])
+def get_customer_open_invoices(customer_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.PAYMENTS.value))):
+    invoices = (
+        db.query(Invoice)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .filter(Invoice.customer_id == customer_id, Invoice.status != "VOID", Invoice.amount_due > 0)
+        .order_by(Invoice.due_date.asc(), Invoice.id.asc())
+        .all()
+    )
+    return [
+        schemas.InvoiceListResponse(
+            id=invoice.id,
+            invoice_number=invoice.invoice_number,
+            customer_id=invoice.customer_id,
+            customer_name=invoice.customer.name,
+            status=invoice.status,
+            issue_date=invoice.issue_date,
+            due_date=invoice.due_date,
+            total=invoice.total,
+            amount_due=invoice.amount_due,
+            sales_request_id=invoice.sales_request_id,
+        )
+        for invoice in invoices
     ]
 
 

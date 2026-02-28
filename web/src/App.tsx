@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, Banknote, BarChart3, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sun, Truck, Users, Wallet } from "lucide-react";
+import { Activity, Banknote, BarChart3, Boxes, ClipboardList, FileText, Layers, LayoutGrid, Moon, PackageCheck, Settings, Sparkles, Sun, Truck, Users, Wallet } from "lucide-react";
 import { useAuth } from "./auth";
 import { isPathAllowed, MODULE_ROUTE_MAP } from "./auth-routing";
 import { canAccess } from "./authz";
@@ -40,6 +40,7 @@ import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchaseOrderCreatePage from "./pages/purchasing/PurchaseOrderCreatePage";
+import POHubPage from "./pages/purchasing/POHubPage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
 import ItemProfilePage from "./pages/ItemProfilePage";
 import AnalyticsDashboard from "./pages/analytics/AnalyticsDashboard";
@@ -84,8 +85,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: MODULES.CHART_OF_ACCOUNTS, children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: MODULES.IMPORT }] }
   ]},
   { title: "Purchasing", items: [
-    { label: "Suppliers", to: "/purchasing/suppliers", icon: Truck, moduleKey: MODULES.SUPPLIERS },
-    { label: "Purchase Orders", to: "/purchasing/purchase-orders", icon: PackageCheck, moduleKey: MODULES.PURCHASE_ORDERS }
+    { label: "Procurement Hub", to: "/purchasing/po-hub", icon: Sparkles, moduleKey: MODULES.PURCHASE_ORDERS }
   ]},
   { title: "Inventory", items: [{ label: "Inventory", to: "/inventory", icon: Boxes, moduleKey: MODULES.INVENTORY }, { label: "Backlog", to: "/operations/backlog", icon: ClipboardList, moduleKey: MODULES.INVENTORY }]},
   { title: "Admin", items: [{ label: "Control", to: "/control", icon: Settings, moduleKey: MODULES.CONTROL }]}
@@ -221,6 +221,7 @@ export default function App() {
             <Route path="/banking/reconciliation" element={<ProtectedRoute moduleKey={MODULES.BANKING}><BankingReconciliationPage /></ProtectedRoute>} />
             <Route path="/accounts" element={<ProtectedRoute moduleKey={MODULES.CHART_OF_ACCOUNTS}><ChartOfAccountsPage /></ProtectedRoute>} />
             <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
+            <Route path="/purchasing/po-hub/*" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><POHubPage /></ProtectedRoute>} />
             <Route path="/purchasing/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders/new" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrderCreatePage /></ProtectedRoute>} />

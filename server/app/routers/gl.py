@@ -25,7 +25,13 @@ router = APIRouter(prefix="/api/gl", tags=["gl"], dependencies=[Depends(require_
 
 
 @router.get("/accounts", response_model=list[schemas.GLAccountResponse])
-def list_accounts(search: str | None = None, type: str | None = None, active: bool | None = None, db: Session = Depends(get_db)):
+def list_accounts(
+    search: str | None = None,
+    type: str | None = None,
+    active: bool | None = None,
+    company_code_id: int | None = None,
+    db: Session = Depends(get_db),
+):
     query = db.query(GLAccount).order_by(GLAccount.account_number.asc())
     if search:
         like = f"%{search}%"
@@ -34,6 +40,10 @@ def list_accounts(search: str | None = None, type: str | None = None, active: bo
         query = query.filter(GLAccount.account_type == type)
     if active is not None:
         query = query.filter(GLAccount.is_active == active)
+    if company_code_id is not None:
+        query = query.filter(GLAccount.company_code_id == company_code_id)
+    if hasattr(GLAccount, "allow_manual_posting"):
+        query = query.filter(getattr(GLAccount, "allow_manual_posting").is_(True))
     return query.all()
 
 

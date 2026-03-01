@@ -104,6 +104,10 @@ def list_accounts(
         return []
 
     _sync_gl_accounts_from_coa(db, normalized_company_code_id)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
 
     child_account = aliased(GLAccount)
     query = db.query(GLAccount).order_by(GLAccount.account_number.asc())

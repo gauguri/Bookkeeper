@@ -110,6 +110,18 @@ def create_journal(db: Session, payload) -> GLJournalHeader:
     fiscal_year, period_number = _get_period(payload.posting_date)
     ensure_period_open(db, payload.company_code_id, fiscal_year, period_number)
 
+    line_account_ids = {line.gl_account_id for line in payload.lines}
+    if line_account_ids:
+        valid_ids = {
+            row[0]
+            for row in db.query(GLAccount.id)
+            .filter(GLAccount.company_code_id == payload.company_code_id, GLAccount.id.in_(line_account_ids))
+            .all()
+        }
+        missing_ids = sorted(line_account_ids - valid_ids)
+        if missing_ids:
+            raise ValueError(f"Invalid GL account(s) for company_code_id={payload.company_code_id}: {', '.join(str(i) for i in missing_ids)}")
+
     header = GLJournalHeader(
         company_code_id=payload.company_code_id,
         ledger_id=payload.ledger_id,

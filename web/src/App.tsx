@@ -245,6 +245,7 @@ export default function App() {
             <Route path="/accounting/gl/accounts" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLAccountsWorkbenchPage /></ProtectedRoute>} />
             <Route path="/accounting/gl/close" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLCloseWorkbenchPage /></ProtectedRoute>} />
             <Route path="/accounting/gl/reports" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLReportsHubPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/reports/trial-balance" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLReportsHubPage /></ProtectedRoute>} />
             <Route path="/no-access" element={<ProtectedRoute><NoAccessPage /></ProtectedRoute>} />
           </Routes></Layout>} />
         </>

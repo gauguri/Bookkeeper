@@ -17,6 +17,7 @@ class ModuleKey(str, Enum):
     IMPORT = "IMPORT"
     BANKING = "BANKING"
     CONTROL = "CONTROL"
+    GENERAL_LEDGER = "GENERAL_LEDGER"
 
 
 MODULE_DEFINITIONS: list[tuple[ModuleKey, str]] = [
@@ -35,6 +36,7 @@ MODULE_DEFINITIONS: list[tuple[ModuleKey, str]] = [
     (ModuleKey.IMPORT, "Import"),
     (ModuleKey.BANKING, "Banking"),
     (ModuleKey.CONTROL, "Control"),
+    (ModuleKey.GENERAL_LEDGER, "General Ledger"),
 ]
 
 MODULE_KEYS: list[str] = [module_key.value for module_key, _ in MODULE_DEFINITIONS]

@@ -18,7 +18,8 @@ export const MODULE_ROUTE_MAP: Record<ModuleKey, string> = {
   [MODULES.CONTROL]: "/control",
   [MODULES.CUSTOMERS]: "/sales/customers",
   [MODULES.ITEMS]: "/sales/items",
-  [MODULES.BANKING]: "/banking"
+  [MODULES.BANKING]: "/banking",
+  [MODULES.GENERAL_LEDGER]: "/accounting/gl"
 };
 
 const LIMITED_USER_DEFAULT_PRIORITY: ModuleKey[] = [
@@ -36,7 +37,8 @@ const LIMITED_USER_DEFAULT_PRIORITY: ModuleKey[] = [
   MODULES.ITEMS,
   MODULES.BANKING,
   MODULES.CONTROL,
-  MODULES.DASHBOARD
+  MODULES.DASHBOARD,
+  MODULES.GENERAL_LEDGER
 ];
 
 const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: string) => boolean }> = [
@@ -54,7 +56,8 @@ const modulePathMatchers: Array<{ moduleKey: ModuleKey; matches: (pathname: stri
   { moduleKey: MODULES.SUPPLIERS, matches: (pathname) => pathname.startsWith("/procurement/suppliers") },
   { moduleKey: MODULES.PURCHASE_ORDERS, matches: (pathname) => pathname.startsWith("/purchasing/purchase-orders") || pathname.startsWith("/purchasing/po-hub") },
   { moduleKey: MODULES.INVENTORY, matches: (pathname) => pathname.startsWith("/inventory") || pathname.startsWith("/operations/backlog") || pathname.startsWith("/backlog") },
-  { moduleKey: MODULES.CONTROL, matches: (pathname) => pathname.startsWith("/control") }
+  { moduleKey: MODULES.CONTROL, matches: (pathname) => pathname.startsWith("/control") },
+  { moduleKey: MODULES.GENERAL_LEDGER, matches: (pathname) => pathname.startsWith("/accounting/gl") }
 ];
 
 export function getDefaultRoute({ isAdmin, allowedModules }: AccessContext): string {

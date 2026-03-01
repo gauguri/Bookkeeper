@@ -55,6 +55,11 @@ import BalanceSheetPage from "./pages/analytics/BalanceSheet";
 import BankingHomePage from "./pages/banking/BankingHomePage";
 import BankingTransactionsPage from "./pages/banking/BankingTransactionsPage";
 import BankingReconciliationPage from "./pages/banking/BankingReconciliationPage";
+import GLReportsHubPage from "./pages/GLReportsHubPage";
+import GLCloseWorkbenchPage from "./pages/GLCloseWorkbenchPage";
+import GLAccountsWorkbenchPage from "./pages/GLAccountsWorkbenchPage";
+import GLJournalsWorkbenchPage from "./pages/GLJournalsWorkbenchPage";
+import GeneralLedgerCommandCenterPage from "./pages/GeneralLedgerCommandCenterPage";
 import { APP_NAME, APP_TAGLINE } from "./branding";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -83,6 +88,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
     { label: "Expenses", to: "/expenses", icon: FileText, moduleKey: MODULES.EXPENSES },
     { label: "Banking", to: "/banking", icon: Banknote, moduleKey: MODULES.BANKING, children: [{ label: "Transactions", to: "/banking/transactions", icon: ClipboardList, moduleKey: MODULES.BANKING }, { label: "Reconciliation", to: "/banking/reconciliation", icon: Layers, moduleKey: MODULES.BANKING }] },
     { label: "Chart of Accounts", to: "/accounts", icon: Layers, moduleKey: MODULES.CHART_OF_ACCOUNTS, children: [{ label: "Bulk Import", to: "/accounts/bulk-import", icon: ClipboardList, moduleKey: MODULES.IMPORT }] }
+    ,{ label: "General Ledger", to: "/accounting/gl", icon: LayoutGrid, moduleKey: MODULES.GENERAL_LEDGER, children: [{ label: "Journals", to: "/accounting/gl/journals", icon: ClipboardList, moduleKey: MODULES.GENERAL_LEDGER }, { label: "Reports", to: "/accounting/gl/reports", icon: BarChart3, moduleKey: MODULES.GENERAL_LEDGER }] }
   ]},
   { title: "Purchasing", items: [
     { label: "Procurement Hub", to: "/purchasing/po-hub", icon: Sparkles, moduleKey: MODULES.PURCHASE_ORDERS },
@@ -234,6 +240,11 @@ export default function App() {
             <Route path="/operations/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GeneralLedgerCommandCenterPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/journals" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLJournalsWorkbenchPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/accounts" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLAccountsWorkbenchPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/close" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLCloseWorkbenchPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/reports" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLReportsHubPage /></ProtectedRoute>} />
             <Route path="/no-access" element={<ProtectedRoute><NoAccessPage /></ProtectedRoute>} />
           </Routes></Layout>} />
         </>

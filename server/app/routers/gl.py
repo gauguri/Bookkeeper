@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.auth import require_module
@@ -38,9 +39,23 @@ def _normal_balance_for_type(account_type: str) -> str:
     return "DEBIT" if account_type in {"ASSET", "EXPENSE"} else "CREDIT"
 
 
+def _resolve_company_code_id(db: Session, requested_company_code_id: int | None) -> int | None:
+    if requested_company_code_id is not None:
+        exists = db.query(CompanyCode.id).filter(CompanyCode.id == requested_company_code_id).first()
+        if exists:
+            return requested_company_code_id
+
+    first = db.query(CompanyCode.id).order_by(CompanyCode.id.asc()).first()
+    return first[0] if first else None
+
+
 def _sync_gl_accounts_from_coa(db: Session, company_code_id: int) -> None:
     """Mirror COA rows into GL accounts so posting and account selection share one source dataset."""
     coa_accounts = db.query(Account).filter(Account.company_id == company_code_id).all()
+    if not coa_accounts:
+        fallback_company = db.query(Account.company_id).order_by(Account.company_id.asc()).first()
+        if fallback_company is not None:
+            coa_accounts = db.query(Account).filter(Account.company_id == fallback_company[0]).all()
     existing = {
         row.account_number: row
         for row in db.query(GLAccount).filter(GLAccount.company_code_id == company_code_id).all()
@@ -84,7 +99,10 @@ def list_accounts(
     company_code_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    normalized_company_code_id = company_code_id or 1
+    normalized_company_code_id = _resolve_company_code_id(db, company_code_id)
+    if normalized_company_code_id is None:
+        return []
+
     _sync_gl_accounts_from_coa(db, normalized_company_code_id)
 
     child_account = aliased(GLAccount)
@@ -428,7 +446,7 @@ def trial_balance_status(period: str, ledger_id: int | None = None, db: Session 
 
 
 @router.get("/command-center/summary")
-def command_center_summary(range: str = Query("MTD", pattern="^(MTD|QTD|YTD|12M)$"), ledger_id: int | None = None, db: Session = Depends(get_db)):
+def command_center_summary(date_range: str = Query("MTD", alias="range", pattern="^(MTD|QTD|YTD|12M)$"), ledger_id: int | None = None, db: Session = Depends(get_db)):
     now = datetime.utcnow()
     ledger = db.query(GLLedger).order_by(GLLedger.id.asc()).first() if ledger_id is None else db.get(GLLedger, ledger_id)
     if not ledger:
@@ -581,9 +599,15 @@ def close_checklist(ledger_id: int, year: int, period: int, db: Session = Depend
 def bootstrap_defaults(db: Session = Depends(get_db)):
     company_code = db.query(CompanyCode).filter(CompanyCode.code == "1000").first()
     if not company_code:
-        company_code = CompanyCode(code="1000", name="Main Company", base_currency="USD")
-        db.add(company_code)
-        db.flush()
+        try:
+            company_code = CompanyCode(code="1000", name="Main Company", base_currency="USD")
+            db.add(company_code)
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            company_code = db.query(CompanyCode).filter(CompanyCode.code == "1000").first()
+            if not company_code:
+                raise
 
     fyv = db.query(FiscalYearVariant).filter(FiscalYearVariant.name == "K4").first()
     if not fyv:

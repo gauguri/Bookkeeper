@@ -190,15 +190,18 @@ export default function GeneralLedgerCommandCenterPage() {
   };
 
   useEffect(() => {
-    void apiFetch<{ company_code_id: number; ledger_id: number }>("/gl/bootstrap", { method: "POST" }).then((boot) => {
-      setForm((prev) => ({ ...prev, company_code_id: boot.company_code_id, ledger_id: boot.ledger_id }));
-    });
-    void apiFetch<Ledger[]>("/gl/ledgers").then((data) => {
+    void (async () => {
+      let data = await apiFetch<Ledger[]>("/gl/ledgers");
+      if (data.length === 0) {
+        const boot = await apiFetch<{ company_code_id: number; ledger_id: number }>("/gl/bootstrap", { method: "POST" });
+        setForm((prev) => ({ ...prev, company_code_id: boot.company_code_id, ledger_id: boot.ledger_id }));
+        data = await apiFetch<Ledger[]>("/gl/ledgers");
+      }
       setLedgers(data);
-      if (data.length === 1) {
+      if (data.length > 0) {
         setForm((prev) => ({ ...prev, ledger_id: data[0].id, company_code_id: data[0].company_code_id }));
       }
-    });
+    })();
     void apiFetch<Account[]>("/gl/accounts?active_only=true").then(setAccounts);
   }, []);
 

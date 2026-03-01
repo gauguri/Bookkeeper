@@ -78,6 +78,14 @@ type Account = {
   account_type: string;
   normal_balance: string;
   is_active: boolean;
+  is_postable: boolean;
+  parent_id?: number | null;
+};
+
+type Ledger = {
+  id: number;
+  name: string;
+  company_code_id: number;
 };
 
 type QueueKey = "needs_attention" | "draft" | "ready" | "posted" | "reversed" | "all";
@@ -112,6 +120,7 @@ export default function GeneralLedgerCommandCenterPage() {
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [glAccounts, setGlAccounts] = useState<Account[]>([]);
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [glAccountsLoading, setGlAccountsLoading] = useState(false);
   const [glAccountsFailed, setGlAccountsFailed] = useState(false);
   const [lineAccountErrors, setLineAccountErrors] = useState<Record<number, string>>({});
@@ -184,7 +193,8 @@ export default function GeneralLedgerCommandCenterPage() {
     void apiFetch<{ company_code_id: number; ledger_id: number }>("/gl/bootstrap").then((boot) => {
       setForm((prev) => ({ ...prev, company_code_id: boot.company_code_id, ledger_id: boot.ledger_id }));
     });
-    void apiFetch<Account[]>("/gl/accounts").then(setAccounts);
+    void apiFetch<Ledger[]>("/gl/ledgers").then(setLedgers);
+    void apiFetch<Account[]>("/gl/accounts?active=true").then(setAccounts);
   }, []);
 
   useEffect(() => {
@@ -192,7 +202,7 @@ export default function GeneralLedgerCommandCenterPage() {
     let active = true;
     setGlAccountsLoading(true);
     setGlAccountsFailed(false);
-    void apiFetch<Account[]>(`/gl/accounts?active=true&company_code_id=${form.company_code_id}`)
+    void apiFetch<Account[]>(`/gl/accounts?active=true&postable_only=true&company_code_id=${form.company_code_id}`)
       .then((data) => {
         if (!active) return;
         setGlAccounts(data);
@@ -243,6 +253,7 @@ export default function GeneralLedgerCommandCenterPage() {
   const canPost = balanceGap === 0 && Boolean(summary?.current_period_open) && periodMatchesCurrent && !hasMissingAccounts && !glAccountsFailed;
 
   const sortedGlAccounts = useMemo(() => [...glAccounts].sort((a, b) => a.account_number.localeCompare(b.account_number, undefined, { numeric: true })), [glAccounts]);
+  const selectedLedgerId = String(form.ledger_id);
 
   const filteredQueueCounts = useMemo(() => {
     const posted = journals.filter((j) => j.status === "POSTED").length;
@@ -352,7 +363,7 @@ export default function GeneralLedgerCommandCenterPage() {
 
   const getLineOptions = (index: number) => {
     const term = (lineAccountSearch[index] || "").trim().toLowerCase();
-    const filtered = sortedGlAccounts.filter((account) => (`${account.account_number} ${account.name}`).toLowerCase().includes(term));
+    const filtered = sortedGlAccounts.filter((account) => account.is_postable && (`${account.account_number} ${account.name}`).toLowerCase().includes(term));
     if (sortedGlAccounts.length > 200) {
       return filtered.slice(0, 100);
     }
@@ -672,7 +683,19 @@ export default function GeneralLedgerCommandCenterPage() {
               {createError ? <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{createError}</div> : null}
               <div className="grid gap-3 md:grid-cols-3">
                 <label className="text-sm">Ledger / Company
-                  <input className="app-input mt-1" value={`${form.ledger_id} / ${form.company_code_id}`} readOnly />
+                  <select
+                    className="app-input mt-1"
+                    value={selectedLedgerId}
+                    onChange={(e) => {
+                      const nextLedger = ledgers.find((ledger) => ledger.id === Number(e.target.value));
+                      if (!nextLedger) return;
+                      setForm((prev) => ({ ...prev, ledger_id: nextLedger.id, company_code_id: nextLedger.company_code_id }));
+                    }}
+                  >
+                    {ledgers.map((ledger) => (
+                      <option key={ledger.id} value={ledger.id}>{`${ledger.name} / ${ledger.company_code_id}`}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="text-sm">Posting Date
                   <input type="date" className="app-input mt-1" value={form.posting_date} onChange={(e) => setForm((p) => ({ ...p, posting_date: e.target.value }))} />
@@ -710,7 +733,7 @@ export default function GeneralLedgerCommandCenterPage() {
                               <input
                                 className="app-input w-full"
                                 placeholder="Search account"
-                                value={lineAccountSearch[idx] ?? (line.gl_account_id > 0 ? `${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.account_number || ""} - ${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.name || ""}` : "")}
+                                value={lineAccountSearch[idx] ?? (line.gl_account_id > 0 ? `${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.account_number || ""} — ${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.name || ""}` : "")}
                                 onChange={(e) => setLineAccountSearch((prev) => ({ ...prev, [idx]: e.target.value }))}
                                 onFocus={() => setLineAccountSearch((prev) => ({ ...prev, [idx]: prev[idx] ?? "" }))}
                               />
@@ -722,7 +745,7 @@ export default function GeneralLedgerCommandCenterPage() {
                                     className="block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100"
                                     onClick={() => {
                                       setLines((prev) => prev.map((l, i) => i === idx ? { ...l, gl_account_id: account.id } : l));
-                                      setLineAccountSearch((prev) => ({ ...prev, [idx]: `${account.account_number} - ${account.name}` }));
+                                      setLineAccountSearch((prev) => ({ ...prev, [idx]: `${account.account_number} — ${account.name}` }));
                                       setLineAccountErrors((prev) => {
                                         const next = { ...prev };
                                         delete next[idx];
@@ -730,7 +753,7 @@ export default function GeneralLedgerCommandCenterPage() {
                                       });
                                     }}
                                   >
-                                    {account.account_number} - {account.name}
+                                    {account.account_number} — {account.name}
                                   </button>
                                 ))}
                               </div>

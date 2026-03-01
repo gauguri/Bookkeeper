@@ -31,6 +31,8 @@ class GLAccountUpdate(BaseModel):
 class GLAccountResponse(GLAccountBase):
     id: int
     company_code_id: int
+    is_postable: bool = False
+    parent_id: Optional[int] = None
 
     class Config:
         from_attributes = True

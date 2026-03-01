@@ -240,7 +240,15 @@ export default function GeneralLedgerCommandCenterPage() {
     source ? next.set("source", source) : next.delete("source");
     periodFilter ? next.set("period", periodFilter) : next.delete("period");
     setSearchParams(next, { replace: true });
-  }, [period, page, queue, search, status, source, periodFilter]);
+  }, [period, page, queue, search, status, source, periodFilter, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (searchParams.get("createJournal") !== "1") return;
+    setCreateOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("createJournal");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     void loadSummary();
@@ -378,6 +386,9 @@ export default function GeneralLedgerCommandCenterPage() {
     return filtered;
   };
 
+  const navQuery = searchParams.toString();
+  const navSuffix = navQuery ? `?${navQuery}` : "";
+
   return (
     <div className="space-y-6">
       {toast ? <div className="fixed right-4 top-4 z-[70] rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow">{toast}</div> : null}
@@ -390,7 +401,7 @@ export default function GeneralLedgerCommandCenterPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="app-button" onClick={() => setCreateOpen(true)}>+ New Journal Entry</button>
-          <Link className="app-button-secondary" to="/accounting/gl/reports">Trial Balance</Link>
+          <Link className="app-button-secondary" to={`/accounting/gl/reports${navSuffix}`}>Trial Balance</Link>
         </div>
       </div>
 
@@ -402,7 +413,7 @@ export default function GeneralLedgerCommandCenterPage() {
           { key: "close", label: "Close", to: "/accounting/gl/close" },
           { key: "reports", label: "Reports", to: "/accounting/gl/reports" },
         ].map((tab) => (
-          <Link key={tab.key} to={tab.to} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab.key === "dashboard" ? "bg-primary text-primary-foreground shadow-glow" : "bg-gray-100 text-muted hover:bg-gray-200"}`}>
+          <Link key={tab.key} to={`${tab.to}${navSuffix}`} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab.key === "dashboard" ? "bg-primary text-primary-foreground shadow-glow" : "bg-gray-100 text-muted hover:bg-gray-200"}`}>
             {tab.label}
           </Link>
         ))}

@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, aliased, selectinload
@@ -9,6 +8,7 @@ from app.auth import require_module
 from app.db import get_db
 from app.gl import schemas, service
 from app.models import (
+    Account,
     CompanyCode,
     FiscalYearVariant,
     GLAccount,
@@ -22,6 +22,56 @@ from app.models import (
 from app.module_keys import ModuleKey
 
 router = APIRouter(prefix="/api/gl", tags=["gl"], dependencies=[Depends(require_module(ModuleKey.GENERAL_LEDGER.value))])
+COA_TO_GL_TYPE = {
+    "ASSET": "ASSET",
+    "LIABILITY": "LIABILITY",
+    "EQUITY": "EQUITY",
+    "INCOME": "REVENUE",
+    "REVENUE": "REVENUE",
+    "EXPENSE": "EXPENSE",
+    "COGS": "EXPENSE",
+    "OTHER": "EXPENSE",
+}
+
+
+def _normal_balance_for_type(account_type: str) -> str:
+    return "DEBIT" if account_type in {"ASSET", "EXPENSE"} else "CREDIT"
+
+
+def _sync_gl_accounts_from_coa(db: Session, company_code_id: int) -> None:
+    """Mirror COA rows into GL accounts so posting and account selection share one source dataset."""
+    coa_accounts = db.query(Account).filter(Account.company_id == company_code_id).all()
+    existing = {
+        row.account_number: row
+        for row in db.query(GLAccount).filter(GLAccount.company_code_id == company_code_id).all()
+    }
+
+    for coa in coa_accounts:
+        account_code = (coa.code or "").strip()
+        if not account_code:
+            continue
+        mapped_type = COA_TO_GL_TYPE.get((coa.type or "").upper(), "EXPENSE")
+        gl_account = existing.get(account_code)
+        if not gl_account:
+            db.add(
+                GLAccount(
+                    company_code_id=company_code_id,
+                    account_number=account_code,
+                    name=coa.name,
+                    account_type=mapped_type,
+                    normal_balance=_normal_balance_for_type(mapped_type),
+                    is_control_account=False,
+                    is_active=bool(coa.is_active),
+                )
+            )
+            continue
+
+        gl_account.name = coa.name
+        gl_account.account_type = mapped_type
+        gl_account.normal_balance = _normal_balance_for_type(mapped_type)
+        gl_account.is_active = bool(coa.is_active)
+
+    db.flush()
 
 
 @router.get("/accounts", response_model=list[schemas.GLAccountResponse])
@@ -29,10 +79,14 @@ def list_accounts(
     search: str | None = None,
     type: str | None = None,
     active: bool | None = None,
+    active_only: bool = False,
     postable_only: bool = False,
     company_code_id: int | None = None,
     db: Session = Depends(get_db),
 ):
+    normalized_company_code_id = company_code_id or 1
+    _sync_gl_accounts_from_coa(db, normalized_company_code_id)
+
     child_account = aliased(GLAccount)
     query = db.query(GLAccount).order_by(GLAccount.account_number.asc())
     if search:
@@ -40,10 +94,10 @@ def list_accounts(
         query = query.filter(or_(GLAccount.account_number.ilike(like), GLAccount.name.ilike(like)))
     if type:
         query = query.filter(GLAccount.account_type == type)
-    if active is not None:
-        query = query.filter(GLAccount.is_active == active)
-    if company_code_id is not None:
-        query = query.filter(GLAccount.company_code_id == company_code_id)
+    effective_active = True if active_only else active
+    if effective_active is not None:
+        query = query.filter(GLAccount.is_active == effective_active)
+    query = query.filter(GLAccount.company_code_id == normalized_company_code_id)
     if postable_only:
         query = (
             query.outerjoin(child_account, child_account.parent_account_id == GLAccount.id)

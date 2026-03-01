@@ -190,11 +190,16 @@ export default function GeneralLedgerCommandCenterPage() {
   };
 
   useEffect(() => {
-    void apiFetch<{ company_code_id: number; ledger_id: number }>("/gl/bootstrap").then((boot) => {
+    void apiFetch<{ company_code_id: number; ledger_id: number }>("/gl/bootstrap", { method: "POST" }).then((boot) => {
       setForm((prev) => ({ ...prev, company_code_id: boot.company_code_id, ledger_id: boot.ledger_id }));
     });
-    void apiFetch<Ledger[]>("/gl/ledgers").then(setLedgers);
-    void apiFetch<Account[]>("/gl/accounts?active=true").then(setAccounts);
+    void apiFetch<Ledger[]>("/gl/ledgers").then((data) => {
+      setLedgers(data);
+      if (data.length === 1) {
+        setForm((prev) => ({ ...prev, ledger_id: data[0].id, company_code_id: data[0].company_code_id }));
+      }
+    });
+    void apiFetch<Account[]>("/gl/accounts?active_only=true").then(setAccounts);
   }, []);
 
   useEffect(() => {
@@ -202,7 +207,7 @@ export default function GeneralLedgerCommandCenterPage() {
     let active = true;
     setGlAccountsLoading(true);
     setGlAccountsFailed(false);
-    void apiFetch<Account[]>(`/gl/accounts?active=true&postable_only=true&company_code_id=${form.company_code_id}`)
+    void apiFetch<Account[]>(`/gl/accounts?active_only=true&postable_only=true&company_code_id=${form.company_code_id}`)
       .then((data) => {
         if (!active) return;
         setGlAccounts(data);
@@ -692,6 +697,7 @@ export default function GeneralLedgerCommandCenterPage() {
                       setForm((prev) => ({ ...prev, ledger_id: nextLedger.id, company_code_id: nextLedger.company_code_id }));
                     }}
                   >
+                    {ledgers.length === 0 ? <option value="">No ledgers available</option> : null}
                     {ledgers.map((ledger) => (
                       <option key={ledger.id} value={ledger.id}>{`${ledger.name} / ${ledger.company_code_id}`}</option>
                     ))}
@@ -719,7 +725,7 @@ export default function GeneralLedgerCommandCenterPage() {
                 {glAccountsLoading ? <p className="mb-2 text-xs text-muted">Loading Chart of Accounts…</p> : null}
                 {!glAccountsLoading && glAccounts.length === 0 ? (
                   <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                    No GL accounts found. Please create Chart of Accounts first. <Link to="/accounts" className="font-semibold underline">Go to Chart of Accounts</Link>
+                    No POSTABLE accounts found. Check that accounts have real codes (not —) and are ACTIVE.
                   </div>
                 ) : null}
                 <div className="overflow-x-auto rounded-lg border">

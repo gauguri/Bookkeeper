@@ -10,6 +10,7 @@ from .routers import (
     chart_of_accounts,
     control,
     dashboard,
+    gl,
     health,
     inventory,
     inv_management,
@@ -41,6 +42,7 @@ app.include_router(banking.router)
 app.include_router(sales.router)
 app.include_router(sales_management.router)
 app.include_router(dashboard.router)
+app.include_router(gl.router)
 app.include_router(suppliers.router)
 app.include_router(inventory.router)
 app.include_router(pricing.router)

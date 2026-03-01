@@ -13,7 +13,8 @@ export const MODULES = {
   REPORTS: "REPORTS",
   IMPORT: "IMPORT",
   BANKING: "BANKING",
-  CONTROL: "CONTROL"
+  CONTROL: "CONTROL",
+  GENERAL_LEDGER: "GENERAL_LEDGER"
 } as const;
 
 export type ModuleKey = (typeof MODULES)[keyof typeof MODULES];

@@ -143,6 +143,204 @@ class JournalLine(Base):
     journal_entry = relationship("JournalEntry", back_populates="lines")
 
 
+class CompanyCode(Base):
+    __tablename__ = "company_codes"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
+    base_currency = Column(String(10), nullable=False, default="USD")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FiscalYearVariant(Base):
+    __tablename__ = "fiscal_year_variants"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False, unique=True)
+    periods_per_year = Column(Integer, nullable=False, default=12)
+    special_periods = Column(Integer, nullable=False, default=4)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("periods_per_year > 0", name="ck_fyv_periods_positive"),
+        CheckConstraint("special_periods >= 0", name="ck_fyv_special_non_negative"),
+        CheckConstraint("periods_per_year + special_periods <= 16", name="ck_fyv_total_periods"),
+    )
+
+
+class PostingPeriod(Base):
+    __tablename__ = "posting_periods"
+
+    id = Column(Integer, primary_key=True)
+    fiscal_year_variant_id = Column(Integer, ForeignKey("fiscal_year_variants.id"), nullable=False)
+    fiscal_year = Column(Integer, nullable=False)
+    period_number = Column(Integer, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    is_special = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("fiscal_year_variant_id", "fiscal_year", "period_number", name="uq_posting_period_unique"),
+    )
+
+
+class PostingPeriodStatus(Base):
+    __tablename__ = "posting_period_status"
+
+    id = Column(Integer, primary_key=True)
+    company_code_id = Column(Integer, ForeignKey("company_codes.id"), nullable=False)
+    fiscal_year = Column(Integer, nullable=False)
+    period_number = Column(Integer, nullable=False)
+    is_open = Column(Boolean, nullable=False, default=False)
+    opened_by = Column(String(255), nullable=True)
+    opened_at = Column(DateTime, nullable=True)
+    closed_by = Column(String(255), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint("company_code_id", "fiscal_year", "period_number", name="uq_period_status"),)
+
+
+class GLLedger(Base):
+    __tablename__ = "gl_ledgers"
+
+    id = Column(Integer, primary_key=True)
+    company_code_id = Column(Integer, ForeignKey("company_codes.id"), nullable=False)
+    name = Column(String(120), nullable=False)
+    currency = Column(String(10), nullable=False, default="USD")
+    fiscal_year_variant_id = Column(Integer, ForeignKey("fiscal_year_variants.id"), nullable=False)
+    is_leading = Column(Boolean, nullable=False, default=False)
+    timezone = Column(String(50), nullable=False, default="UTC")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class GLAccount(Base):
+    __tablename__ = "gl_accounts"
+
+    id = Column(Integer, primary_key=True)
+    company_code_id = Column(Integer, ForeignKey("company_codes.id"), nullable=False)
+    account_number = Column(String(40), nullable=False)
+    name = Column(String(200), nullable=False)
+    account_type = Column(Enum("ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE", name="gl_account_type"), nullable=False)
+    normal_balance = Column(Enum("DEBIT", "CREDIT", name="gl_normal_balance"), nullable=False)
+    is_control_account = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    parent_account_id = Column(Integer, ForeignKey("gl_accounts.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("company_code_id", "account_number", name="uq_gl_account_number"),
+        Index("ix_gl_accounts_type", "account_type"),
+    )
+
+
+class GLJournalHeader(Base):
+    __tablename__ = "gl_journal_headers"
+
+    id = Column(Integer, primary_key=True)
+    company_code_id = Column(Integer, ForeignKey("company_codes.id"), nullable=False)
+    ledger_id = Column(Integer, ForeignKey("gl_ledgers.id"), nullable=False)
+    document_number = Column(String(50), nullable=False)
+    document_type = Column(String(20), nullable=False, default="SA")
+    posting_date = Column(Date, nullable=False)
+    document_date = Column(Date, nullable=False)
+    fiscal_year = Column(Integer, nullable=False)
+    period_number = Column(Integer, nullable=False)
+    currency = Column(String(10), nullable=False)
+    reference = Column(String(120), nullable=True)
+    header_text = Column(String(255), nullable=True)
+    source_module = Column(String(30), nullable=False, default="MANUAL")
+    status = Column(Enum("DRAFT", "POSTED", "REVERSED", "VOID", name="gl_journal_status"), nullable=False, default="DRAFT")
+    created_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    posted_by = Column(String(255), nullable=True)
+    posted_at = Column(DateTime, nullable=True)
+    reversed_by = Column(String(255), nullable=True)
+    reversed_at = Column(DateTime, nullable=True)
+    idempotency_key = Column(String(255), nullable=True)
+
+    lines = relationship("GLJournalLine", back_populates="header", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("ledger_id", "document_number", "fiscal_year", name="uq_gl_doc_number_year"),
+        UniqueConstraint("ledger_id", "idempotency_key", name="uq_gl_idempotency"),
+    )
+
+
+class GLJournalLine(Base):
+    __tablename__ = "gl_journal_lines"
+
+    id = Column(Integer, primary_key=True)
+    header_id = Column(Integer, ForeignKey("gl_journal_headers.id", ondelete="CASCADE"), nullable=False)
+    line_number = Column(Integer, nullable=False)
+    gl_account_id = Column(Integer, ForeignKey("gl_accounts.id"), nullable=False)
+    description = Column(String(255), nullable=True)
+    debit_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    credit_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    amount_in_doc_currency = Column(Numeric(18, 2), nullable=False, default=0)
+    currency = Column(String(10), nullable=False)
+    cost_center_id = Column(Integer, nullable=True)
+    profit_center_id = Column(Integer, nullable=True)
+    segment_id = Column(Integer, nullable=True)
+    source_type = Column(String(50), nullable=True)
+    source_id = Column(Integer, nullable=True)
+    source_line_id = Column(Integer, nullable=True)
+
+    header = relationship("GLJournalHeader", back_populates="lines")
+
+    __table_args__ = (
+        CheckConstraint(
+            "((debit_amount > 0 AND credit_amount = 0) OR (credit_amount > 0 AND debit_amount = 0))",
+            name="ck_gl_line_debit_xor_credit",
+        ),
+    )
+
+
+class GLBalance(Base):
+    __tablename__ = "gl_balances"
+
+    id = Column(Integer, primary_key=True)
+    ledger_id = Column(Integer, ForeignKey("gl_ledgers.id"), nullable=False)
+    fiscal_year = Column(Integer, nullable=False)
+    period_number = Column(Integer, nullable=False)
+    gl_account_id = Column(Integer, ForeignKey("gl_accounts.id"), nullable=False)
+    opening_balance = Column(Numeric(18, 2), nullable=False, default=0)
+    period_debits = Column(Numeric(18, 2), nullable=False, default=0)
+    period_credits = Column(Numeric(18, 2), nullable=False, default=0)
+    closing_balance = Column(Numeric(18, 2), nullable=False, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("ledger_id", "fiscal_year", "period_number", "gl_account_id", name="uq_gl_balance"),)
+
+
+class GLPostingBatch(Base):
+    __tablename__ = "gl_posting_batches"
+
+    id = Column(Integer, primary_key=True)
+    ledger_id = Column(Integer, ForeignKey("gl_ledgers.id"), nullable=False)
+    source_module = Column(String(40), nullable=False)
+    source_batch_key = Column(String(120), nullable=False)
+    status = Column(Enum("READY", "POSTED", "FAILED", name="gl_posting_batch_status"), nullable=False, default="READY")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    posted_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint("ledger_id", "source_module", "source_batch_key", name="uq_gl_batch"),)
+
+
+class GLPostingLink(Base):
+    __tablename__ = "gl_posting_links"
+
+    id = Column(Integer, primary_key=True)
+    source_module = Column(String(40), nullable=False)
+    source_id = Column(Integer, nullable=False)
+    gl_journal_header_id = Column(Integer, ForeignKey("gl_journal_headers.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("source_module", "source_id", name="uq_gl_posting_link"),)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

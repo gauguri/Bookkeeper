@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.auth import require_module
 from app.db import get_db
@@ -29,9 +29,11 @@ def list_accounts(
     search: str | None = None,
     type: str | None = None,
     active: bool | None = None,
+    postable_only: bool = False,
     company_code_id: int | None = None,
     db: Session = Depends(get_db),
 ):
+    child_account = aliased(GLAccount)
     query = db.query(GLAccount).order_by(GLAccount.account_number.asc())
     if search:
         like = f"%{search}%"
@@ -42,9 +44,40 @@ def list_accounts(
         query = query.filter(GLAccount.is_active == active)
     if company_code_id is not None:
         query = query.filter(GLAccount.company_code_id == company_code_id)
+    if postable_only:
+        query = (
+            query.outerjoin(child_account, child_account.parent_account_id == GLAccount.id)
+            .filter(child_account.id.is_(None))
+            .filter(GLAccount.account_number.isnot(None))
+            .filter(func.trim(GLAccount.account_number) != "")
+            .filter(GLAccount.account_number != "—")
+            .filter(GLAccount.is_control_account.is_(False))
+        )
     if hasattr(GLAccount, "allow_manual_posting"):
         query = query.filter(getattr(GLAccount, "allow_manual_posting").is_(True))
-    return query.all()
+    rows = query.all()
+    return [
+        {
+            "id": account.id,
+            "company_code_id": account.company_code_id,
+            "account_number": account.account_number,
+            "name": account.name,
+            "account_type": account.account_type,
+            "normal_balance": account.normal_balance,
+            "is_control_account": account.is_control_account,
+            "is_active": account.is_active,
+            "parent_account_id": account.parent_account_id,
+            "parent_id": account.parent_account_id,
+            "is_postable": bool(
+                account.is_active
+                and account.account_number
+                and account.account_number.strip()
+                and account.account_number.strip() != "—"
+                and not account.is_control_account
+            ),
+        }
+        for account in rows
+    ]
 
 
 @router.post("/accounts", response_model=schemas.GLAccountResponse, status_code=status.HTTP_201_CREATED)

@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
@@ -15,6 +16,7 @@ from app.models import (
     GLPostingBatch,
     GLJournalLine,
     GLLedger,
+    GLBalance,
     PostingPeriodStatus,
 )
 from app.module_keys import ModuleKey
@@ -120,19 +122,55 @@ def close_period(year: int, period: int, ledger_id: int = Query(...), closed_by:
 def list_journals(
     page: int = 1,
     page_size: int = 50,
+    queue: str | None = None,
     status: str | None = None,
     source: str | None = None,
-    period: int | None = None,
+    period: str | None = None,
+    date_range: str | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(GLJournalHeader).options(selectinload(GLJournalHeader.lines)).order_by(GLJournalHeader.posting_date.desc(), GLJournalHeader.id.desc())
+    if queue:
+        queue_key = queue.lower()
+        if queue_key == "draft":
+            query = query.filter(GLJournalHeader.status == "DRAFT")
+        elif queue_key == "ready":
+            query = query.filter(GLJournalHeader.status == "DRAFT")
+        elif queue_key == "posted":
+            query = query.filter(GLJournalHeader.status == "POSTED")
+        elif queue_key == "reversed":
+            query = query.filter(GLJournalHeader.status == "REVERSED")
+        elif queue_key == "needs_attention":
+            query = query.filter(GLJournalHeader.status == "DRAFT")
     if status:
         query = query.filter(GLJournalHeader.status == status)
     if source:
         query = query.filter(GLJournalHeader.source_module == source)
     if period:
-        query = query.filter(GLJournalHeader.period_number == period)
+        if "-" in period:
+            year_str, month_str = period.split("-", 1)
+            query = query.filter(GLJournalHeader.fiscal_year == int(year_str), GLJournalHeader.period_number == int(month_str))
+        else:
+            query = query.filter(GLJournalHeader.period_number == int(period))
+    if date_range:
+        now = datetime.utcnow()
+        if date_range == "MTD":
+            query = query.filter(GLJournalHeader.posting_date >= datetime(now.year, now.month, 1).date())
+        elif date_range == "QTD":
+            q_month = ((now.month - 1) // 3) * 3 + 1
+            query = query.filter(GLJournalHeader.posting_date >= datetime(now.year, q_month, 1).date())
+        elif date_range == "YTD":
+            query = query.filter(GLJournalHeader.posting_date >= datetime(now.year, 1, 1).date())
+        elif date_range == "12M":
+            min_year = now.year - 1 if now.month < 12 else now.year
+            min_month = now.month + 1 if now.month < 12 else 1
+            query = query.filter(
+                or_(
+                    GLJournalHeader.fiscal_year > min_year,
+                    (GLJournalHeader.fiscal_year == min_year) & (GLJournalHeader.period_number >= min_month),
+                )
+            )
     if search:
         like = f"%{search}%"
         query = query.filter(or_(GLJournalHeader.document_number.ilike(like), GLJournalHeader.reference.ilike(like), GLJournalHeader.header_text.ilike(like)))
@@ -149,9 +187,11 @@ def list_journals(
                 "document_type": h.document_type,
                 "source_module": h.source_module,
                 "reference": h.reference,
+                "description": h.header_text,
                 "debits": sum((line.debit_amount for line in h.lines), 0),
                 "credits": sum((line.credit_amount for line in h.lines), 0),
                 "status": h.status,
+                "period_label": f"{h.fiscal_year}-{h.period_number:02d}",
                 "updated_at": h.posted_at or h.created_at,
             }
             for h in rows
@@ -259,6 +299,150 @@ def get_batch(batch_id: int, db: Session = Depends(get_db)):
 @router.get("/reports/trial-balance", response_model=list[schemas.TrialBalanceRow])
 def report_trial_balance(ledger_id: int, year: int, period_from: int, period_to: int, db: Session = Depends(get_db)):
     return service.trial_balance(db, ledger_id, year, period_from, period_to)
+
+
+@router.get("/reports/trial-balance-status")
+def trial_balance_status(period: str, ledger_id: int | None = None, db: Session = Depends(get_db)):
+    period_year, period_number = [int(v) for v in period.split("-", 1)]
+    ledger = db.query(GLLedger).order_by(GLLedger.id.asc()).first() if ledger_id is None else db.get(GLLedger, ledger_id)
+    if not ledger:
+        return {"balanced": True, "imbalance_amount": 0, "last_refreshed": datetime.utcnow().isoformat()}
+    rows = (
+        db.query(GLBalance, GLAccount)
+        .join(GLAccount, GLBalance.gl_account_id == GLAccount.id)
+        .filter(GLBalance.ledger_id == ledger.id, GLBalance.fiscal_year == period_year, GLBalance.period_number == period_number)
+        .all()
+    )
+    debit_total = Decimal("0.00")
+    credit_total = Decimal("0.00")
+    last_refreshed = None
+    for bal, account in rows:
+        if account.normal_balance == "DEBIT":
+            debit_total += bal.closing_balance
+        else:
+            credit_total += bal.closing_balance
+        last_refreshed = max(last_refreshed, bal.updated_at) if last_refreshed else bal.updated_at
+    imbalance = abs(debit_total - credit_total)
+    return {
+        "balanced": imbalance == 0,
+        "imbalance_amount": float(imbalance),
+        "last_refreshed": (last_refreshed or datetime.utcnow()).isoformat(),
+    }
+
+
+@router.get("/command-center/summary")
+def command_center_summary(range: str = Query("MTD", pattern="^(MTD|QTD|YTD|12M)$"), ledger_id: int | None = None, db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    ledger = db.query(GLLedger).order_by(GLLedger.id.asc()).first() if ledger_id is None else db.get(GLLedger, ledger_id)
+    if not ledger:
+        return {
+            "unposted_count": 0,
+            "exceptions_count": 0,
+            "trial_balance_balanced": True,
+            "trial_balance_imbalance_amount": 0,
+            "current_period_label": f"{now.year}-{now.month:02d}",
+            "current_period_open": True,
+            "ytd_net_income": 0,
+            "cash_balance": 0,
+            "posted_volume_series": [],
+            "net_income_series": [],
+            "revenue_series": [],
+            "expense_series": [],
+            "account_balance_composition": [],
+        }
+
+    current_year = now.year
+    current_period = now.month
+    period_status = db.query(PostingPeriodStatus).filter(
+        PostingPeriodStatus.company_code_id == ledger.company_code_id,
+        PostingPeriodStatus.fiscal_year == current_year,
+        PostingPeriodStatus.period_number == current_period,
+    ).first()
+    current_period_open = period_status.is_open if period_status else True
+
+    unposted_count = db.query(func.count(GLJournalHeader.id)).filter(GLJournalHeader.ledger_id == ledger.id, GLJournalHeader.status == "DRAFT").scalar() or 0
+    exceptions_count = db.query(func.count(GLPostingBatch.id)).filter(GLPostingBatch.ledger_id == ledger.id, GLPostingBatch.status == "FAILED").scalar() or 0
+
+    monthly_rows = (
+        db.query(GLBalance.period_number, GLAccount.account_type, func.sum(GLBalance.closing_balance))
+        .join(GLAccount, GLBalance.gl_account_id == GLAccount.id)
+        .filter(GLBalance.ledger_id == ledger.id, GLBalance.fiscal_year == current_year)
+        .group_by(GLBalance.period_number, GLAccount.account_type)
+        .all()
+    )
+    monthly_map: dict[int, dict[str, Decimal]] = {}
+    for period_number, account_type, balance in monthly_rows:
+        bucket = monthly_map.setdefault(period_number, {})
+        bucket[account_type] = Decimal(str(balance or 0))
+
+    months = list(range(max(1, current_period - 11), current_period + 1))
+    revenue_series = []
+    expense_series = []
+    net_income_series = []
+    for month in months:
+        revenue = float(monthly_map.get(month, {}).get("REVENUE", Decimal("0.00")))
+        expense = float(monthly_map.get(month, {}).get("EXPENSE", Decimal("0.00")))
+        revenue_series.append({"period": f"{current_year}-{month:02d}", "value": revenue})
+        expense_series.append({"period": f"{current_year}-{month:02d}", "value": expense})
+        net_income_series.append({"period": f"{current_year}-{month:02d}", "value": revenue - expense})
+
+    ytd_net_income = sum(point["value"] for point in net_income_series if int(point["period"].split("-")[1]) <= current_period)
+
+    cash_balance = (
+        db.query(func.sum(GLBalance.closing_balance))
+        .join(GLAccount, GLBalance.gl_account_id == GLAccount.id)
+        .filter(
+            GLBalance.ledger_id == ledger.id,
+            GLBalance.fiscal_year == current_year,
+            GLBalance.period_number == current_period,
+            GLAccount.account_number.like("10%"),
+        )
+        .scalar()
+        or 0
+    )
+
+    posted_volume_rows = (
+        db.query(GLJournalHeader.period_number, func.count(GLJournalHeader.id))
+        .filter(GLJournalHeader.ledger_id == ledger.id, GLJournalHeader.fiscal_year == current_year, GLJournalHeader.status == "POSTED")
+        .group_by(GLJournalHeader.period_number)
+        .all()
+    )
+    posted_volume_map = {period_number: count for period_number, count in posted_volume_rows}
+    posted_volume_series = [{"period": f"{current_year}-{month:02d}", "value": int(posted_volume_map.get(month, 0))} for month in months]
+
+    composition_rows = (
+        db.query(GLAccount.name, func.sum(GLBalance.closing_balance))
+        .join(GLAccount, GLBalance.gl_account_id == GLAccount.id)
+        .filter(GLBalance.ledger_id == ledger.id, GLBalance.fiscal_year == current_year, GLBalance.period_number == current_period)
+        .group_by(GLAccount.name)
+        .all()
+    )
+    sorted_composition = sorted(
+        [{"category": name, "value": float(abs(total or 0))} for name, total in composition_rows],
+        key=lambda row: row["value"],
+        reverse=True,
+    )
+    top_six = sorted_composition[:6]
+    other_total = sum(row["value"] for row in sorted_composition[6:])
+    if other_total > 0:
+        top_six.append({"category": "Other", "value": other_total})
+
+    trial_balance = trial_balance_status(period=f"{current_year}-{current_period:02d}", ledger_id=ledger.id, db=db)
+    return {
+        "unposted_count": int(unposted_count),
+        "exceptions_count": int(exceptions_count),
+        "trial_balance_balanced": bool(trial_balance["balanced"]),
+        "trial_balance_imbalance_amount": float(trial_balance["imbalance_amount"]),
+        "current_period_label": f"{current_year}-{current_period:02d}",
+        "current_period_open": bool(current_period_open),
+        "ytd_net_income": float(ytd_net_income),
+        "cash_balance": float(cash_balance),
+        "posted_volume_series": posted_volume_series,
+        "net_income_series": net_income_series,
+        "revenue_series": revenue_series,
+        "expense_series": expense_series,
+        "account_balance_composition": top_six,
+    }
 
 
 @router.get("/reports/account-analysis")

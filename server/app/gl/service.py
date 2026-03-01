@@ -143,7 +143,6 @@ def create_journal(db: Session, payload) -> GLJournalHeader:
             )
         )
     db.flush()
-    validate_balanced(header.lines)
     return header
 
 

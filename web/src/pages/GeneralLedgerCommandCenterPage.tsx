@@ -71,7 +71,14 @@ type JournalDetail = {
   lines: { gl_account_id: number; description?: string; debit_amount: number; credit_amount: number }[];
 };
 
-type Account = { id: number; account_number: string; name: string };
+type Account = {
+  id: number;
+  account_number: string;
+  name: string;
+  account_type: string;
+  normal_balance: string;
+  is_active: boolean;
+};
 
 type QueueKey = "needs_attention" | "draft" | "ready" | "posted" | "reversed" | "all";
 
@@ -104,6 +111,11 @@ export default function GeneralLedgerCommandCenterPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [glAccounts, setGlAccounts] = useState<Account[]>([]);
+  const [glAccountsLoading, setGlAccountsLoading] = useState(false);
+  const [glAccountsFailed, setGlAccountsFailed] = useState(false);
+  const [lineAccountErrors, setLineAccountErrors] = useState<Record<number, string>>({});
+  const [lineAccountSearch, setLineAccountSearch] = useState<Record<number, string>>({});
   const [selectedJournal, setSelectedJournal] = useState<JournalDetail | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [toast, setToast] = useState("");
@@ -176,6 +188,31 @@ export default function GeneralLedgerCommandCenterPage() {
   }, []);
 
   useEffect(() => {
+    if (!createOpen || !form.company_code_id) return;
+    let active = true;
+    setGlAccountsLoading(true);
+    setGlAccountsFailed(false);
+    void apiFetch<Account[]>(`/gl/accounts?active=true&company_code_id=${form.company_code_id}`)
+      .then((data) => {
+        if (!active) return;
+        setGlAccounts(data);
+      })
+      .catch((error) => {
+        console.error("[GL] Failed to load chart of accounts", error);
+        if (!active) return;
+        setGlAccounts([]);
+        setGlAccountsFailed(true);
+        setToast("Failed to load Chart of Accounts");
+      })
+      .finally(() => {
+        if (active) setGlAccountsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [createOpen, form.company_code_id]);
+
+  useEffect(() => {
     const next = new URLSearchParams(searchParams);
     next.set("range", period);
     next.set("page", String(page));
@@ -202,7 +239,10 @@ export default function GeneralLedgerCommandCenterPage() {
   const creditTotal = useMemo(() => lines.reduce((sum, line) => sum + Number(line.credit_amount || 0), 0), [lines]);
   const balanceGap = Number((debitTotal - creditTotal).toFixed(2));
   const periodMatchesCurrent = form.posting_date.startsWith(summary?.current_period_label ?? "");
-  const canPost = balanceGap === 0 && Boolean(summary?.current_period_open) && periodMatchesCurrent;
+  const hasMissingAccounts = lines.some((line) => line.gl_account_id <= 0);
+  const canPost = balanceGap === 0 && Boolean(summary?.current_period_open) && periodMatchesCurrent && !hasMissingAccounts && !glAccountsFailed;
+
+  const sortedGlAccounts = useMemo(() => [...glAccounts].sort((a, b) => a.account_number.localeCompare(b.account_number, undefined, { numeric: true })), [glAccounts]);
 
   const filteredQueueCounts = useMemo(() => {
     const posted = journals.filter((j) => j.status === "POSTED").length;
@@ -242,6 +282,19 @@ export default function GeneralLedgerCommandCenterPage() {
     setSaving(true);
     setCreateError("");
     try {
+      if (shouldPost) {
+        const errors: Record<number, string> = {};
+        lines.forEach((line, idx) => {
+          if (line.gl_account_id <= 0) errors[idx] = "Account is required.";
+        });
+        setLineAccountErrors(errors);
+        if (Object.keys(errors).length > 0) {
+          setCreateError("Select an account for every journal entry line before posting.");
+          setSaving(false);
+          return;
+        }
+      }
+
       const payload = {
         company_code_id: form.company_code_id,
         ledger_id: form.ledger_id,
@@ -296,6 +349,15 @@ export default function GeneralLedgerCommandCenterPage() {
   ];
 
   const accountNameMap = useMemo(() => new Map(accounts.map((a) => [a.id, `${a.account_number} · ${a.name}`])), [accounts]);
+
+  const getLineOptions = (index: number) => {
+    const term = (lineAccountSearch[index] || "").trim().toLowerCase();
+    const filtered = sortedGlAccounts.filter((account) => (`${account.account_number} ${account.name}`).toLowerCase().includes(term));
+    if (sortedGlAccounts.length > 200) {
+      return filtered.slice(0, 100);
+    }
+    return filtered;
+  };
 
   return (
     <div className="space-y-6">
@@ -631,17 +693,50 @@ export default function GeneralLedgerCommandCenterPage() {
                   <h3 className="text-sm font-semibold">Line Editor</h3>
                   <button type="button" className="app-button-secondary" onClick={() => setLines((prev) => [...prev, { gl_account_id: 0, description: "", debit_amount: "", credit_amount: "" }])}>Add Line</button>
                 </div>
+                {glAccountsLoading ? <p className="mb-2 text-xs text-muted">Loading Chart of Accounts…</p> : null}
+                {!glAccountsLoading && glAccounts.length === 0 ? (
+                  <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    No GL accounts found. Please create Chart of Accounts first. <Link to="/accounts" className="font-semibold underline">Go to Chart of Accounts</Link>
+                  </div>
+                ) : null}
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead><tr className="border-b bg-gray-50"><th className="px-3 py-2 text-left">Account</th><th className="px-3 py-2 text-left">Description</th><th className="px-3 py-2 text-right">Debit</th><th className="px-3 py-2 text-right">Credit</th><th className="px-3 py-2" /></tr></thead>
                     <tbody>
                       {lines.map((line, idx) => (
                         <tr key={idx} className="border-t">
-                          <td className="px-3 py-2">
-                            <select className="app-select w-full" value={line.gl_account_id} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, gl_account_id: Number(e.target.value) } : l))}>
-                              <option value={0}>Select account</option>
-                              {accounts.map((account) => <option key={account.id} value={account.id}>{account.account_number} · {account.name}</option>)}
-                            </select>
+                          <td className="px-3 py-2 align-top">
+                            <div className="space-y-1">
+                              <input
+                                className="app-input w-full"
+                                placeholder="Search account"
+                                value={lineAccountSearch[idx] ?? (line.gl_account_id > 0 ? `${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.account_number || ""} - ${sortedGlAccounts.find((a) => a.id === line.gl_account_id)?.name || ""}` : "")}
+                                onChange={(e) => setLineAccountSearch((prev) => ({ ...prev, [idx]: e.target.value }))}
+                                onFocus={() => setLineAccountSearch((prev) => ({ ...prev, [idx]: prev[idx] ?? "" }))}
+                              />
+                              <div className="max-h-36 overflow-y-auto rounded-md border bg-surface">
+                                {getLineOptions(idx).map((account) => (
+                                  <button
+                                    type="button"
+                                    key={account.id}
+                                    className="block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100"
+                                    onClick={() => {
+                                      setLines((prev) => prev.map((l, i) => i === idx ? { ...l, gl_account_id: account.id } : l));
+                                      setLineAccountSearch((prev) => ({ ...prev, [idx]: `${account.account_number} - ${account.name}` }));
+                                      setLineAccountErrors((prev) => {
+                                        const next = { ...prev };
+                                        delete next[idx];
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {account.account_number} - {account.name}
+                                  </button>
+                                ))}
+                              </div>
+                              {sortedGlAccounts.length > 200 ? <p className="text-[11px] text-muted">Showing up to 100 results. Keep typing to refine search.</p> : null}
+                              {lineAccountErrors[idx] ? <p className="text-xs text-red-600">{lineAccountErrors[idx]}</p> : null}
+                            </div>
                           </td>
                           <td className="px-3 py-2"><input className="app-input" value={line.description} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, description: e.target.value } : l))} /></td>
                           <td className="px-3 py-2"><input inputMode="decimal" className="app-input text-right" value={line.debit_amount} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, debit_amount: e.target.value, credit_amount: e.target.value ? "" : l.credit_amount } : l))} /></td>

@@ -14,6 +14,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
 import CurrentInventoryBreakdownCard from "../components/inventory/CurrentInventoryBreakdownCard";
+import InventoryCompositionCard, { type CompositionItem } from "../components/inventory/InventoryCompositionCard";
 import InventoryValueCompositionCard from "../components/inventory/InventoryValueCompositionCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
@@ -69,6 +70,8 @@ type AnalyticsResponse = {
   net_flow: { period: string; receipts: number; issues: number; reserved: number }[];
 };
 
+type CompositionMetric = "value" | "quantity";
+
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
 type Detail = {
   item: ItemRow;
@@ -109,6 +112,12 @@ export default function InventoryPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [composition, setComposition] = useState<CompositionItem[]>([]);
+  const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
+  const [compositionLimit, setCompositionLimit] = useState<10 | 25>(10);
+  const [compositionLoading, setCompositionLoading] = useState(false);
+  const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
+  const [pendingReservedItemId, setPendingReservedItemId] = useState<number | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
@@ -136,6 +145,8 @@ export default function InventoryPage() {
   const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
   const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
   const mismatchLogged = useRef(false);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -213,6 +224,18 @@ export default function InventoryPage() {
     }
   };
 
+  const loadComposition = async (metric: CompositionMetric, limit: 10 | 25) => {
+    setCompositionLoading(true);
+    try {
+      const compositionRes = await apiFetch<CompositionItem[]>(`/inventory/analytics/composition?metric=${metric}&limit=${limit}`);
+      setComposition(compositionRes);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCompositionLoading(false);
+    }
+  };
+
   const loadTable = async () => {
     setTableLoading(true);
     setError("");
@@ -229,6 +252,10 @@ export default function InventoryPage() {
   useEffect(() => {
     void loadOverview();
   }, [usageDays]);
+
+  useEffect(() => {
+    void loadComposition(compositionMetric, compositionLimit);
+  }, [compositionMetric, compositionLimit]);
 
   useEffect(() => {
     void loadTable();
@@ -301,6 +328,20 @@ export default function InventoryPage() {
     return breakdownFiltered;
   }, [normalizedItems, breakdownFilter, abcItemFilter, abcClassFilter, abcClassByItemId]);
 
+
+  useEffect(() => {
+    if (!pendingReservedItemId) return;
+    const row = displayedItems.find((entry) => entry.id === pendingReservedItemId);
+    if (!row) return;
+    const rowElement = rowRefs.current[pendingReservedItemId];
+    if (!rowElement) return;
+    const syntheticMouseEvent = {
+      currentTarget: rowElement,
+    } as unknown as MouseEvent;
+    void openReservations(pendingReservedItemId, syntheticMouseEvent);
+    setPendingReservedItemId(null);
+  }, [displayedItems, pendingReservedItemId]);
+
   const createPOForSelection = () => {
     if (!selectedIds.length) return;
     navigate("/purchasing/purchase-orders/new", {
@@ -358,6 +399,28 @@ export default function InventoryPage() {
     setPopover({ itemId, x: rect.left, y: rect.bottom + 8 });
     const payload = await apiFetch<Reservation[]>(`/inventory/reservations/${itemId}`);
     setReservations(payload);
+  };
+
+  const handleCompositionClick = (itemId: number, segment: "available" | "reserved") => {
+    setBreakdown(segment);
+    setAbcItemFilter(itemId);
+    setHighlightedItemId(itemId);
+    setTimeout(() => {
+      gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      rowRefs.current[itemId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 20);
+    if (segment === "reserved") setPendingReservedItemId(itemId);
+  };
+
+  const handleCompositionViewAll = () => {
+    if (!composition.length) {
+      navigate("/purchasing/purchase-orders");
+      return;
+    }
+    setBreakdown("all");
+    clearAbcFilters();
+    setHighlightedItemId(null);
+    gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   if (overviewLoading && !summary) {
@@ -429,6 +492,17 @@ export default function InventoryPage() {
         />
       </div>
 
+      <InventoryCompositionCard
+        items={composition}
+        metric={compositionMetric}
+        limit={compositionLimit}
+        loading={compositionLoading}
+        onMetricChange={setCompositionMetric}
+        onLimitChange={setCompositionLimit}
+        onBarClick={handleCompositionClick}
+        onViewAll={handleCompositionViewAll}
+      />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>
         <div className="app-card p-4"><p className="mb-2 font-semibold">Stock Health Breakdown</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={analytics?.health_breakdown ?? []} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85}>{(analytics?.health_breakdown ?? []).map((_, idx) => <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div></div>
@@ -436,7 +510,7 @@ export default function InventoryPage() {
         <div className="app-card p-4"><p className="mb-2 font-semibold">Demand vs Supply / Net Flow</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><BarChart data={analytics?.net_flow}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="receipts" stackId="a" fill={CHART_COLORS[1]} /><Bar dataKey="issues" stackId="a" fill={CHART_COLORS[3]} /><Bar dataKey="reserved" stackId="a" fill={CHART_COLORS[4]} /></BarChart></ResponsiveContainer></div></div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+      <div ref={gridRef} className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="app-card p-3">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Work Queues</p>
           <div className="space-y-1">
@@ -482,7 +556,7 @@ export default function InventoryPage() {
               <thead className="sticky top-0 bg-surface text-xs uppercase text-muted"><tr><th className="px-3 py-2"><input type="checkbox" onChange={(e) => setSelectedIds(e.target.checked ? displayedItems.map((x) => x.id) : [])} /></th><th className="px-3 py-2">Item</th><th className="px-3 py-2">On Hand</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">ROP</th>{visibleCols.safety_stock && <th className="px-3 py-2">Safety</th>}{visibleCols.lead_time_days && <th className="px-3 py-2">Lead Time</th>}{visibleCols.avg_daily_usage && <th className="px-3 py-2">Avg Usage</th>}<th className="px-3 py-2">DOS</th><th className="px-3 py-2">ROQ</th><th className="px-3 py-2">Supplier</th>{visibleCols.last_receipt && <th className="px-3 py-2">Last Receipt</th>}{visibleCols.last_issue && <th className="px-3 py-2">Last Issue</th>}<th className="px-3 py-2">Total Value</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {displayedItems.map((row) => (
-                  <tr key={row.id} className={`cursor-pointer border-t border-muted/20 ${compact ? "text-xs" : ""}`} onClick={() => void openDetail(row.id)}>
+                  <tr key={row.id} ref={(node) => { rowRefs.current[row.id] = node; }} className={`cursor-pointer border-t border-muted/20 ${compact ? "text-xs" : ""} ${highlightedItemId === row.id ? "bg-primary/10" : ""}`} onClick={() => { setHighlightedItemId(row.id); void openDetail(row.id); }}>
                     <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={(e) => setSelectedIds((prev) => e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id))} /></td>
                     <td className="px-3 py-2"><button className="font-medium hover:underline" onClick={(e) => { e.stopPropagation(); void openDetail(row.id); }}>{row.item}</button><p className="text-xs text-muted">{row.sku ?? "—"}</p></td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.on_hand)}</td>

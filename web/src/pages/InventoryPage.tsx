@@ -13,8 +13,7 @@ import {
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
-import CurrentInventoryBreakdownCard from "../components/inventory/CurrentInventoryBreakdownCard";
-import InventoryCompositionCard, { type CompositionItem } from "../components/inventory/InventoryCompositionCard";
+import InventoryOverviewCard, { type OverviewItem } from "../components/inventory/InventoryOverviewCard";
 import InventoryValueCompositionCard from "../components/inventory/InventoryValueCompositionCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
@@ -71,6 +70,20 @@ type AnalyticsResponse = {
 };
 
 type CompositionMetric = "value" | "quantity";
+type CompositionLimit = 10 | 25 | "all";
+
+type InventoryOverviewResponse = {
+  totals: {
+    total_on_hand_qty?: number | null;
+    total_reserved_qty?: number | null;
+    total_available_qty?: number | null;
+    total_inventory_value?: number | null;
+  };
+  items: OverviewItem[];
+  data_quality: {
+    missing_landed_cost_count: number;
+  };
+};
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
 type Detail = {
@@ -112,12 +125,11 @@ export default function InventoryPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
-  const [composition, setComposition] = useState<CompositionItem[]>([]);
+  const [overview, setOverview] = useState<InventoryOverviewResponse | null>(null);
   const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
-  const [compositionLimit, setCompositionLimit] = useState<10 | 25>(10);
+  const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(10);
   const [compositionLoading, setCompositionLoading] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
-  const [pendingReservedItemId, setPendingReservedItemId] = useState<number | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
@@ -224,11 +236,12 @@ export default function InventoryPage() {
     }
   };
 
-  const loadComposition = async (metric: CompositionMetric, limit: 10 | 25) => {
+  const loadComposition = async (limit: CompositionLimit) => {
     setCompositionLoading(true);
     try {
-      const compositionRes = await apiFetch<CompositionItem[]>(`/inventory/analytics/composition?metric=${metric}&limit=${limit}`);
-      setComposition(compositionRes);
+      const queryLimit = limit === "all" ? 0 : limit;
+      const compositionRes = await apiFetch<InventoryOverviewResponse>(`/inventory/analytics/overview?limit=${queryLimit}`);
+      setOverview(compositionRes);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -254,8 +267,8 @@ export default function InventoryPage() {
   }, [usageDays]);
 
   useEffect(() => {
-    void loadComposition(compositionMetric, compositionLimit);
-  }, [compositionMetric, compositionLimit]);
+    void loadComposition(compositionLimit);
+  }, [compositionLimit]);
 
   useEffect(() => {
     void loadTable();
@@ -303,11 +316,6 @@ export default function InventoryPage() {
     return rows;
   }, [itemsData?.items]);
 
-  const hasTotalsMismatch = useMemo(() => {
-    if (!summary) return false;
-    return Math.abs(Number(summary.total_on_hand_qty ?? 0) - (Number(summary.total_reserved_qty ?? 0) + Number(summary.total_available_qty ?? 0))) > 0.01;
-  }, [summary]);
-
   const abcClassByItemId = useMemo(() => {
     const classified = computeAbcClassification(normalizedItems);
     return new Map(classified.map((row) => [row.id, row.abc_class]));
@@ -328,19 +336,6 @@ export default function InventoryPage() {
     return breakdownFiltered;
   }, [normalizedItems, breakdownFilter, abcItemFilter, abcClassFilter, abcClassByItemId]);
 
-
-  useEffect(() => {
-    if (!pendingReservedItemId) return;
-    const row = displayedItems.find((entry) => entry.id === pendingReservedItemId);
-    if (!row) return;
-    const rowElement = rowRefs.current[pendingReservedItemId];
-    if (!rowElement) return;
-    const syntheticMouseEvent = {
-      currentTarget: rowElement,
-    } as unknown as MouseEvent;
-    void openReservations(pendingReservedItemId, syntheticMouseEvent);
-    setPendingReservedItemId(null);
-  }, [displayedItems, pendingReservedItemId]);
 
   const createPOForSelection = () => {
     if (!selectedIds.length) return;
@@ -401,7 +396,7 @@ export default function InventoryPage() {
     setReservations(payload);
   };
 
-  const handleCompositionClick = (itemId: number, segment: "available" | "reserved") => {
+  const handleCompositionClick = (itemId: number, segment: "available" | "reserved", event?: MouseEvent) => {
     setBreakdown(segment);
     setAbcItemFilter(itemId);
     setHighlightedItemId(itemId);
@@ -409,11 +404,11 @@ export default function InventoryPage() {
       gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       rowRefs.current[itemId]?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 20);
-    if (segment === "reserved") setPendingReservedItemId(itemId);
+    if (segment === "reserved" && event) void openReservations(itemId, event);
   };
 
   const handleCompositionViewAll = () => {
-    if (!composition.length) {
+    if (!(overview?.items?.length ?? 0)) {
       navigate("/purchasing/purchase-orders");
       return;
     }
@@ -475,32 +470,29 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <CurrentInventoryBreakdownCard
-          summary={summary}
-          activeFilter={(["all", "reserved", "available", "inbound"].includes(breakdownFilter) ? breakdownFilter : "all") as "all" | "reserved" | "available" | "inbound"}
-          onFilterChange={setBreakdown}
-          mismatch={hasTotalsMismatch}
-        />
-        <InventoryValueCompositionCard
-          items={normalizedItems}
-          activeItemId={Number.isFinite(abcItemFilter) && abcItemFilter > 0 ? abcItemFilter : null}
-          activeClass={["A", "B", "C"].includes(abcClassFilter) ? (abcClassFilter as "A" | "B" | "C") : null}
-          onItemSelect={setAbcItemFilter}
-          onClassSelect={setAbcClassFilter}
-          onClearFilters={clearAbcFilters}
-        />
-      </div>
-
-      <InventoryCompositionCard
-        items={composition}
+      <InventoryOverviewCard
+        totals={overview?.totals ?? null}
+        items={overview?.items ?? []}
         metric={compositionMetric}
         limit={compositionLimit}
         loading={compositionLoading}
+        missingLandedCostCount={Number(overview?.data_quality?.missing_landed_cost_count ?? 0)}
         onMetricChange={setCompositionMetric}
         onLimitChange={setCompositionLimit}
-        onBarClick={handleCompositionClick}
         onViewAll={handleCompositionViewAll}
+        onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
+        onSegmentClick={handleCompositionClick}
+        onSetLandedCosts={() => navigate("/items")}
+        onReceiveInventory={() => navigate("/purchasing/purchase-orders")}
+      />
+
+      <InventoryValueCompositionCard
+        items={normalizedItems}
+        activeItemId={Number.isFinite(abcItemFilter) && abcItemFilter > 0 ? abcItemFilter : null}
+        activeClass={["A", "B", "C"].includes(abcClassFilter) ? (abcClassFilter as "A" | "B" | "C") : null}
+        onItemSelect={setAbcItemFilter}
+        onClassSelect={setAbcClassFilter}
+        onClearFilters={clearAbcFilters}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

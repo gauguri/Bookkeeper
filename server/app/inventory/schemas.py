@@ -175,6 +175,36 @@ class InventoryCompositionPoint(BaseModel):
     landed_unit_cost_missing: bool = False
 
 
+class InventoryOverviewTotals(BaseModel):
+    total_on_hand_qty: DecimalValue = Field(default=Decimal("0"))
+    total_reserved_qty: DecimalValue = Field(default=Decimal("0"))
+    total_available_qty: DecimalValue = Field(default=Decimal("0"))
+    total_inventory_value: DecimalValue = Field(default=Decimal("0"))
+
+
+class InventoryOverviewItem(BaseModel):
+    item_id: int
+    item_name: str
+    sku: Optional[str] = None
+    on_hand_qty: DecimalValue = Field(default=Decimal("0"))
+    reserved_qty: DecimalValue = Field(default=Decimal("0"))
+    available_qty: DecimalValue = Field(default=Decimal("0"))
+    landed_unit_cost: Optional[DecimalValue] = None
+    available_value: DecimalValue = Field(default=Decimal("0"))
+    reserved_value: DecimalValue = Field(default=Decimal("0"))
+    total_value: DecimalValue = Field(default=Decimal("0"))
+
+
+class InventoryOverviewDataQuality(BaseModel):
+    missing_landed_cost_count: int = 0
+
+
+class InventoryOverviewResponse(BaseModel):
+    totals: InventoryOverviewTotals
+    items: list[InventoryOverviewItem]
+    data_quality: InventoryOverviewDataQuality
+
+
 class InventoryItemDetailResponse(BaseModel):
     item: InventoryItemRow
     movements: list[dict]

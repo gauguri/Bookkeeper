@@ -434,6 +434,69 @@ def get_inventory_composition(
     return composition[:limit]
 
 
+@router.get("/analytics/overview", response_model=schemas.InventoryOverviewResponse)
+def get_inventory_overview(
+    limit: int = Query(10, ge=0, le=500),
+    db: Session = Depends(get_db),
+):
+    rows = _build_inventory_rows(db, usage_days=90)
+    item_ids = [row.id for row in rows]
+    inventory_records = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all() if item_ids else []
+    inventory_by_item_id = {record.item_id: record for record in inventory_records}
+
+    items: list[schemas.InventoryOverviewItem] = []
+    total_value = Decimal("0")
+    missing_landed_cost_count = 0
+
+    for row in rows:
+        on_hand_qty = _q2(row.on_hand)
+        reserved_qty = _q2(row.reserved)
+        available_qty = _q2(max(Decimal("0"), on_hand_qty - reserved_qty))
+        inventory = inventory_by_item_id.get(row.id)
+        landed_cost: Decimal | None = None
+        if inventory and inventory.landed_unit_cost is not None:
+            landed_cost = _q2(inventory.landed_unit_cost)
+        elif row.on_hand > 0:
+            missing_landed_cost_count += 1
+
+        available_value = _q2(available_qty * landed_cost) if landed_cost is not None else Decimal("0")
+        reserved_value = _q2(reserved_qty * landed_cost) if landed_cost is not None else Decimal("0")
+        item_total_value = _q2(available_value + reserved_value)
+        total_value += item_total_value
+
+        items.append(
+            schemas.InventoryOverviewItem(
+                item_id=row.id,
+                item_name=row.item,
+                sku=row.sku,
+                on_hand_qty=on_hand_qty,
+                reserved_qty=reserved_qty,
+                available_qty=available_qty,
+                landed_unit_cost=landed_cost,
+                available_value=available_value,
+                reserved_value=reserved_value,
+                total_value=item_total_value,
+            )
+        )
+
+    items.sort(key=lambda entry: entry.total_value, reverse=True)
+    if limit > 0:
+        items = items[:limit]
+
+    totals = schemas.InventoryOverviewTotals(
+        total_on_hand_qty=_q2(sum((row.on_hand for row in rows), Decimal("0"))),
+        total_reserved_qty=_q2(sum((row.reserved for row in rows), Decimal("0"))),
+        total_available_qty=_q2(sum((max(Decimal("0"), row.on_hand - row.reserved) for row in rows), Decimal("0"))),
+        total_inventory_value=_q2(total_value),
+    )
+
+    return schemas.InventoryOverviewResponse(
+        totals=totals,
+        items=items,
+        data_quality=schemas.InventoryOverviewDataQuality(missing_landed_cost_count=missing_landed_cost_count),
+    )
+
+
 @router.get("/items/{item_id}/detail", response_model=schemas.InventoryItemDetailResponse)
 def get_item_detail(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()

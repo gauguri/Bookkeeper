@@ -394,6 +394,46 @@ def get_inventory_analytics(db: Session = Depends(get_db)):
     )
 
 
+@router.get("/analytics/composition", response_model=list[schemas.InventoryCompositionPoint])
+def get_inventory_composition(
+    limit: int = Query(10, ge=1, le=25),
+    metric: str = Query("value", pattern="^(value|quantity)$"),
+    db: Session = Depends(get_db),
+):
+    rows = _build_inventory_rows(db, usage_days=90)
+    inventory_by_item_id = {record.item_id: record for record in db.query(Inventory).filter(Inventory.item_id.in_([row.id for row in rows])).all()}
+    composition: list[schemas.InventoryCompositionPoint] = []
+    for row in rows:
+        inventory = inventory_by_item_id.get(row.id)
+        landed_unit_cost_raw = _safe_decimal(inventory.landed_unit_cost if inventory else Decimal("0"))
+        landed_unit_cost_missing = inventory is None or inventory.landed_unit_cost is None
+        on_hand_qty = _q2(row.on_hand)
+        reserved_qty = _q2(row.reserved)
+        available_qty = _q2(on_hand_qty - reserved_qty)
+        total_value = _q2(on_hand_qty * landed_unit_cost_raw)
+
+        composition.append(
+            schemas.InventoryCompositionPoint(
+                item_id=row.id,
+                item_name=row.item,
+                sku=row.sku,
+                on_hand_qty=on_hand_qty,
+                reserved_qty=reserved_qty,
+                available_qty=available_qty,
+                landed_unit_cost=_q2(landed_unit_cost_raw),
+                total_value=total_value,
+                landed_unit_cost_missing=landed_unit_cost_missing,
+            )
+        )
+
+    if metric == "quantity":
+        composition.sort(key=lambda entry: entry.on_hand_qty, reverse=True)
+    else:
+        composition.sort(key=lambda entry: entry.total_value, reverse=True)
+
+    return composition[:limit]
+
+
 @router.get("/items/{item_id}/detail", response_model=schemas.InventoryItemDetailResponse)
 def get_item_detail(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()

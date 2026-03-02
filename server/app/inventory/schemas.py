@@ -163,6 +163,18 @@ class InventoryAnalyticsResponse(BaseModel):
     net_flow: list[InventoryFlowPoint]
 
 
+class InventoryCompositionPoint(BaseModel):
+    item_id: int
+    item_name: str
+    sku: Optional[str] = None
+    on_hand_qty: DecimalValue
+    reserved_qty: DecimalValue
+    available_qty: DecimalValue
+    landed_unit_cost: DecimalValue
+    total_value: DecimalValue
+    landed_unit_cost_missing: bool = False
+
+
 class InventoryItemDetailResponse(BaseModel):
     item: InventoryItemRow
     movements: list[dict]

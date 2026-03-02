@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -386,38 +386,9 @@ export default function GeneralLedgerCommandCenterPage() {
     return filtered;
   };
 
-  const navQuery = searchParams.toString();
-  const navSuffix = navQuery ? `?${navQuery}` : "";
-
   return (
     <div className="space-y-6">
       {toast ? <div className="fixed right-4 top-4 z-[70] rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow">{toast}</div> : null}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Accounting</p>
-          <h1 className="text-2xl font-bold">General Ledger Command Center</h1>
-          <p className="text-sm text-muted">SAP-grade cockpit for journals, close health, and financial movement.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="app-button" onClick={() => setCreateOpen(true)}>+ New Journal Entry</button>
-          <Link className="app-button-secondary" to={`/accounting/gl/reports${navSuffix}`}>Trial Balance</Link>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {[
-          { key: "dashboard", label: "Dashboard", to: "/accounting/gl" },
-          { key: "journals", label: "Journals", to: "/accounting/gl/journals" },
-          { key: "trial", label: "Trial Balance", to: "/accounting/gl/reports" },
-          { key: "close", label: "Close", to: "/accounting/gl/close" },
-          { key: "reports", label: "Reports", to: "/accounting/gl/reports" },
-        ].map((tab) => (
-          <Link key={tab.key} to={`${tab.to}${navSuffix}`} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab.key === "dashboard" ? "bg-primary text-primary-foreground shadow-glow" : "bg-gray-100 text-muted hover:bg-gray-200"}`}>
-            {tab.label}
-          </Link>
-        ))}
-      </div>
 
       <div className="app-card p-4">
         <DashboardFilter period={period} onPeriodChange={(next) => setPeriod(next)} />

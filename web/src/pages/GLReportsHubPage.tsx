@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 
 type TbRow = { gl_account_id: number; account_number: string; account_name: string; debit: number; credit: number; balance: number };
@@ -6,8 +7,11 @@ type TbRow = { gl_account_id: number; account_number: string; account_name: stri
 export default function GLReportsHubPage() {
   const [ledgerId, setLedgerId] = useState<number>(0);
   const [rows, setRows] = useState<TbRow[]>([]);
+  const location = useLocation();
   const year = new Date().getFullYear();
   const period = new Date().getMonth() + 1;
+
+  const title = useMemo(() => (location.pathname.endsWith("/trial-balance") ? "Trial Balance" : "Reports"), [location.pathname]);
 
   useEffect(() => {
     apiFetch<{ ledger_id: number }>("/gl/bootstrap").then((res) => setLedgerId(res.ledger_id));
@@ -20,9 +24,9 @@ export default function GLReportsHubPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">GL Reports Hub</h1>
+      <h2 className="text-xl font-semibold">{title}</h2>
       <div className="rounded-xl border bg-white p-4 overflow-auto">
-        <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Trial Balance</h2>
+        <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Trial Balance</h3>
         <table className="min-w-full text-sm">
           <thead><tr className="text-left text-slate-500"><th>Account</th><th>Name</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
           <tbody>

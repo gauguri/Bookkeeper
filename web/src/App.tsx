@@ -60,6 +60,7 @@ import GLCloseWorkbenchPage from "./pages/GLCloseWorkbenchPage";
 import GLAccountsWorkbenchPage from "./pages/GLAccountsWorkbenchPage";
 import GLJournalsWorkbenchPage from "./pages/GLJournalsWorkbenchPage";
 import GeneralLedgerCommandCenterPage from "./pages/GeneralLedgerCommandCenterPage";
+import GeneralLedgerShell from "./pages/accounting/gl/GeneralLedgerShell";
 import { APP_NAME, APP_TAGLINE } from "./branding";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -240,12 +241,15 @@ export default function App() {
             <Route path="/operations/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
-            <Route path="/accounting/gl" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GeneralLedgerCommandCenterPage /></ProtectedRoute>} />
-            <Route path="/accounting/gl/journals" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLJournalsWorkbenchPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GeneralLedgerShell /></ProtectedRoute>}>
+              <Route index element={<GeneralLedgerCommandCenterPage />} />
+              <Route path="journals" element={<GLJournalsWorkbenchPage />} />
+              <Route path="trial-balance" element={<GLReportsHubPage />} />
+              <Route path="close" element={<GLCloseWorkbenchPage />} />
+              <Route path="reports" element={<GLReportsHubPage />} />
+            </Route>
             <Route path="/accounting/gl/accounts" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLAccountsWorkbenchPage /></ProtectedRoute>} />
-            <Route path="/accounting/gl/close" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLCloseWorkbenchPage /></ProtectedRoute>} />
-            <Route path="/accounting/gl/reports" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLReportsHubPage /></ProtectedRoute>} />
-            <Route path="/accounting/gl/reports/trial-balance" element={<ProtectedRoute moduleKey={MODULES.GENERAL_LEDGER}><GLReportsHubPage /></ProtectedRoute>} />
+            <Route path="/accounting/gl/reports/trial-balance" element={<Navigate to="/accounting/gl/trial-balance" replace />} />
             <Route path="/no-access" element={<ProtectedRoute><NoAccessPage /></ProtectedRoute>} />
           </Routes></Layout>} />
         </>

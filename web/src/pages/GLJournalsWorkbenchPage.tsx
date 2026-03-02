@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { apiFetch } from "../api";
 
 type Journal = { id: number; document_number: string; posting_date: string; source_module: string; debits: number; credits: number; status: string; reference?: string };
@@ -7,17 +7,6 @@ type Journal = { id: number; document_number: string; posting_date: string; sour
 export default function GLJournalsWorkbenchPage() {
   const [items, setItems] = useState<Journal[]>([]);
   const location = useLocation();
-
-  const tabs = useMemo(
-    () => [
-      { key: "dashboard", label: "Dashboard", to: "/accounting/gl" },
-      { key: "journals", label: "Journal Entries", to: "/accounting/gl/journals" },
-      { key: "trial", label: "Trial Balance", to: "/accounting/gl/reports/trial-balance" },
-      { key: "close", label: "Close", to: "/accounting/gl/close" },
-      { key: "reports", label: "Reports", to: "/accounting/gl/reports" },
-    ],
-    [],
-  );
 
   const exportJournals = () => {
     const rows = [
@@ -52,32 +41,10 @@ export default function GLJournalsWorkbenchPage() {
 
   return (
     <section className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-muted">Accounting / General Ledger / Journal Entries</p>
-          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.3em] text-muted">Accounting</p>
-          <h1 className="text-2xl font-bold">Journal Entry Workbench</h1>
-          <p className="text-sm text-muted">Create, review, and post journal entries.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link className="app-button" to={`/accounting/gl?createJournal=1${location.search ? `&${location.search.replace("?", "")}` : ""}`}>+ New Journal Entry</Link>
-          <button type="button" className="app-button-secondary" onClick={exportJournals}>Export</button>
-          <Link className="app-button-secondary" to={`/accounting/gl${location.search}`}>Filters</Link>
-        </div>
-      </header>
-
-      <nav className="flex flex-wrap gap-2" aria-label="General ledger sections">
-        {tabs.map((tab) => (
-          <NavLink
-            key={tab.key}
-            to={`${tab.to}${location.search}`}
-            end={tab.to === "/accounting/gl"}
-            className={({ isActive }) => `rounded-full px-4 py-2 text-sm font-semibold transition ${isActive ? "bg-primary text-primary-foreground shadow-glow" : "border bg-surface text-muted hover:text-foreground"}`}
-          >
-            {tab.label}
-          </NavLink>
-        ))}
-      </nav>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="app-button-secondary" onClick={exportJournals}>Export</button>
+        <Link className="app-button-secondary" to={`/accounting/gl${location.search}`}>Filters</Link>
+      </div>
 
       <div className="app-card overflow-auto p-4">
         <table className="min-w-full text-sm">

@@ -63,6 +63,7 @@ import GeneralLedgerCommandCenterPage from "./pages/GeneralLedgerCommandCenterPa
 import GeneralLedgerShell from "./pages/accounting/gl/GeneralLedgerShell";
 import { APP_NAME, APP_TAGLINE } from "./branding";
 import ErrorBoundary from "./components/ErrorBoundary";
+import PageLayout from "./components/layout/PageLayout";
 
 type BootstrapStatus = { needs_bootstrap: boolean };
 type NavItem = { label: string; to: string; icon: any; moduleKey?: ModuleKey; children?: NavItem[] };
@@ -135,6 +136,19 @@ function Layout({ children }: { children: React.ReactNode }) {
   const navLabelClass = collapsed ? "opacity-0 translate-x-4" : "opacity-100";
   const badgeClasses = useMemo(() => "app-badge border-primary/30 bg-primary/10 text-primary", []);
   const contentAnimationKey = location.pathname.startsWith("/accounting/gl") ? "/accounting/gl" : location.pathname;
+  const cockpitPathPrefixes = [
+    "/inventory",
+    "/sales/command-center",
+    "/analytics",
+    "/accounting/gl",
+    "/invoices",
+    "/sales/invoices",
+    "/payments",
+    "/sales/payments",
+    "/procurement/suppliers",
+    "/purchasing/po-hub",
+  ];
+  const layoutVariant = cockpitPathPrefixes.some((prefix) => location.pathname.startsWith(prefix)) ? "cockpit" : "standard";
 
   return <div className="min-h-screen bg-background text-foreground">{/* unchanged layout */}
     <aside className={`fixed inset-y-0 left-0 z-40 hidden md:flex ${navWidth} flex-col border-r bg-surface/95 px-4 pb-6 pt-6 shadow-soft backdrop-blur transition-all`}>
@@ -144,7 +158,17 @@ function Layout({ children }: { children: React.ReactNode }) {
       }}><item.icon className="h-4 w-4" /><span className={`transition ${navLabelClass}`}>{item.label}</span></NavLink></div>)}</nav></div>)}</div>
     </aside>
     <header className={`sticky top-0 z-30 flex items-center justify-between border-b bg-surface/80 px-6 py-4 shadow-soft backdrop-blur ${collapsed ? "md:ml-20" : "md:ml-72"}`}><div><p className="text-xs uppercase tracking-[0.3em] text-muted">{APP_NAME}</p><h1 className="text-lg font-semibold">Sales Command Center</h1></div><div className="flex items-center gap-3"><button className="app-button-ghost" onClick={() => setDarkMode((p) => !p)}>{darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</button><span>{user?.full_name || user?.email}</span><button className="app-button-ghost" onClick={logout}>Logout</button><span className={badgeClasses}>DEV</span></div></header>
-    <main className={`relative px-6 pb-16 pt-8 ${collapsed ? "md:ml-20" : "md:ml-72"}`}><div className="mx-auto flex w-full max-w-6xl flex-col gap-8"><ErrorBoundary><AnimatePresence mode="wait"><motion.div key={contentAnimationKey} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }} className="space-y-8">{children}</motion.div></AnimatePresence></ErrorBoundary></div></main>
+    <main className={`relative pb-16 pt-8 ${collapsed ? "md:ml-20" : "md:ml-72"}`}>
+      <PageLayout variant={layoutVariant}>
+        <ErrorBoundary>
+          <AnimatePresence mode="wait">
+            <motion.div key={contentAnimationKey} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }} className="space-y-8">
+              {children}
+            </motion.div>
+          </AnimatePresence>
+        </ErrorBoundary>
+      </PageLayout>
+    </main>
   </div>;
 }
 

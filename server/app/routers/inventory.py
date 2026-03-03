@@ -92,6 +92,7 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
         inv = inv_by_id.get(item.id)
         on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
         landed_cost = _q2(inv.landed_unit_cost if inv else item.preferred_landed_cost)
+        inventory_total_value = _q2(inv.total_value) if inv else None
         reserved = _q2(reserved_by_id.get(item.id, Decimal("0")))
         available = on_hand - reserved
         avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))
@@ -128,6 +129,9 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
         elif pressure:
             health_flag = "reserved_pressure"
 
+        computed_total_value = _q2(on_hand * landed_cost)
+        effective_total_value = inventory_total_value if inventory_total_value is not None and inventory_total_value > 0 else computed_total_value
+
         rows.append(
             schemas.InventoryItemRow(
                 id=item.id,
@@ -146,7 +150,7 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
                 preferred_supplier_id=item.preferred_supplier_id,
                 last_receipt=last_receipt.get(item.id),
                 last_issue=last_issue.get(item.id),
-                total_value=_q2(on_hand * landed_cost),
+                total_value=effective_total_value,
                 inbound_qty=inbound,
                 health_flag=health_flag,
             )

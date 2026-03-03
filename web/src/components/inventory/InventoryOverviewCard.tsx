@@ -63,11 +63,7 @@ export default function InventoryOverviewCard({
 }: Props) {
   const sorted = [...items].sort((a, b) => (metric === "value" ? b.total_value - a.total_value : b.on_hand_qty - a.on_hand_qty));
   const limited = limit === "all" ? sorted : sorted.slice(0, limit);
-  const hasInventory = sorted.some((item) => safeNumber(item.on_hand_qty) > 0);
-  const shouldShowEmptyState = !hasInventory
-    && sorted.length === 0
-    && safeNumber(totals?.total_on_hand_qty) === 0
-    && safeNumber(totals?.total_inventory_value) === 0;
+  const shouldShowEmptyState = sorted.length === 0 && safeNumber(totals?.total_on_hand_qty) === 0;
   const maxMetricValue = Math.max(
     1,
     ...limited.map((item) => (metric === "value" ? safeNumber(item.total_value) : safeNumber(item.on_hand_qty))),

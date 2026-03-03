@@ -64,6 +64,10 @@ export default function InventoryOverviewCard({
   const sorted = [...items].sort((a, b) => (metric === "value" ? b.total_value - a.total_value : b.on_hand_qty - a.on_hand_qty));
   const limited = limit === "all" ? sorted : sorted.slice(0, limit);
   const hasInventory = sorted.some((item) => safeNumber(item.on_hand_qty) > 0);
+  const shouldShowEmptyState = !hasInventory
+    && sorted.length === 0
+    && safeNumber(totals?.total_on_hand_qty) === 0
+    && safeNumber(totals?.total_inventory_value) === 0;
   const maxMetricValue = Math.max(
     1,
     ...limited.map((item) => (metric === "value" ? safeNumber(item.total_value) : safeNumber(item.on_hand_qty))),
@@ -111,7 +115,7 @@ export default function InventoryOverviewCard({
 
       {loading ? (
         <div className="h-72 animate-pulse rounded-2xl bg-secondary" />
-      ) : !hasInventory ? (
+      ) : shouldShowEmptyState ? (
         <div className="rounded-2xl border border-dashed border-border px-4 py-12 text-center">
           <p className="text-lg font-semibold">No inventory yet</p>
           <p className="mt-1 text-sm text-muted">Start with a receipt to populate inventory overview metrics.</p>

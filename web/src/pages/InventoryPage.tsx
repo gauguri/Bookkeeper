@@ -13,28 +13,15 @@ import {
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
-import InventoryOverviewCard, { type OverviewItem } from "../components/inventory/InventoryOverviewCard";
+import InventoryOverviewCard from "../components/inventory/InventoryOverviewCard";
 import InventoryValueCompositionCard from "../components/inventory/InventoryValueCompositionCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
 import { CATEGORY_COLORS } from "../utils/chartPalette";
 import { formatCompact, formatCurrency } from "../utils/formatters";
 import { computeAbcClassification } from "../utils/inventoryAbc";
+import { useInventoryOverview } from "../hooks/useInventoryOverview";
 
-type Summary = {
-  inventory_value: number;
-  low_stock_items: number;
-  stockouts: number;
-  at_risk_items: number;
-  excess_dead_stock: number;
-  reserved_pressure_items: number;
-  total_on_hand_qty: number;
-  total_reserved_qty: number;
-  total_available_qty: number;
-  total_value: number;
-  total_inbound_qty: number;
-  total_backordered_qty: number;
-};
 
 type ItemRow = {
   id: number;
@@ -72,18 +59,6 @@ type AnalyticsResponse = {
 type CompositionMetric = "value" | "quantity";
 type CompositionLimit = 10 | 25 | "all";
 
-type InventoryOverviewResponse = {
-  totals: {
-    total_on_hand_qty?: number | null;
-    total_reserved_qty?: number | null;
-    total_available_qty?: number | null;
-    total_inventory_value?: number | null;
-  };
-  items: OverviewItem[];
-  data_quality: {
-    missing_landed_cost_count: number;
-  };
-};
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
 type Detail = {
@@ -122,15 +97,11 @@ export default function InventoryPage() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("total_value:desc");
   const [usageDays, setUsageDays] = useState(90);
-  const [summary, setSummary] = useState<Summary | null>(null);
   const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
-  const [overview, setOverview] = useState<InventoryOverviewResponse | null>(null);
   const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
   const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(10);
-  const [compositionLoading, setCompositionLoading] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
-  const [overviewLoading, setOverviewLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -156,6 +127,8 @@ export default function InventoryPage() {
   const breakdownFilter = searchParams.get("breakdown") || "all";
   const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
   const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
+  const overview = useInventoryOverview(compositionLimit);
+
   const mismatchLogged = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
@@ -220,32 +193,12 @@ export default function InventoryPage() {
   };
 
   const loadOverview = async () => {
-    setOverviewLoading(true);
     setError("");
     try {
-      const [summaryRes, analyticsRes] = await Promise.all([
-        apiFetch<Summary>(`/inventory/summary?usage_days=${usageDays}`),
-        apiFetch<AnalyticsResponse>("/inventory/analytics"),
-      ]);
-      setSummary(summaryRes);
+      const analyticsRes = await apiFetch<AnalyticsResponse>("/inventory/analytics");
       setAnalytics(analyticsRes);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setOverviewLoading(false);
-    }
-  };
-
-  const loadComposition = async (limit: CompositionLimit) => {
-    setCompositionLoading(true);
-    try {
-      const queryLimit = limit === "all" ? 0 : limit;
-      const compositionRes = await apiFetch<InventoryOverviewResponse>(`/inventory/analytics/overview?limit=${queryLimit}`);
-      setOverview(compositionRes);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setCompositionLoading(false);
     }
   };
 
@@ -266,25 +219,28 @@ export default function InventoryPage() {
     void loadOverview();
   }, [usageDays]);
 
-  useEffect(() => {
-    void loadComposition(compositionLimit);
-  }, [compositionLimit]);
 
   useEffect(() => {
     void loadTable();
   }, [queue, sort, usageDays]);
 
+  useEffect(() => {
+    if (overview.error) setError(overview.error);
+  }, [overview.error]);
+
+  const queueCounts = useMemo(() => Object.fromEntries(overview.queues.map((entry) => [entry.key, entry.count])), [overview.queues]);
+
   const kpis = useMemo(() => {
-    if (!summary) return [];
+    if (!overview.totals) return [];
     return [
-      { label: "Inventory Value", value: formatCurrency(summary.inventory_value), queue: "all" },
-      { label: "Low Stock Items", value: formatNumber(summary.low_stock_items), queue: "low_stock" },
-      { label: "Stockouts", value: formatNumber(summary.stockouts), queue: "stockouts" },
-      { label: "At Risk", value: formatNumber(summary.at_risk_items), queue: "at_risk" },
-      { label: "Excess / Dead Stock", value: formatNumber(summary.excess_dead_stock), queue: "excess" },
-      { label: "Backordered / Reserved Pressure", value: formatNumber(summary.reserved_pressure_items), queue: "reserved_pressure" },
+      { label: "Inventory Value", value: formatCurrency(Number(overview.totals.total_inventory_value ?? 0)), queue: "all" },
+      { label: "Low Stock Items", value: formatNumber(Number(queueCounts.low_stock ?? 0)), queue: "low_stock" },
+      { label: "Stockouts", value: formatNumber(Number(queueCounts.stockouts ?? 0)), queue: "stockouts" },
+      { label: "At Risk", value: formatNumber(Number(queueCounts.at_risk ?? 0)), queue: "at_risk" },
+      { label: "Excess / Dead Stock", value: formatNumber(Number(queueCounts.excess ?? 0)), queue: "excess" },
+      { label: "Backordered / Reserved Pressure", value: formatNumber(Number(queueCounts.reserved_pressure ?? 0)), queue: "reserved_pressure" },
     ];
-  }, [summary]);
+  }, [overview.totals, queueCounts]);
 
   const topConsumptionData = useMemo(
     () => [...(analytics?.top_consumption ?? [])].sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 10),
@@ -408,7 +364,7 @@ export default function InventoryPage() {
   };
 
   const handleCompositionViewAll = () => {
-    if (!(overview?.items?.length ?? 0)) {
+    if (!overview.items.length) {
       navigate("/purchasing/purchase-orders");
       return;
     }
@@ -418,7 +374,7 @@ export default function InventoryPage() {
     gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  if (overviewLoading && !summary) {
+  if (overview.loading && !overview.totals) {
     return (
       <section className="space-y-6">
         <div className="h-20 animate-pulse rounded-2xl bg-secondary" />
@@ -471,12 +427,12 @@ export default function InventoryPage() {
       </div>
 
       <InventoryOverviewCard
-        totals={overview?.totals ?? null}
-        items={overview?.items ?? []}
+        totals={overview.totals}
+        items={overview.items}
         metric={compositionMetric}
         limit={compositionLimit}
-        loading={compositionLoading}
-        missingLandedCostCount={Number(overview?.data_quality?.missing_landed_cost_count ?? 0)}
+        loading={overview.loading}
+        missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
         onMetricChange={setCompositionMetric}
         onLimitChange={setCompositionLimit}
         onViewAll={handleCompositionViewAll}
@@ -506,7 +462,7 @@ export default function InventoryPage() {
         <aside className="app-card p-3">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted">Work Queues</p>
           <div className="space-y-1">
-            {(itemsData?.queue_counts ?? []).map((entry) => (
+            {(overview.queues ?? []).map((entry) => (
               <button key={entry.key} onClick={() => setQueue(entry.key)} className={`w-full rounded-xl px-3 py-2 text-left text-sm ${queue === entry.key ? "bg-primary/10 text-primary" : "hover:bg-secondary"}`}>
                 <div className="flex items-center justify-between"><span>{entry.label}</span><span className="text-xs tabular-nums text-muted">{entry.count}</span></div>
               </button>

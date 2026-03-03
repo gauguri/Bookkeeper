@@ -440,29 +440,21 @@ def get_inventory_overview(
     db: Session = Depends(get_db),
 ):
     rows = _build_inventory_rows(db, usage_days=90)
-    item_ids = [row.id for row in rows]
-    inventory_records = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all() if item_ids else []
-    inventory_by_item_id = {record.item_id: record for record in inventory_records}
-
     items: list[schemas.InventoryOverviewItem] = []
-    total_value = Decimal("0")
     missing_landed_cost_count = 0
 
     for row in rows:
         on_hand_qty = _q2(row.on_hand)
         reserved_qty = _q2(row.reserved)
-        available_qty = _q2(max(Decimal("0"), on_hand_qty - reserved_qty))
-        inventory = inventory_by_item_id.get(row.id)
-        landed_cost: Decimal | None = None
-        if inventory and inventory.landed_unit_cost is not None:
-            landed_cost = _q2(inventory.landed_unit_cost)
-        elif row.on_hand > 0:
+        available_qty = _q2(max(Decimal("0"), row.available))
+        total_value = _q2(row.total_value)
+        landed_cost: Decimal | None = _q2(total_value / on_hand_qty) if on_hand_qty > 0 else None
+        if on_hand_qty > 0 and (landed_cost is None or landed_cost <= 0):
             missing_landed_cost_count += 1
 
-        available_value = _q2(available_qty * landed_cost) if landed_cost is not None else Decimal("0")
+        available_value = _q2(max(Decimal("0"), total_value - (reserved_qty * landed_cost))) if landed_cost is not None else Decimal("0")
         reserved_value = _q2(reserved_qty * landed_cost) if landed_cost is not None else Decimal("0")
         item_total_value = _q2(available_value + reserved_value)
-        total_value += item_total_value
 
         items.append(
             schemas.InventoryOverviewItem(
@@ -486,13 +478,24 @@ def get_inventory_overview(
     totals = schemas.InventoryOverviewTotals(
         total_on_hand_qty=_q2(sum((row.on_hand for row in rows), Decimal("0"))),
         total_reserved_qty=_q2(sum((row.reserved for row in rows), Decimal("0"))),
-        total_available_qty=_q2(sum((max(Decimal("0"), row.on_hand - row.reserved) for row in rows), Decimal("0"))),
-        total_inventory_value=_q2(total_value),
+        total_available_qty=_q2(sum((max(Decimal("0"), row.available) for row in rows), Decimal("0"))),
+        total_inventory_value=_q2(sum((row.total_value for row in rows), Decimal("0"))),
     )
+
+    queues = [
+        schemas.InventoryQueueCount(key="needs_attention", label="Needs Attention", count=len(_queue_filter("needs_attention", rows))),
+        schemas.InventoryQueueCount(key="stockouts", label="Stockouts", count=len(_queue_filter("stockouts", rows))),
+        schemas.InventoryQueueCount(key="low_stock", label="Low Stock", count=len(_queue_filter("low_stock", rows))),
+        schemas.InventoryQueueCount(key="at_risk", label="At Risk (JIT)", count=len(_queue_filter("at_risk", rows))),
+        schemas.InventoryQueueCount(key="excess", label="Excess / Dead Stock", count=len(_queue_filter("excess", rows))),
+        schemas.InventoryQueueCount(key="reserved_pressure", label="Reserved Pressure", count=len(_queue_filter("reserved_pressure", rows))),
+        schemas.InventoryQueueCount(key="all", label="All Items", count=len(rows)),
+    ]
 
     return schemas.InventoryOverviewResponse(
         totals=totals,
         items=items,
+        queues=queues,
         data_quality=schemas.InventoryOverviewDataQuality(missing_landed_cost_count=missing_landed_cost_count),
     )
 

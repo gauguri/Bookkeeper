@@ -57,7 +57,8 @@ type AnalyticsResponse = {
 };
 
 type CompositionMetric = "value" | "quantity";
-type CompositionLimit = 10 | 25 | "all";
+type CompositionLimit = 5 | 10 | 25 | "all";
+type OverviewDensity = "compact" | "comfortable";
 
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
@@ -100,7 +101,9 @@ export default function InventoryPage() {
   const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
-  const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(10);
+  const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(5);
+  const [overviewDensity, setOverviewDensity] = useState<OverviewDensity>("compact");
+  const [overviewShowZeroQty, setOverviewShowZeroQty] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
@@ -431,10 +434,14 @@ export default function InventoryPage() {
         items={overview.items}
         metric={compositionMetric}
         limit={compositionLimit}
+        density={overviewDensity}
+        showZeroQty={overviewShowZeroQty}
         loading={overview.loading}
         missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
         onMetricChange={setCompositionMetric}
         onLimitChange={setCompositionLimit}
+        onDensityChange={setOverviewDensity}
+        onShowZeroQtyChange={setOverviewShowZeroQty}
         onViewAll={handleCompositionViewAll}
         onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
         onSegmentClick={handleCompositionClick}

@@ -202,6 +202,7 @@ class InventoryOverviewDataQuality(BaseModel):
 class InventoryOverviewResponse(BaseModel):
     totals: InventoryOverviewTotals
     items: list[InventoryOverviewItem]
+    queues: list[InventoryQueueCount] = Field(default_factory=list)
     data_quality: InventoryOverviewDataQuality
 
 

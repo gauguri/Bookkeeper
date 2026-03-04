@@ -1,6 +1,6 @@
 import { COLOR } from "../../utils/colorScales";
 import { formatKpiValue } from "../../utils/formatters";
-import { toGaugeAngle } from "./gaugeMath";
+import { calculateNeedleAngle } from "./gaugeMath";
 
 type Props = {
   value: number;
@@ -27,9 +27,9 @@ export default function GaugeChart({
   unit = "",
   zones = DEFAULT_ZONES,
 }: Props) {
-  const gaugeStartAngle = -180;
-  const gaugeEndAngle = 0;
-  const angle = toGaugeAngle(value, min, max, gaugeStartAngle, gaugeEndAngle);
+  const gaugeStartAngle = -90;
+  const gaugeEndAngle = 90;
+  const angle = calculateNeedleAngle(value, min, max, gaugeStartAngle, gaugeEndAngle);
 
   const cx = 100;
   const cy = 90;
@@ -38,7 +38,7 @@ export default function GaugeChart({
   const needleTip = polarToCartesian(cx, cy, innerR - 5, angle);
 
   function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-    const rad = (angleDeg * Math.PI) / 180;
+    const rad = ((angleDeg - 90) * Math.PI) / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
   }
 
@@ -63,8 +63,8 @@ export default function GaugeChart({
 
         {/* Colored zone arcs */}
         {zones.map((zone, i) => {
-          const zStart = toGaugeAngle(zone.min, min, max, gaugeStartAngle, gaugeEndAngle);
-          const zEnd = toGaugeAngle(zone.max, min, max, gaugeStartAngle, gaugeEndAngle);
+          const zStart = calculateNeedleAngle(zone.min, min, max, gaugeStartAngle, gaugeEndAngle);
+          const zEnd = calculateNeedleAngle(zone.max, min, max, gaugeStartAngle, gaugeEndAngle);
           return (
             <path
               key={i}
@@ -94,7 +94,7 @@ export default function GaugeChart({
 
         {/* Target line */}
         {target != null && (() => {
-          const tAngle = toGaugeAngle(target, min, max, gaugeStartAngle, gaugeEndAngle);
+          const tAngle = calculateNeedleAngle(target, min, max, gaugeStartAngle, gaugeEndAngle);
           const inner = polarToCartesian(cx, cy, innerR - 2, tAngle);
           const outer = polarToCartesian(cx, cy, outerR + 2, tAngle);
           return (

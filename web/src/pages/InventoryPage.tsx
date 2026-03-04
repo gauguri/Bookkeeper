@@ -429,34 +429,38 @@ export default function InventoryPage() {
         ))}
       </div>
 
-      <InventoryOverviewCard
-        totals={overview.totals}
-        items={overview.items}
-        metric={compositionMetric}
-        limit={compositionLimit}
-        density={overviewDensity}
-        showZeroQty={overviewShowZeroQty}
-        loading={overview.loading}
-        missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
-        onMetricChange={setCompositionMetric}
-        onLimitChange={setCompositionLimit}
-        onDensityChange={setOverviewDensity}
-        onShowZeroQtyChange={setOverviewShowZeroQty}
-        onViewAll={handleCompositionViewAll}
-        onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
-        onSegmentClick={handleCompositionClick}
-        onSetLandedCosts={() => navigate("/items")}
-        onReceiveInventory={() => navigate("/purchasing/purchase-orders")}
-      />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
+        <InventoryOverviewCard
+          className="h-full"
+          totals={overview.totals}
+          items={overview.items}
+          metric={compositionMetric}
+          limit={compositionLimit}
+          density={overviewDensity}
+          showZeroQty={overviewShowZeroQty}
+          loading={overview.loading}
+          missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
+          onMetricChange={setCompositionMetric}
+          onLimitChange={setCompositionLimit}
+          onDensityChange={setOverviewDensity}
+          onShowZeroQtyChange={setOverviewShowZeroQty}
+          onViewAll={handleCompositionViewAll}
+          onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
+          onSegmentClick={handleCompositionClick}
+          onSetLandedCosts={() => navigate("/items")}
+          onReceiveInventory={() => navigate("/purchasing/purchase-orders")}
+        />
 
-      <InventoryValueCompositionCard
-        items={normalizedItems}
-        activeItemId={Number.isFinite(abcItemFilter) && abcItemFilter > 0 ? abcItemFilter : null}
-        activeClass={["A", "B", "C"].includes(abcClassFilter) ? (abcClassFilter as "A" | "B" | "C") : null}
-        onItemSelect={setAbcItemFilter}
-        onClassSelect={setAbcClassFilter}
-        onClearFilters={clearAbcFilters}
-      />
+        <InventoryValueCompositionCard
+          className="h-full"
+          items={normalizedItems}
+          activeItemId={Number.isFinite(abcItemFilter) && abcItemFilter > 0 ? abcItemFilter : null}
+          activeClass={["A", "B", "C"].includes(abcClassFilter) ? (abcClassFilter as "A" | "B" | "C") : null}
+          onItemSelect={setAbcItemFilter}
+          onClassSelect={setAbcClassFilter}
+          onClearFilters={clearAbcFilters}
+        />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="app-card p-4"><p className="mb-2 font-semibold">Inventory Value Trend (12 Months)</p><div className="h-56"><ResponsiveContainer width="100%" height="100%"><LineChart data={analytics?.value_trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => formatCurrency(v)} /><Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div></div>

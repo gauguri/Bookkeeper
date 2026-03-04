@@ -24,6 +24,7 @@ export type InventoryCompositionItem = {
 };
 
 type Props = {
+  className?: string;
   items: InventoryCompositionItem[];
   topN?: number;
   activeItemId?: number | null;
@@ -63,6 +64,7 @@ function CompositionTooltip({ active, payload }: { active?: boolean; payload?: A
 }
 
 export default function InventoryValueCompositionCard({
+  className,
   items,
   topN = 10,
   activeItemId,
@@ -99,7 +101,7 @@ export default function InventoryValueCompositionCard({
 
   if (totalValue <= 0) {
     return (
-      <div className="app-card p-4">
+      <div className={`app-card flex h-full flex-col p-4 ${className ?? ""}`}>
         <p className="font-semibold">Inventory Value Composition (ABC)</p>
         <p className="text-xs text-muted">See where inventory value is concentrated. Click bars or classes to filter.</p>
         <div className="mt-3 rounded-xl border border-dashed border-border p-6">
@@ -114,7 +116,7 @@ export default function InventoryValueCompositionCard({
   }
 
   return (
-    <div className="app-card p-4">
+    <div className={`app-card flex h-full flex-col p-4 ${className ?? ""}`}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold">Inventory Value Composition (ABC)</p>

@@ -27,6 +27,7 @@ export type OverviewItem = {
 };
 
 type Props = {
+  className?: string;
   totals: Totals | null;
   items: OverviewItem[];
   metric: Metric;
@@ -52,6 +53,7 @@ const AVAILABLE_COLOR = "#16a34a";
 const safeNumber = (value: number | null | undefined) => (Number.isFinite(value) ? Number(value) : 0);
 
 export default function InventoryOverviewCard({
+  className,
   totals,
   items,
   metric,
@@ -97,7 +99,7 @@ export default function InventoryOverviewCard({
   ];
 
   return (
-    <div className="app-card p-3">
+    <div className={`app-card flex h-full flex-col p-3 ${className ?? ""}`}>
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="font-semibold">Inventory Overview</p>

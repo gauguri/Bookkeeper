@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   CircleCheck,
@@ -12,6 +12,7 @@ import {
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 import CustomerInsightsPanel from "../components/CustomerInsightsPanel";
+import { canRecordPayment, shouldAutoOpenRecordPayment } from "./invoicePaymentNavigation";
 
 type InvoiceLine = {
   id: number;
@@ -149,14 +150,20 @@ const ConfirmDialog = ({
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [actionError, setActionError] = useState("");
+  const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [shipping, setShipping] = useState(false);
+  const [recordingPayment, setRecordingPayment] = useState(false);
   const [confirmVoid, setConfirmVoid] = useState(false);
+  const [showRecordPayment, setShowRecordPayment] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ amount: "", payment_date: new Date().toISOString().slice(0, 10), method: "", notes: "" });
 
   const invoiceKey = useMemo(() => {
     const value = invoiceId?.trim() ?? "";
@@ -233,6 +240,42 @@ export default function InvoiceDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceKey.value, invoiceKey.isNumericId]);
 
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setToast(""), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!invoice) {
+      return;
+    }
+    const shouldOpen = shouldAutoOpenRecordPayment(
+      searchParams.get("action"),
+      (location.state as { openRecordPayment?: boolean } | null) ?? null
+    );
+    if (!shouldOpen) {
+      return;
+    }
+    if (!canRecordPayment(invoice)) {
+      return;
+    }
+    setPaymentForm((prev) => ({
+      ...prev,
+      amount: Number(invoice.amount_due || 0).toFixed(2),
+      payment_date: new Date().toISOString().slice(0, 10)
+    }));
+    setShowRecordPayment(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("action");
+    setSearchParams(next, { replace: true });
+    if (location.state) {
+      navigate(location.pathname + (next.toString() ? `?${next.toString()}` : ""), { replace: true, state: null });
+    }
+  }, [invoice, searchParams, location.state, location.pathname, navigate, setSearchParams]);
+
   const markSent = async () => {
     if (!invoice) {
       return;
@@ -280,6 +323,40 @@ export default function InvoiceDetailPage() {
       setActionError((err as Error).message);
     } finally {
       setVoiding(false);
+    }
+  };
+
+  const submitPayment = async () => {
+    if (!invoice?.id) {
+      console.error("Unable to record payment: invoice id missing", invoice);
+      setActionError("Unable to record payment because invoice id is missing.");
+      return;
+    }
+    if (!paymentForm.amount || !paymentForm.payment_date) {
+      setActionError("Amount and payment date are required.");
+      return;
+    }
+    try {
+      setRecordingPayment(true);
+      setActionError("");
+      await apiFetch("/payments", {
+        method: "POST",
+        body: JSON.stringify({
+          invoice_id: invoice.id,
+          amount: Number(paymentForm.amount),
+          payment_date: paymentForm.payment_date,
+          method: paymentForm.method || null,
+          notes: paymentForm.notes || null
+        })
+      });
+      setShowRecordPayment(false);
+      setPaymentForm({ amount: "", payment_date: new Date().toISOString().slice(0, 10), method: "", notes: "" });
+      setToast("Payment recorded");
+      await loadInvoice();
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setRecordingPayment(false);
     }
   };
 
@@ -357,6 +434,7 @@ export default function InvoiceDetailPage() {
   const canMarkSent = invoice.status === "DRAFT";
   const canMarkShipped = ["SENT", "PARTIALLY_PAID"].includes(invoice.status);
   const canVoid = !["PAID", "VOID", "PARTIALLY_PAID", "SHIPPED"].includes(invoice.status);
+  const canOpenRecordPayment = canRecordPayment(invoice);
   const headerTitle = `Invoice ${invoice.invoice_number}`;
   const customerLabel = invoice.customer.email
     ? `${invoice.customer.name} · ${invoice.customer.email}`
@@ -409,16 +487,37 @@ export default function InvoiceDetailPage() {
                 <XCircle className="h-4 w-4" /> {voiding ? "Voiding..." : "Void"}
               </button>
             )}
-            <button
-              className="app-button"
-              onClick={() => navigate(`/payments?invoiceId=${invoice.id}`)}
-            >
-              Record payment
-            </button>
+            {canOpenRecordPayment ? (
+              <button
+                className="app-button"
+                onClick={() => {
+                  if (!invoice.id) {
+                    console.error("Unable to open record payment because invoice id is missing", invoice);
+                    setActionError("Unable to record payment because invoice id is missing.");
+                    return;
+                  }
+                  setPaymentForm({
+                    amount: Number(invoice.amount_due || 0).toFixed(2),
+                    payment_date: new Date().toISOString().slice(0, 10),
+                    method: "",
+                    notes: ""
+                  });
+                  setShowRecordPayment(true);
+                }}
+              >
+                Record payment
+              </button>
+            ) : (
+              <button className="app-button" disabled title="Payment can only be recorded for open invoices with a remaining balance.">
+                Record payment
+              </button>
+            )}
           </div>
           <p className="text-xs text-muted">Apply payments from the Payments page to update this invoice.</p>
         </div>
       </div>
+
+      {toast ? <div className="fixed right-4 top-4 z-[70] rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow">{toast}</div> : null}
 
       {actionError && (
         <div className="app-card border-danger/40 bg-danger/5 p-4 text-sm text-danger">
@@ -616,6 +715,27 @@ export default function InvoiceDetailPage() {
         onCancel={() => setConfirmVoid(false)}
         loading={voiding}
       />
+
+      {showRecordPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="app-card w-full max-w-2xl p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">+ Record Payment</h2>
+              <button type="button" className="app-button-ghost" onClick={() => setShowRecordPayment(false)}>Close</button>
+            </div>
+            <p className="mt-2 text-sm text-muted">{invoice.invoice_number} · {invoice.customer.name} · Remaining {currency(invoice.amount_due)}</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <input className="app-input" placeholder="Invoice ID" value={String(invoice.id)} disabled />
+              <input className="app-input" placeholder="Invoice #" value={invoice.invoice_number} disabled />
+              <input className="app-input" placeholder="Amount" value={paymentForm.amount} onChange={(event) => setPaymentForm((prev) => ({ ...prev, amount: event.target.value }))} />
+              <input className="app-input" type="date" value={paymentForm.payment_date} onChange={(event) => setPaymentForm((prev) => ({ ...prev, payment_date: event.target.value }))} />
+              <input className="app-input" placeholder="Method" value={paymentForm.method} onChange={(event) => setPaymentForm((prev) => ({ ...prev, method: event.target.value }))} />
+              <input className="app-input md:col-span-2" placeholder="Notes" value={paymentForm.notes} onChange={(event) => setPaymentForm((prev) => ({ ...prev, notes: event.target.value }))} />
+            </div>
+            <div className="mt-4 flex justify-end"><button type="button" className="app-button" onClick={submitPayment} disabled={recordingPayment}>{recordingPayment ? "Recording..." : "Record payment"}</button></div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

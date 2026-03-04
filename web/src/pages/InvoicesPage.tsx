@@ -16,6 +16,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { apiFetch } from "../api";
 import { currency } from "../utils/format";
 import { sumBySafe, toNumberSafe } from "../utils/numberSafe";
+import { buildInvoiceRecordPaymentPath, canRecordPayment } from "./invoicePaymentNavigation";
 
 type Customer = { id: number; name: string; terms?: string | null };
 type Item = {
@@ -663,7 +664,11 @@ export default function InvoicesPage() {
                         <button className="app-button-ghost" onClick={() => openDetail(invoice.id)}>View</button>
                         <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>Edit</Link>
                         <button className="app-button-ghost" onClick={() => setInfoBanner("Duplicate action will be wired in next iteration.")}>Duplicate</button>
-                        <Link className="app-button-ghost" to={`/payments?invoiceId=${invoice.id}`}>Record Payment</Link>
+                        {canRecordPayment(invoice) ? (
+                          <Link className="app-button-ghost" to={buildInvoiceRecordPaymentPath(invoice) ?? "/invoices"}>Record Payment</Link>
+                        ) : (
+                          <button className="app-button-ghost" disabled title="Payment can only be recorded for open invoices with a remaining balance.">Record Payment</button>
+                        )}
                         <button className="app-button-ghost" onClick={() => runBulk("void")}><MoreHorizontal className="h-4 w-4" /></button>
                       </div>
                     </td>
@@ -727,7 +732,11 @@ export default function InvoicesPage() {
                 <div className="mt-5 flex flex-wrap gap-2">
                   <Link className="app-button-ghost" to={`/invoices/${detail.id}`}><ExternalLink className="h-4 w-4" /> View full</Link>
                   <Link className="app-button-ghost" to={`/invoices/${detail.id}`}>Edit</Link>
-                  <Link className="app-button-ghost" to={`/payments?invoiceId=${detail.id}`}>Record payment</Link>
+                  {canRecordPayment(detail) ? (
+                    <Link className="app-button-ghost" to={buildInvoiceRecordPaymentPath(detail) ?? "/invoices"}>Record payment</Link>
+                  ) : (
+                    <button className="app-button-ghost" disabled title="Payment can only be recorded for open invoices with a remaining balance.">Record payment</button>
+                  )}
                   <button className="app-button-ghost" onClick={() => runBulk("send")}>Send</button>
                   <button className="app-button-ghost" onClick={() => runBulk("void")}>Void</button>
                 </div>

@@ -1,4 +1,5 @@
 import { APP_NAME } from "../../branding";
+import bedrockLogo from "../../../assets/branding/bedrock-logo.svg";
 
 export function BrandPanel() {
   return (
@@ -22,7 +23,8 @@ export function BrandPanel() {
       </svg>
 
       <div className="relative z-10 max-w-lg space-y-5 p-12">
-        <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-900/75">{APP_NAME} Guided Access</p>
+        <img src={bedrockLogo} alt={`${APP_NAME} ERP`} width={202} height={48} className="h-12 w-auto" />
+        <p className="text-xs font-semibold uppercase tracking-[0.36em] text-sky-900/75">Guided Access</p>
         <h2 className="text-5xl font-semibold leading-tight text-slate-900">Built on Strength. Engineered for Scale.</h2>
         <p className="text-lg leading-relaxed text-slate-700">
           Bring finance, operations, and commercial workflows into one infrastructure-grade control plane.

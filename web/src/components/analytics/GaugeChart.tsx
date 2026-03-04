@@ -1,5 +1,6 @@
 import { COLOR } from "../../utils/colorScales";
 import { formatKpiValue } from "../../utils/formatters";
+import { toGaugeAngle } from "./gaugeMath";
 
 type Props = {
   value: number;
@@ -26,14 +27,15 @@ export default function GaugeChart({
   unit = "",
   zones = DEFAULT_ZONES,
 }: Props) {
-  const range = max - min;
-  const normalizedValue = Math.max(0, Math.min(1, (value - min) / (range || 1)));
-  const angle = -90 + normalizedValue * 180;
+  const gaugeStartAngle = -180;
+  const gaugeEndAngle = 0;
+  const angle = toGaugeAngle(value, min, max, gaugeStartAngle, gaugeEndAngle);
 
   const cx = 100;
   const cy = 90;
   const outerR = 75;
   const innerR = 55;
+  const needleTip = polarToCartesian(cx, cy, innerR - 5, angle);
 
   function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
     const rad = (angleDeg * Math.PI) / 180;
@@ -52,7 +54,7 @@ export default function GaugeChart({
       <svg viewBox="0 0 200 110" className="w-full max-w-[200px]">
         {/* Background arc */}
         <path
-          d={describeArc(cx, cy, outerR, -180, 0)}
+          d={describeArc(cx, cy, outerR, gaugeStartAngle, gaugeEndAngle)}
           fill="none"
           stroke="#e5e7eb"
           strokeWidth={outerR - innerR}
@@ -61,8 +63,8 @@ export default function GaugeChart({
 
         {/* Colored zone arcs */}
         {zones.map((zone, i) => {
-          const zStart = ((zone.min - min) / range) * 180 - 180;
-          const zEnd = ((zone.max - min) / range) * 180 - 180;
+          const zStart = toGaugeAngle(zone.min, min, max, gaugeStartAngle, gaugeEndAngle);
+          const zEnd = toGaugeAngle(zone.max, min, max, gaugeStartAngle, gaugeEndAngle);
           return (
             <path
               key={i}
@@ -77,25 +79,22 @@ export default function GaugeChart({
         })}
 
         {/* Needle */}
-        <g transform={`rotate(${angle}, ${cx}, ${cy})`}>
-          <line
-            x1={cx}
-            y1={cy}
-            x2={cx + innerR - 5}
-            y2={cy}
-            stroke="#1e3a5f"
-            strokeWidth={2.5}
-            strokeLinecap="round"
-          />
-        </g>
+        <line
+          x1={cx}
+          y1={cy}
+          x2={needleTip.x}
+          y2={needleTip.y}
+          stroke="#1e3a5f"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+        />
 
         {/* Center dot */}
         <circle cx={cx} cy={cy} r={5} fill="#1e3a5f" />
 
         {/* Target line */}
         {target != null && (() => {
-          const tNorm = Math.max(0, Math.min(1, (target - min) / range));
-          const tAngle = -180 + tNorm * 180;
+          const tAngle = toGaugeAngle(target, min, max, gaugeStartAngle, gaugeEndAngle);
           const inner = polarToCartesian(cx, cy, innerR - 2, tAngle);
           const outer = polarToCartesian(cx, cy, outerR + 2, tAngle);
           return (

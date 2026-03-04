@@ -1,30 +1,28 @@
-export const clamp = (value: number, min: number, max: number): number => {
+export const clampGaugeValue = (value: number, min: number, max: number): number => {
   if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) {
     return min;
   }
 
-  const safeMin = Math.min(min, max);
-  const safeMax = Math.max(min, max);
-  return Math.min(safeMax, Math.max(safeMin, value));
+  return Math.min(Math.max(value, min), max);
 };
 
-export const normalizeGaugeValue = (value: number, min: number, max: number): number => {
-  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-    return 0;
-  }
-
-  const clamped = clamp(value, min, max);
-  return (clamped - min) / (max - min);
-};
-
-export const toGaugeAngle = (
+export const calculateNeedleAngle = (
   value: number,
   min: number,
   max: number,
   startAngle: number,
   endAngle: number,
 ): number => {
-  const normalized = normalizeGaugeValue(value, min, max);
+  if (!Number.isFinite(startAngle) || !Number.isFinite(endAngle) || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return startAngle;
+  }
+
+  if (max === min) {
+    return startAngle;
+  }
+
+  const clamped = clampGaugeValue(value, min, max);
+  const normalized = (clamped - min) / (max - min);
+
   return startAngle + normalized * (endAngle - startAngle);
 };
-

@@ -308,6 +308,7 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
         cash = _resolve_account(db, company_id, codes=["1000", "10100"], names=["cash"])
         ar = _resolve_account(db, company_id, codes=["1100", "11100"], names=["accounts receivable", "a/r"])
         revenue = _resolve_account(db, company_id, codes=["4000", "4100"], names=["revenue", "sales"])
+        tax_payable = _resolve_account(db, company_id, codes=["2200", "2100"], names=["sales tax payable", "tax payable"])
         inventory = _resolve_account(db, company_id, codes=["1200", "13100"], names=["inventory"])
         cogs = _resolve_account(db, company_id, codes=["5000", "5100"], names=["cost of goods sold", "cogs"])
         unearned = _resolve_account(db, company_id, codes=["2300", "2200"], names=["unearned", "customer deposit"])
@@ -316,7 +317,21 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
         lines: list[dict[str, Any]] = []
         invoice_id = context.get("invoice_id")
 
-        if event_type in {"INVOICE_POSTED", "SHIPMENT_POSTED", "SHIPMENT", "SHIPMENT_FOR_PREPAID_ORDER"}:
+        if event_type == "INVOICE_POSTED":
+            invoice: Invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+            if not invoice:
+                raise GLPostingError("Invoice not found for invoice posting.")
+            subtotal = _money(invoice.subtotal)
+            tax_total = _money(invoice.tax_total)
+            total = _money(invoice.total)
+            if total <= ZERO:
+                raise GLPostingError("Invoice posting amount must be > 0.")
+            lines.append({"account_id": ar.id, "debit_amount": total, "credit_amount": ZERO})
+            if subtotal > ZERO:
+                lines.append({"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": subtotal})
+            if tax_total > ZERO:
+                lines.append({"account_id": tax_payable.id, "debit_amount": ZERO, "credit_amount": tax_total})
+        elif event_type in {"SHIPMENT_POSTED", "SHIPMENT", "SHIPMENT_FOR_PREPAID_ORDER", "SHIPMENT_COGS"}:
             invoice: Invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
             if not invoice:
                 raise GLPostingError("Invoice not found for shipment posting.")
@@ -325,20 +340,12 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
                 raise GLPostingError("Invalid shipped ratio.")
 
             revenue_amount, cogs_amount = _shipment_lines(db, invoice, shipped_ratio)
-            if revenue_amount <= ZERO:
-                raise GLPostingError("Shipment posting amount must be > 0.")
-
-            if event_type == "INVOICE_POSTED":
-                lines.extend([
-                    {"account_id": ar.id, "debit_amount": revenue_amount, "credit_amount": ZERO},
-                    {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": revenue_amount},
-                ])
-            elif event_type == "SHIPMENT_FOR_PREPAID_ORDER":
+            if event_type == "SHIPMENT_FOR_PREPAID_ORDER":
                 lines.extend([
                     {"account_id": unearned.id, "debit_amount": revenue_amount, "credit_amount": ZERO},
                     {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": revenue_amount},
                 ])
-            else:
+            elif event_type in {"SHIPMENT", "SHIPMENT_POSTED"} and not bool(context.get("skip_revenue")):
                 unearned_available = _posted_unearned_balance(db, invoice.id, unearned.id)
                 unearned_to_recognize = min(unearned_available, revenue_amount)
                 ar_to_recognize = _money(revenue_amount - unearned_to_recognize)
@@ -363,7 +370,7 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
             if amount <= ZERO:
                 raise GLPostingError("Payment must be greater than zero.")
             invoice_status = (context.get("invoice_status") or "").upper()
-            if invoice_status and invoice_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
+            if invoice_status and invoice_status not in {"SENT", "POSTED", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
                 raise GLPostingError("Payments can only be posted after the invoice has recognized AR.")
             ar_outstanding = _posted_ar_balance(db, int(invoice_id), ar.id)
             if ar_outstanding < amount:
@@ -401,9 +408,11 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
 
         _validate_revenue_cash_direction(eventType, lines, cash.id, revenue.id)
         batch_entries = [{**line, "created_at": datetime.utcnow()} for line in lines]
+        LOGGER.info("gl_posting_prepared", extra={"event_type": event_type, "event_id": event_id, "invoice_id": invoice_id, "company_id": company_id, "lines": [{"account_id": int(line["account_id"]), "debit": str(_money(line["debit_amount"])), "credit": str(_money(line["credit_amount"]))} for line in lines]})
         _assert_balanced(batch_entries)
         batch_id = postJournalEntry(db, event_type=event_type, context=context, entries=batch_entries)
 
+        LOGGER.info("gl_posting_completed", extra={"event_type": event_type, "event_id": event_id, "invoice_id": invoice_id, "journal_batch_id": batch_id, "posted_at": datetime.utcnow().isoformat()})
         db.merge(GLPostingAudit(event_type=event_type, event_id=event_id, journal_batch_id=batch_id, payload=str(context)))
         db.flush()
         return batch_id

@@ -9,7 +9,8 @@ import { formatCurrency, formatPercent } from "../../utils/formatters";
 export default function ProfitLoss() {
   const [period, setPeriod] = useState("ytd");
   const { data, isLoading, error } = usePnl(period);
-  const revenueMismatch = data ? !data.reconciliation.within_threshold : false;
+  const revenueMismatch = data ? data.reconciliation.show_banner : false;
+  const [showWhy, setShowWhy] = useState(false);
 
   if (isLoading) {
     return (
@@ -39,10 +40,26 @@ export default function ProfitLoss() {
       <div className="app-card p-4 text-xs text-muted">
         <p>Revenue data source: <span className="font-semibold">{data.revenue_data_source}</span></p>
         {revenueMismatch && (
-          <p className="mt-2 inline-flex items-center gap-1 text-amber-600">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Revenue mismatch: GL {formatCurrency(data.reconciliation.gl_revenue)} vs Invoices {formatCurrency(data.reconciliation.operational_revenue)}
-          </p>
+          <div className="mt-2 text-amber-600">
+            <p className="inline-flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Revenue mismatch: GL {formatCurrency(data.reconciliation.gl_revenue)} vs Invoices {formatCurrency(data.reconciliation.operational_revenue)}
+              <button className="underline" onClick={() => setShowWhy((v) => !v)}>Why?</button>
+            </p>
+            {showWhy && (
+              <ul className="ml-5 mt-1 list-disc">
+                {data.reconciliation.why.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {import.meta.env.DEV && (
+          <div className="mt-2 text-xs">
+            <p>Debug: invoices_finalized={data.debug.invoices_finalized}, invoices_posted_to_gl={data.debug.invoices_posted_to_gl}, gl_entries_count_for_revenue={data.debug.gl_entries_count_for_revenue}</p>
+            <p>GL date field: {data.debug.gl_date_field}</p>
+          </div>
         )}
       </div>
 

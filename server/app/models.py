@@ -615,6 +615,10 @@ class Invoice(Base):
     shipped_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    posted_to_gl = Column(Boolean, nullable=False, default=False)
+    posted_journal_entry_id = Column(Integer, nullable=True)
+    posted_at = Column(DateTime, nullable=True)
+    gl_posting_last_error = Column(Text, nullable=True)
 
     customer = relationship("Customer", back_populates="invoices")
     sales_request = relationship("SalesRequest", back_populates="invoice")

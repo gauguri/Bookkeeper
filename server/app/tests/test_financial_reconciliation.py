@@ -94,3 +94,44 @@ def test_revenue_reconciliation_flags_operational_gl_mismatch():
     assert reconciliation["operational_revenue"] == 300.0
     assert reconciliation["difference"] == -300.0
     assert reconciliation["within_threshold"] is False
+
+
+def test_pnl_reconciliation_banner_disappears_after_invoice_posting():
+    db = create_session()
+    invoice = seed_invoice(db, Decimal("300.00"), Decimal("0.00"))
+
+    pre = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
+    assert pre["reconciliation"]["show_banner"] is True
+
+    postJournalEntries("INVOICE_POSTED", {"event_id": "inv-recon-1", "company_id": 1, "invoice_id": invoice.id, "reference_id": invoice.id, "posting_date": date(2025, 1, 1)}, db)
+    post = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
+
+    assert post["revenue"] == 300.0
+    assert post["revenue_operational"] == 300.0
+    assert post["reconciliation"]["within_threshold"] is True
+    assert post["reconciliation"]["show_banner"] is False
+
+
+def test_draft_invoice_does_not_impact_gl_or_pnl_revenue():
+    db = create_session()
+    customer = Customer(name="Draft Co")
+    item = Item(name="Draft Widget", unit_price=Decimal("100.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    db.add_all([customer, item])
+    db.flush()
+    draft = Invoice(
+        customer_id=customer.id,
+        invoice_number="INV-DRAFT-1",
+        status="DRAFT",
+        issue_date=date(2025, 1, 10),
+        due_date=date(2025, 1, 30),
+        subtotal=Decimal("100.00"),
+        tax_total=Decimal("0.00"),
+        total=Decimal("100.00"),
+        amount_due=Decimal("100.00"),
+    )
+    db.add(draft)
+    db.commit()
+
+    pnl = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
+    assert pnl["revenue"] == 0.0
+    assert pnl["revenue_operational"] == 0.0

@@ -54,6 +54,15 @@ export type PnlData = {
     operational_revenue: number;
     difference: number;
     within_threshold: boolean;
+    show_banner: boolean;
+    tolerance: number;
+    why: string[];
+  };
+  debug: {
+    invoices_finalized: number;
+    invoices_posted_to_gl: number;
+    gl_entries_count_for_revenue: number;
+    gl_date_field: string;
   };
   cogs: number;
   gross_profit: number;

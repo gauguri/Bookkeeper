@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import logging
 from decimal import Decimal
 from typing import List, Optional
 
@@ -41,6 +42,7 @@ from app.sales.service import (
 )
 
 router = APIRouter(prefix="/api", tags=["sales"])
+LOGGER = logging.getLogger(__name__)
 
 
 def _date_range_bounds(range_key: str) -> tuple[date, date]:
@@ -392,6 +394,31 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     if invoice.status != "DRAFT":
         raise HTTPException(status_code=400, detail="Only draft invoices can be sent.")
     invoice.status = "SENT"
+
+    try:
+        LOGGER.info("invoice_gl_posting_started", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "status": invoice.status, "subtotal": str(invoice.subtotal), "tax_total": str(invoice.tax_total), "total": str(invoice.total), "currency": "USD"})
+        batch_id = postJournalEntries(
+            "INVOICE_POSTED",
+            {
+                "event_id": f"invoice-posted:{invoice.id}",
+                "company_id": 1,
+                "invoice_id": invoice.id,
+                "reference_id": invoice.id,
+                "posting_date": invoice.issue_date,
+            },
+            db,
+        )
+        invoice.posted_to_gl = True
+        invoice.posted_journal_entry_id = batch_id
+        invoice.posted_at = datetime.utcnow()
+        invoice.gl_posting_last_error = None
+        LOGGER.info("invoice_gl_posting_succeeded", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "journal_entry_id": batch_id, "posted_at": invoice.posted_at.isoformat()})
+    except Exception as exc:
+        invoice.posted_to_gl = False
+        invoice.gl_posting_last_error = str(exc)
+        LOGGER.exception("invoice_gl_posting_failed", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number})
+        raise HTTPException(status_code=400, detail=f"Failed to post invoice to GL: {exc}")
+
     db.commit()
     db.refresh(invoice)
     return invoice
@@ -451,7 +478,7 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     release_reservations(db, source_type=source_type, source_id=source_id)
 
     postJournalEntries(
-        "shipment",
+        "shipment_cogs",
         {
             "event_id": f"shipment:{invoice.id}",
             "company_id": 1,
@@ -473,6 +500,22 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+
+@router.get("/invoices/{invoice_id}/gl-status", response_model=schemas.InvoiceGLPostingStatus)
+def get_invoice_gl_status(invoice_id: int, db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.INVOICES.value))):
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    return schemas.InvoiceGLPostingStatus(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        posted_to_gl=bool(invoice.posted_to_gl),
+        posted_journal_entry_id=invoice.posted_journal_entry_id,
+        posted_at=invoice.posted_at,
+        last_error=invoice.gl_posting_last_error,
+    )
 
 
 @router.post("/invoices/{invoice_id}/void", response_model=schemas.InvoiceResponse)

@@ -9,6 +9,7 @@ import { formatCurrency, formatPercent } from "../../utils/formatters";
 export default function ProfitLoss() {
   const [period, setPeriod] = useState("ytd");
   const { data, isLoading, error } = usePnl(period);
+  const revenueMismatch = data ? !data.reconciliation.within_threshold : false;
 
   if (isLoading) {
     return (
@@ -33,6 +34,16 @@ export default function ProfitLoss() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">Profit & Loss</h1>
         <DashboardFilter period={period} onPeriodChange={setPeriod} />
+      </div>
+
+      <div className="app-card p-4 text-xs text-muted">
+        <p>Revenue data source: <span className="font-semibold">{data.revenue_data_source}</span></p>
+        {revenueMismatch && (
+          <p className="mt-2 inline-flex items-center gap-1 text-amber-600">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Revenue mismatch: GL {formatCurrency(data.reconciliation.gl_revenue)} vs Invoices {formatCurrency(data.reconciliation.operational_revenue)}
+          </p>
+        )}
       </div>
 
       {/* Margin Summary */}

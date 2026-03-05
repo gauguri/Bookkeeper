@@ -79,6 +79,10 @@ class WaterfallItem(BaseModel):
 
 class PnlResponse(BaseModel):
     revenue: float
+    revenue_gl: float = 0
+    revenue_operational: float = 0
+    revenue_data_source: str = "GL (Posted Entries)"
+    reconciliation: Dict[str, Any] = Field(default_factory=dict)
     cogs: float
     gross_profit: float
     gross_margin: float
@@ -264,6 +268,7 @@ class DashboardResponse(BaseModel):
     ap_aging: AgingBuckets
     anomalies: List[AnomalyItem]
     pnl_summary: PnlResponse
+    revenue_reconciliation: Dict[str, Any] = Field(default_factory=dict)
     computed_at: datetime
 
 

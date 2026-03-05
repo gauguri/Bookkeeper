@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.accounting.gl_engine import postJournalEntries
-from app.analytics.kpis import calc_balance_sheet, calc_pnl
+from app.analytics.kpis import calc_balance_sheet, calc_pnl, calc_revenue_reconciliation
 from app.db import Base
 from app.models import Customer, Invoice, InvoiceLine, Item
 
@@ -61,6 +61,9 @@ def test_invoice_and_payment_reconcile_statements():
     bs = calc_balance_sheet(db, date(2025, 1, 31))
 
     assert pnl["revenue"] == 500.0
+    assert pnl["revenue_gl"] == 500.0
+    assert pnl["revenue_operational"] == 500.0
+    assert pnl["reconciliation"]["within_threshold"] is True
     assert pnl["net_income"] == 500.0
     assert bs["current_period_net_income"] == 500.0
     assert bs["reconciliation_difference"] == 0.0
@@ -79,3 +82,15 @@ def test_inventory_sale_net_income_flows_to_equity():
     assert pnl["operating_expenses"] == 600.0
     assert pnl["net_income"] == 400.0
     assert bs["current_period_net_income"] == 400.0
+
+
+def test_revenue_reconciliation_flags_operational_gl_mismatch():
+    db = create_session()
+    seed_invoice(db, Decimal("300.00"), Decimal("0.00"))
+
+    reconciliation = calc_revenue_reconciliation(db, date(2025, 1, 1), date(2025, 1, 31))
+
+    assert reconciliation["gl_revenue"] == 0.0
+    assert reconciliation["operational_revenue"] == 300.0
+    assert reconciliation["difference"] == -300.0
+    assert reconciliation["within_threshold"] is False

@@ -551,7 +551,7 @@ def calc_expense_kpis(db: Session, as_of: date) -> Dict[str, Any]:
 
 
 def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
-    revenue = float(
+    revenue_gl = float(
         db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
         .join(Account, Account.id == GLEntry.account_id)
         .filter(Account.type == "REVENUE")
@@ -568,10 +568,22 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
         or 0
     )
 
+    revenue_operational = float(get_revenue_for_period(db, start, end))
+    revenue = revenue_gl
     net_income = revenue - expenses
+    mismatch = round(revenue_gl - revenue_operational, 2)
 
     return {
         "revenue": round(revenue, 2),
+        "revenue_gl": round(revenue_gl, 2),
+        "revenue_operational": round(revenue_operational, 2),
+        "revenue_data_source": "GL (Posted Entries)",
+        "reconciliation": {
+            "gl_revenue": round(revenue_gl, 2),
+            "operational_revenue": round(revenue_operational, 2),
+            "difference": mismatch,
+            "within_threshold": abs(mismatch) <= 1.0,
+        },
         "cogs": 0.0,
         "gross_profit": round(revenue - expenses, 2),
         "gross_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
@@ -585,6 +597,25 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
             {"label": "Expenses", "value": round(-expenses, 2), "type": "decrease"},
             {"label": "Net Income", "value": round(net_income, 2), "type": "total"},
         ],
+    }
+
+
+def calc_revenue_reconciliation(db: Session, start: date, end: date) -> Dict[str, Any]:
+    gl_revenue = float(
+        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "REVENUE")
+        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        .scalar()
+        or 0
+    )
+    operational_revenue = float(get_revenue_for_period(db, start, end))
+    difference = round(gl_revenue - operational_revenue, 2)
+    return {
+        "gl_revenue": round(gl_revenue, 2),
+        "operational_revenue": round(operational_revenue, 2),
+        "difference": difference,
+        "within_threshold": abs(difference) <= 1.0,
     }
 
 

@@ -46,6 +46,15 @@ export type WaterfallItem = {
 
 export type PnlData = {
   revenue: number;
+  revenue_gl: number;
+  revenue_operational: number;
+  revenue_data_source: string;
+  reconciliation: {
+    gl_revenue: number;
+    operational_revenue: number;
+    difference: number;
+    within_threshold: boolean;
+  };
   cogs: number;
   gross_profit: number;
   gross_margin: number;
@@ -79,6 +88,12 @@ export type DashboardData = {
   ap_aging: AgingData;
   anomalies: AnomalyItem[];
   pnl_summary: PnlData;
+  revenue_reconciliation: {
+    gl_revenue: number;
+    operational_revenue: number;
+    difference: number;
+    within_threshold: boolean;
+  };
   computed_at: string;
 };
 

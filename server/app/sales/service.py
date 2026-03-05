@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Sequence
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.accounting.gl_engine import postJournalEntries
 from app.inventory.service import SOURCE_INVOICE, get_available_qty, reserve_inventory_record
 from app.models import ARCollectionActivity, Customer, Inventory, Invoice, InvoiceLine, Item, Payment, PaymentApplication, SalesRequest, SupplierItem
 from app.sales.calculations import (
@@ -417,7 +418,6 @@ def update_invoice(db: Session, invoice: Invoice, payload: dict) -> Invoice:
 
 
 def create_payment_accounting_entry_stub(payment: Payment) -> None:
-    """Placeholder for posting payment-related accounting entries."""
     _ = payment
 
 
@@ -486,6 +486,25 @@ def apply_payment(
     db.add(payment)
     db.flush()
 
+    for application in payment.applications:
+        invoice = invoice_map.get(application.invoice_id)
+        if not invoice:
+            continue
+        postJournalEntries(
+            "payment",
+            {
+                "event_id": f"payment:{payment.id}:invoice:{invoice.id}",
+                "company_id": 1,
+                "invoice_id": invoice.id,
+                "payment_id": payment.id,
+                "amount": Decimal(application.applied_amount or 0),
+                "invoice_status": invoice.status,
+                "reference_id": payment.id,
+                "posting_date": payment.payment_date,
+            },
+            db,
+        )
+
     from app.sales_requests.service import close_sales_request_if_paid
 
     for invoice in invoices:
@@ -495,7 +514,6 @@ def apply_payment(
         if invoice.sales_request_id:
             close_sales_request_if_paid(db, invoice.sales_request_id)
 
-    create_payment_accounting_entry_stub(payment)
     return payment
 
 

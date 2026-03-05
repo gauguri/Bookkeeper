@@ -1,5 +1,7 @@
 import os
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://bookkeeper:bookkeeper@db:5432/bookkeeper")
@@ -15,3 +17,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kw):
+    return "TEXT"

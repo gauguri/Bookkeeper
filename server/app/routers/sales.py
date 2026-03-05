@@ -7,6 +7,7 @@ from sqlalchemy import String, cast, func
 from sqlalchemy.orm import Session
 
 from app.auth import require_module
+from app.accounting.gl_engine import postJournalEntries
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory.service import SOURCE_INVOICE, SOURCE_SALES_REQUEST, create_inventory_movement, get_source_reserved_qty_map, release_reservations
@@ -448,6 +449,20 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         )
 
     release_reservations(db, source_type=source_type, source_id=source_id)
+
+    postJournalEntries(
+        "shipment",
+        {
+            "event_id": f"shipment:{invoice.id}",
+            "company_id": 1,
+            "invoice_id": invoice.id,
+            "shipment_id": invoice.id,
+            "reference_id": invoice.id,
+            "posting_date": date.today(),
+            "shipped_ratio": Decimal("1.00"),
+        },
+        db,
+    )
 
     invoice.status = "SHIPPED"
     invoice.shipped_at = datetime.utcnow()

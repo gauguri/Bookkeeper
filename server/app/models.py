@@ -143,6 +143,45 @@ class JournalLine(Base):
     journal_entry = relationship("JournalEntry", back_populates="lines")
 
 
+class GLEntry(Base):
+    __tablename__ = "gl_entries"
+
+    id = Column(Integer, primary_key=True)
+    journal_batch_id = Column(Integer, nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    debit_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    credit_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    reference_type = Column(String(50), nullable=False)
+    reference_id = Column(Integer, nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    shipment_id = Column(Integer, nullable=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    event_type = Column(String(50), nullable=False)
+    event_id = Column(String(120), nullable=False)
+    posting_date = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_gl_entries_journal_batch", "journal_batch_id"),
+        Index("ix_gl_entries_reference", "reference_type", "reference_id"),
+    )
+
+
+class GLPostingAudit(Base):
+    __tablename__ = "gl_posting_audit"
+
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(50), nullable=False)
+    event_id = Column(String(120), nullable=False)
+    journal_batch_id = Column(Integer, nullable=False)
+    payload = Column(JSONB().with_variant(Text, "sqlite"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("event_type", "event_id", name="uq_gl_posting_event"),
+    )
+
+
 class CompanyCode(Base):
     __tablename__ = "company_codes"
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -10,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.models import Account, GLEntry, GLPostingAudit, Inventory, Invoice
 
 ZERO = Decimal("0.00")
+LOGGER = logging.getLogger(__name__)
+DEBIT_NORMAL_TYPES = {"ASSET", "EXPENSE", "COGS"}
 
 
 class GLPostingError(ValueError):
@@ -92,33 +95,33 @@ def get_gl_account_balances(db: Session, *, account_type: str | None = None) -> 
             Account.name.label("account_name"),
             func.coalesce(func.sum(GLEntry.debit_amount), 0).label("total_debits"),
             func.coalesce(func.sum(GLEntry.credit_amount), 0).label("total_credits"),
-            (
-                func.coalesce(func.sum(GLEntry.debit_amount), 0)
-                - func.coalesce(func.sum(GLEntry.credit_amount), 0)
-            ).label("balance"),
+            Account.type.label("account_type"),
         )
         .join(GLEntry, GLEntry.account_id == Account.id)
-        .group_by(Account.id, Account.name)
+        .group_by(Account.id, Account.name, Account.type)
     )
     if account_type:
         query = query.filter(func.upper(Account.type) == account_type.upper())
 
-    rows = query.order_by(
-        (
-            func.coalesce(func.sum(GLEntry.debit_amount), 0)
-            - func.coalesce(func.sum(GLEntry.credit_amount), 0)
-        ).asc()
-    ).all()
-    return [
+    rows = query.all()
+
+    def _normal_balance(account_kind: str | None, debit: Decimal, credit: Decimal) -> Decimal:
+        if (account_kind or "").upper() in DEBIT_NORMAL_TYPES:
+            return debit - credit
+        return credit - debit
+
+    normalized_rows = [
         {
             "account_id": row.account_id,
             "account_name": row.account_name,
             "total_debits": _money(row.total_debits),
             "total_credits": _money(row.total_credits),
-            "balance": _money(row.balance),
+            "balance": _normal_balance(row.account_type, _money(row.total_debits), _money(row.total_credits)),
         }
         for row in rows
     ]
+    normalized_rows.sort(key=lambda row: row["balance"])
+    return normalized_rows
 
 
 def get_gl_entries_for_account(db: Session, account_id: int) -> list[GLEntry]:
@@ -169,6 +172,83 @@ def _assert_asset_account_guardrails(db: Session, lines: list[dict[str, Any]], *
                 f"Posting would drive asset account '{account.name}' (id={account.id}) below allowed threshold "
                 f"{_money(allowed_threshold)}. Projected balance={projected_balance}."
             )
+
+
+def _warn_on_negative_asset_balance(db: Session, lines: list[dict[str, Any]], *, reference: str) -> None:
+    account_ids = {int(line["account_id"]) for line in lines}
+    if not account_ids:
+        return
+    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all()
+    account_map = {account.id: account for account in accounts}
+    for line in lines:
+        account = account_map.get(int(line["account_id"]))
+        if not account or (account.type or "").upper() != "ASSET":
+            continue
+        line_debit = _money(line.get("debit_amount"))
+        line_credit = _money(line.get("credit_amount"))
+        if line_credit <= line_debit:
+            continue
+        current_balance = (
+            db.query(
+                func.coalesce(func.sum(GLEntry.debit_amount), 0)
+                - func.coalesce(func.sum(GLEntry.credit_amount), 0)
+            )
+            .filter(GLEntry.account_id == account.id)
+            .scalar()
+            or ZERO
+        )
+        projected_balance = _money(current_balance) + (line_debit - line_credit)
+        if projected_balance < ZERO:
+            LOGGER.warning(
+                "Asset account projected negative from credit posting | reference=%s account_id=%s account_name=%s projected_balance=%s",
+                reference,
+                account.id,
+                account.name,
+                projected_balance,
+            )
+
+
+def _validate_revenue_cash_direction(event_type: str, lines: list[dict[str, Any]], cash_account_id: int, revenue_account_id: int) -> None:
+    cash_credit = sum(
+        (_money(line.get("credit_amount")) for line in lines if int(line["account_id"]) == cash_account_id),
+        ZERO,
+    )
+    revenue_credit = sum(
+        (_money(line.get("credit_amount")) for line in lines if int(line["account_id"]) == revenue_account_id),
+        ZERO,
+    )
+    if event_type != "cash_sale" and cash_credit > ZERO and revenue_credit > ZERO:
+        raise GLPostingError("Revenue postings must not credit cash unless posting a cash_sale event.")
+
+
+def postJournalEntry(db: Session, *, event_type: str, context: dict[str, Any], entries: list[dict[str, Any]]) -> int:
+    _assert_balanced(entries)
+    _assert_asset_account_guardrails(db, entries, allowed_threshold=_money(context.get("asset_negative_threshold", ZERO)))
+    _warn_on_negative_asset_balance(
+        db,
+        entries,
+        reference=f"{event_type}:{context.get('reference_id') or context.get('invoice_id') or context.get('payment_id') or 'unknown'}",
+    )
+    batch_id = _next_batch_id(db)
+    for line in entries:
+        db.add(
+            GLEntry(
+                journal_batch_id=batch_id,
+                account_id=line["account_id"],
+                debit_amount=_money(line["debit_amount"]),
+                credit_amount=_money(line["credit_amount"]),
+                reference_type=line["reference_type"],
+                reference_id=int(line["reference_id"]),
+                invoice_id=context.get("invoice_id"),
+                shipment_id=context.get("shipment_id"),
+                payment_id=context.get("payment_id"),
+                event_type=event_type,
+                event_id=str(context["event_id"]),
+                posting_date=context.get("posting_date"),
+                created_at=line.get("created_at", datetime.utcnow()),
+            )
+        )
+    return batch_id
 
 
 def _shipment_lines(db: Session, invoice: Invoice, shipped_ratio: Decimal) -> tuple[Decimal, Decimal]:
@@ -255,29 +335,36 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
                 {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
                 {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
             ])
+        elif eventType == "cash_sale":
+            amount = _money(context["amount"])
+            if amount <= ZERO:
+                raise GLPostingError("Cash sale amount must be greater than zero.")
+            lines.extend([
+                {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
+                {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": amount},
+            ])
+            cogs_amount = _money(context.get("cogs_amount", ZERO))
+            if cogs_amount > ZERO:
+                lines.extend([
+                    {"account_id": cogs.id, "debit_amount": cogs_amount, "credit_amount": ZERO},
+                    {"account_id": inventory.id, "debit_amount": ZERO, "credit_amount": cogs_amount},
+                ])
         else:
             raise GLPostingError(f"Unsupported eventType: {eventType}")
 
-        _assert_balanced(lines)
-        _assert_asset_account_guardrails(db, lines, allowed_threshold=_money(context.get("asset_negative_threshold", ZERO)))
-        batch_id = _next_batch_id(db)
-        for line in lines:
-            db.add(
-                GLEntry(
-                    journal_batch_id=batch_id,
-                    account_id=line["account_id"],
-                    debit_amount=_money(line["debit_amount"]),
-                    credit_amount=_money(line["credit_amount"]),
-                    reference_type=eventType,
-                    reference_id=int(context.get("reference_id") or invoice_id or payment_id or 0),
-                    invoice_id=invoice_id,
-                    shipment_id=shipment_id,
-                    payment_id=payment_id,
-                    event_type=eventType,
-                    event_id=event_id,
-                    posting_date=posting_date,
-                )
-            )
+        _validate_revenue_cash_direction(eventType, lines, cash.id, revenue.id)
+        batch_entries = [
+            {
+                "account_id": line["account_id"],
+                "debit_amount": _money(line["debit_amount"]),
+                "credit_amount": _money(line["credit_amount"]),
+                "reference_type": eventType,
+                "reference_id": int(context.get("reference_id") or invoice_id or payment_id or 0),
+                "created_at": datetime.utcnow(),
+            }
+            for line in lines
+        ]
+        batch_id = postJournalEntry(db, event_type=eventType, context=context, entries=batch_entries)
 
         db.add(
             GLPostingAudit(

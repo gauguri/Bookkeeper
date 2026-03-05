@@ -9,6 +9,7 @@ from app.accounting.gl_engine import (
     GLPostingError,
     get_gl_account_balances,
     get_gl_entries_for_account,
+    postJournalEntry,
     postJournalEntries,
 )
 from app.db import Base
@@ -143,6 +144,13 @@ def test_payment_posting_reduces_ar_for_shipped_invoice():
     _, debits, credits = _batch_totals(db, batch_id)
     assert debits == credits == Decimal("30.00")
 
+    rows = db.query(GLEntry).filter(GLEntry.journal_batch_id == batch_id).all()
+    cash_line = next(r for r in rows if Decimal(r.debit_amount or 0) > 0)
+    ar_line = next(r for r in rows if Decimal(r.credit_amount or 0) > 0)
+    assert Decimal(cash_line.debit_amount) == Decimal("30.00")
+    assert Decimal(cash_line.credit_amount) == Decimal("0.00")
+    assert Decimal(ar_line.credit_amount) == Decimal("30.00")
+
 
 def test_payment_before_shipment_is_rejected():
     db = create_session()
@@ -232,3 +240,45 @@ def test_asset_balance_diagnostic_identifies_negative_ar_and_trace():
     traced_entries = get_gl_entries_for_account(db, most_negative["account_id"])
     assert len(traced_entries) == 2
     assert [entry.reference_type for entry in traced_entries] == ["shipment", "payment"]
+
+
+def test_cash_sale_posts_debit_cash_credit_revenue():
+    db = create_session()
+
+    batch_id = postJournalEntries(
+        "cash_sale",
+        {
+            "event_id": "cash-sale:1",
+            "company_id": 1,
+            "amount": Decimal("200.00"),
+            "reference_id": 1,
+            "posting_date": date(2024, 1, 6),
+        },
+        db,
+    )
+    rows, debits, credits = _batch_totals(db, batch_id)
+    assert debits == credits == Decimal("200.00")
+    assert len(rows) == 2
+    assert any(Decimal(r.debit_amount or 0) == Decimal("200.00") for r in rows)
+    assert any(Decimal(r.credit_amount or 0) == Decimal("200.00") for r in rows)
+
+
+def test_post_journal_entry_rejects_unbalanced_batches():
+    db = create_session()
+
+    with pytest.raises(GLPostingError, match="Unbalanced GL posting"):
+        postJournalEntry(
+            db,
+            event_type="shipment",
+            context={"event_id": "bad:1", "reference_id": 1},
+            entries=[
+                {
+                    "account_id": 1,
+                    "debit_amount": Decimal("100.00"),
+                    "credit_amount": Decimal("0.00"),
+                    "reference_type": "shipment",
+                    "reference_id": 1,
+                    "created_at": date(2024, 1, 1),
+                },
+            ],
+        )

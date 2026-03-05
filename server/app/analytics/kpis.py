@@ -632,6 +632,7 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
         "total_assets": round(assets, 2),
         "total_liabilities": round(liabilities, 2),
         "total_equity": round(total_equity, 2),
+        "inventory_value": 0.0,
         "retained_earnings": round(retained_earnings, 2),
         "current_period_net_income": round(net_income, 2),
         "reconciliation_difference": diff,

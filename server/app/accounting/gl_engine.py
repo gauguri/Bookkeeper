@@ -85,6 +85,92 @@ def _posted_unearned_balance(db: Session, invoice_id: int, unearned_account_id: 
     return sum((_money(r.credit_amount) - _money(r.debit_amount) for r in rows), ZERO)
 
 
+def get_gl_account_balances(db: Session, *, account_type: str | None = None) -> list[dict[str, Any]]:
+    query = (
+        db.query(
+            Account.id.label("account_id"),
+            Account.name.label("account_name"),
+            func.coalesce(func.sum(GLEntry.debit_amount), 0).label("total_debits"),
+            func.coalesce(func.sum(GLEntry.credit_amount), 0).label("total_credits"),
+            (
+                func.coalesce(func.sum(GLEntry.debit_amount), 0)
+                - func.coalesce(func.sum(GLEntry.credit_amount), 0)
+            ).label("balance"),
+        )
+        .join(GLEntry, GLEntry.account_id == Account.id)
+        .group_by(Account.id, Account.name)
+    )
+    if account_type:
+        query = query.filter(func.upper(Account.type) == account_type.upper())
+
+    rows = query.order_by(
+        (
+            func.coalesce(func.sum(GLEntry.debit_amount), 0)
+            - func.coalesce(func.sum(GLEntry.credit_amount), 0)
+        ).asc()
+    ).all()
+    return [
+        {
+            "account_id": row.account_id,
+            "account_name": row.account_name,
+            "total_debits": _money(row.total_debits),
+            "total_credits": _money(row.total_credits),
+            "balance": _money(row.balance),
+        }
+        for row in rows
+    ]
+
+
+def get_gl_entries_for_account(db: Session, account_id: int) -> list[GLEntry]:
+    return (
+        db.query(GLEntry)
+        .filter(GLEntry.account_id == account_id)
+        .order_by(GLEntry.created_at.asc(), GLEntry.id.asc())
+        .all()
+    )
+
+
+def _assert_asset_account_guardrails(db: Session, lines: list[dict[str, Any]], *, allowed_threshold: Decimal = ZERO) -> None:
+    account_ids = {int(line["account_id"]) for line in lines}
+    if not account_ids:
+        return
+
+    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all()
+    account_map = {account.id: account for account in accounts}
+    for account_id in account_ids:
+        account = account_map.get(account_id)
+        if not account or (account.type or "").upper() != "ASSET":
+            continue
+        guarded_names = {"accounts receivable", "a/r", "cash", "undeposited funds"}
+        account_name = (account.name or "").strip().lower()
+        if account_name not in guarded_names:
+            continue
+
+        current_balance = (
+            db.query(
+                func.coalesce(func.sum(GLEntry.debit_amount), 0)
+                - func.coalesce(func.sum(GLEntry.credit_amount), 0)
+            )
+            .filter(GLEntry.account_id == account_id)
+            .scalar()
+            or ZERO
+        )
+        line_delta = sum(
+            (
+                _money(line.get("debit_amount")) - _money(line.get("credit_amount"))
+                for line in lines
+                if int(line["account_id"]) == account_id
+            ),
+            ZERO,
+        )
+        projected_balance = _money(current_balance) + line_delta
+        if projected_balance < _money(allowed_threshold):
+            raise GLPostingError(
+                f"Posting would drive asset account '{account.name}' (id={account.id}) below allowed threshold "
+                f"{_money(allowed_threshold)}. Projected balance={projected_balance}."
+            )
+
+
 def _shipment_lines(db: Session, invoice: Invoice, shipped_ratio: Decimal) -> tuple[Decimal, Decimal]:
     revenue_amount = _money(invoice.total) * shipped_ratio
     cogs_amount = ZERO
@@ -160,23 +246,20 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
             if amount <= ZERO:
                 raise GLPostingError("Payment must be greater than zero.")
             invoice_status = (context.get("invoice_status") or "").upper()
-            if invoice_status == "SHIPPED":
-                ar_outstanding = _posted_ar_balance(db, int(invoice_id), ar.id)
-                if ar_outstanding < amount:
-                    raise GLPostingError("Negative AR would result from payment posting.")
-                lines.extend([
-                    {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
-                    {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
-                ])
-            else:
-                lines.extend([
-                    {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
-                    {"account_id": unearned.id, "debit_amount": ZERO, "credit_amount": amount},
-                ])
+            if invoice_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
+                raise GLPostingError("Payments can only be posted after the invoice has recognized AR.")
+            ar_outstanding = _posted_ar_balance(db, int(invoice_id), ar.id)
+            if ar_outstanding < amount:
+                raise GLPostingError("Negative AR would result from payment posting.")
+            lines.extend([
+                {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
+                {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
+            ])
         else:
             raise GLPostingError(f"Unsupported eventType: {eventType}")
 
         _assert_balanced(lines)
+        _assert_asset_account_guardrails(db, lines, allowed_threshold=_money(context.get("asset_negative_threshold", ZERO)))
         batch_id = _next_batch_id(db)
         for line in lines:
             db.add(

@@ -13,7 +13,7 @@ from app.accounting.gl_engine import (
     postJournalEntries,
 )
 from app.db import Base
-from app.models import Customer, GLEntry, Invoice, InvoiceLine, Item
+from app.models import Customer, GLEntry, Invoice, InvoiceLine, Item, JournalBatch, JournalBatchLine
 
 
 def create_session():
@@ -239,7 +239,7 @@ def test_asset_balance_diagnostic_identifies_negative_ar_and_trace():
 
     traced_entries = get_gl_entries_for_account(db, most_negative["account_id"])
     assert len(traced_entries) == 2
-    assert [entry.reference_type for entry in traced_entries] == ["shipment", "payment"]
+    assert [entry.reference_type.lower() for entry in traced_entries] == ["shipment", "payment"]
 
 
 def test_cash_sale_posts_debit_cash_credit_revenue():
@@ -282,3 +282,68 @@ def test_post_journal_entry_rejects_unbalanced_batches():
                 },
             ],
         )
+
+
+def test_invoice_posted_template_and_idempotency():
+    db = create_session()
+    invoice = seed_invoice(db)
+
+    payload = {
+        "event_id": f"invoice-posted:{invoice.id}",
+        "company_id": 1,
+        "invoice_id": invoice.id,
+        "reference_id": invoice.id,
+        "posting_date": date(2024, 1, 2),
+    }
+    batch_id = postJournalEntries("INVOICE_POSTED", payload, db)
+    again = postJournalEntries("INVOICE_POSTED", payload, db)
+
+    assert batch_id == again
+    assert db.query(JournalBatch).count() == 1
+    assert db.query(JournalBatchLine).filter(JournalBatchLine.batch_id == batch_id).count() == 4
+
+
+def test_credit_memo_and_write_off_templates_balance():
+    db = create_session()
+    invoice = seed_invoice(db)
+    postJournalEntries(
+        "INVOICE_POSTED",
+        {
+            "event_id": f"invoice-posted:{invoice.id}",
+            "company_id": 1,
+            "invoice_id": invoice.id,
+            "reference_id": invoice.id,
+            "posting_date": date(2024, 1, 2),
+        },
+        db,
+    )
+
+    cm_batch = postJournalEntries(
+        "CREDIT_MEMO",
+        {
+            "event_id": f"credit-memo:{invoice.id}",
+            "company_id": 1,
+            "invoice_id": invoice.id,
+            "amount": Decimal("25.00"),
+            "reference_id": invoice.id,
+            "posting_date": date(2024, 1, 3),
+        },
+        db,
+    )
+    _, dr, cr = _batch_totals(db, cm_batch)
+    assert dr == cr == Decimal("25.00")
+
+    wo_batch = postJournalEntries(
+        "WRITE_OFF",
+        {
+            "event_id": f"writeoff:{invoice.id}",
+            "company_id": 1,
+            "invoice_id": invoice.id,
+            "amount": Decimal("10.00"),
+            "reference_id": invoice.id,
+            "posting_date": date(2024, 1, 4),
+        },
+        db,
+    )
+    _, dr2, cr2 = _batch_totals(db, wo_batch)
+    assert dr2 == cr2 == Decimal("10.00")

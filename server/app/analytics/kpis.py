@@ -12,7 +12,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, inspect
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -570,12 +570,28 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
     )
 
     invoice_query = (
-        db.query(Invoice)
+        db.query(Invoice.id)
         .filter(Invoice.status.in_(REVENUE_STATUSES))
         .filter(Invoice.issue_date >= start, Invoice.issue_date <= end)
     )
     invoices_finalized = invoice_query.count()
-    invoices_posted_to_gl = invoice_query.filter(Invoice.posted_to_gl.is_(True)).count()
+    invoice_columns = {
+        column["name"] for column in inspect(db.get_bind()).get_columns("invoices")
+    }
+    if "posted_to_gl" in invoice_columns:
+        invoices_posted_to_gl = (
+            db.query(func.count(Invoice.id))
+            .filter(Invoice.status.in_(REVENUE_STATUSES))
+            .filter(Invoice.issue_date >= start, Invoice.issue_date <= end)
+            .filter(Invoice.posted_to_gl.is_(True))
+            .scalar()
+            or 0
+        )
+    else:
+        LOGGER.warning(
+            "invoices.posted_to_gl missing from schema; defaulting invoices_posted_to_gl metric to 0"
+        )
+        invoices_posted_to_gl = 0
     gl_entries_count_for_revenue = int(
         db.query(func.count(GLEntry.id))
         .join(Account, Account.id == GLEntry.account_id)

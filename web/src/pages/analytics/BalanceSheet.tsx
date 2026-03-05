@@ -3,6 +3,7 @@ import { useBalanceSheet } from "../../hooks/useAnalytics";
 import FinancialStatement from "../../components/analytics/FinancialStatement";
 import DistributionChart from "../../components/analytics/DistributionChart";
 import { formatCurrency, formatCompact } from "../../utils/formatters";
+import CurrentAssetsFormulaCard, { currentAssetsFormulaSum } from "../../components/analytics/CurrentAssetsFormulaCard";
 
 export default function BalanceSheet() {
   const { data, isLoading, error } = useBalanceSheet();
@@ -60,6 +61,13 @@ export default function BalanceSheet() {
         />
       )}
 
+
+      <CurrentAssetsFormulaCard
+        asOf={data.as_of}
+        currentAssetsTotal={data.current_assets_total}
+        components={data.current_assets_components}
+      />
+
       {/* Financial Statement */}
       <FinancialStatement
         title="Balance Sheet"
@@ -100,6 +108,7 @@ export default function BalanceSheet() {
             items: [
               { label: "Total Liabilities + Equity", value: data.total_liabilities + data.total_equity, isTotal: true, bold: true },
               { label: "Net Assets (Assets - Liabilities)", value: data.net_assets, isSubtotal: true },
+              { label: "Current Assets Components Sum", value: currentAssetsFormulaSum(data.current_assets_components), isSubtotal: true },
             ],
           },
         ]}

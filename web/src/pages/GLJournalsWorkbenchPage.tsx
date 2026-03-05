@@ -1,12 +1,26 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 
 type Journal = { id: number; document_number: string; posting_date: string; source_module: string; debits: number; credits: number; status: string; reference?: string };
+type JournalEntry = {
+  id: number;
+  date: string;
+  memo?: string;
+  amount: number;
+  source_type?: string;
+  debit_account: string;
+  credit_account: string;
+};
 
 export default function GLJournalsWorkbenchPage() {
   const [items, setItems] = useState<Journal[]>([]);
+  const [drilldownItems, setDrilldownItems] = useState<JournalEntry[]>([]);
+  const [searchParams] = useSearchParams();
   const location = useLocation();
+  const accountIds = searchParams.get("account_ids");
+  const asOf = searchParams.get("as_of");
+  const isDrilldown = Boolean(accountIds);
 
   const exportJournals = () => {
     const rows = [
@@ -35,9 +49,49 @@ export default function GLJournalsWorkbenchPage() {
     URL.revokeObjectURL(url);
   };
 
+  const drilldownQuery = useMemo(() => {
+    if (!accountIds) return "";
+    const query = new URLSearchParams({ limit: "200", account_ids: accountIds });
+    if (asOf) {
+      query.set("end_date", asOf);
+    }
+    return query.toString();
+  }, [accountIds, asOf]);
+
   useEffect(() => {
+    if (isDrilldown) {
+      apiFetch<JournalEntry[]>(`/journal-entries?${drilldownQuery}`).then((res) => setDrilldownItems(res));
+      return;
+    }
     apiFetch<{ items: Journal[] }>("/gl/journals?page=1&page_size=100").then((res) => setItems(res.items));
-  }, []);
+  }, [drilldownQuery, isDrilldown]);
+
+  if (isDrilldown) {
+    return (
+      <section className="space-y-6">
+        <div className="flex flex-wrap justify-between gap-2">
+          <p className="text-sm text-muted">Ledger drilldown for account IDs: {accountIds}</p>
+          <Link className="app-button-secondary" to="/accounting/gl/journals">Back to Journals</Link>
+        </div>
+        <div className="app-card overflow-auto p-4">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th>ID</th><th>Date</th><th>Memo</th><th>Debit Account</th><th>Credit Account</th><th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drilldownItems.map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td>{row.id}</td><td>{row.date}</td><td>{row.memo ?? "-"}</td><td>{row.debit_account}</td><td>{row.credit_account}</td><td>{row.amount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-6">

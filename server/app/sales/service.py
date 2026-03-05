@@ -449,22 +449,29 @@ def apply_payment(
             if invoice.customer_id != payment_data["customer_id"]:
                 raise ValueError("Invoice does not belong to the payment customer.")
     for invoice in invoices:
-        if invoice.status == "VOID":
+        normalized_status = (invoice.status or "").upper()
+        if normalized_status == "VOID":
             raise ValueError("Payments can only be applied to active invoices.")
-        if invoice.status == "DRAFT":
-            invoice.status = "SENT"
-            invoice.updated_at = datetime.utcnow()
+        if normalized_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID"}:
+            raise ValueError("Payment rejected: invoice must be posted/shipped before recording payment.")
     applications_inputs: List[PaymentApplicationInput] = []
     for application in normalized_applications:
         invoice = invoice_map.get(application["invoice_id"])
         if not invoice:
             raise ValueError("Invoice not found.")
         recalculate_invoice_balance(db, invoice)
+        if Decimal(invoice.amount_due or 0) <= 0:
+            raise ValueError(f"Payment rejected: invoice {invoice.id} has no outstanding balance.")
+        applied_amount = Decimal(application["applied_amount"])
+        if applied_amount > Decimal(invoice.amount_due):
+            raise ValueError(
+                f"Payment rejected: applied amount for invoice {invoice.id} exceeds outstanding balance."
+            )
         applications_inputs.append(
             PaymentApplicationInput(
                 invoice_id=invoice.id,
                 invoice_balance=Decimal(invoice.amount_due),
-                applied_amount=Decimal(application["applied_amount"]),
+                applied_amount=applied_amount,
             )
         )
     validate_payment_applications(Decimal(payment_data["amount"]), applications_inputs)
@@ -523,6 +530,8 @@ def create_invoice_payment(db: Session, payload: dict) -> Payment:
         raise ValueError("Invoice not found.")
     if invoice.status == "VOID":
         raise ValueError("Cannot record payment for a void invoice.")
+    if (invoice.status or "").upper() not in {"POSTED", "SHIPPED", "PARTIALLY_PAID"}:
+        raise ValueError("Payment rejected: invoice must be posted/shipped before recording payment.")
 
     recalculate_invoice_balance(db, invoice)
     current_balance = Decimal(invoice.amount_due or 0)

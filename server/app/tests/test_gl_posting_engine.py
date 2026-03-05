@@ -5,7 +5,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.accounting.gl_engine import GLPostingError, postJournalEntries
+from app.accounting.gl_engine import (
+    GLPostingError,
+    get_gl_account_balances,
+    get_gl_entries_for_account,
+    postJournalEntries,
+)
 from app.db import Base
 from app.models import Customer, GLEntry, Invoice, InvoiceLine, Item
 
@@ -139,42 +144,25 @@ def test_payment_posting_reduces_ar_for_shipped_invoice():
     assert debits == credits == Decimal("30.00")
 
 
-def test_prepayment_then_shipment_recognizes_unearned_then_revenue():
+def test_payment_before_shipment_is_rejected():
     db = create_session()
     invoice = seed_invoice(db)
 
-    postJournalEntries(
-        "payment",
-        {
-            "event_id": "payment:pre:1",
-            "company_id": 1,
-            "invoice_id": invoice.id,
-            "payment_id": 1,
-            "amount": Decimal("100.00"),
-            "invoice_status": "SENT",
-            "reference_id": 1,
-            "posting_date": date(2024, 1, 1),
-        },
-        db,
-    )
-
-    batch_id = postJournalEntries(
-        "shipment",
-        {
-            "event_id": f"shipment:{invoice.id}",
-            "company_id": 1,
-            "invoice_id": invoice.id,
-            "shipment_id": invoice.id,
-            "reference_id": invoice.id,
-            "posting_date": date(2024, 1, 2),
-            "shipped_ratio": Decimal("1.00"),
-        },
-        db,
-    )
-    rows, debits, credits = _batch_totals(db, batch_id)
-    assert debits == credits
-    revenue_credits = sum((Decimal(r.credit_amount or 0) for r in rows if r.account_id), Decimal("0.00"))
-    assert revenue_credits >= Decimal("100.00")
+    with pytest.raises(GLPostingError, match="recognized AR"):
+        postJournalEntries(
+            "payment",
+            {
+                "event_id": "payment:pre:1",
+                "company_id": 1,
+                "invoice_id": invoice.id,
+                "payment_id": 1,
+                "amount": Decimal("100.00"),
+                "invoice_status": "SENT",
+                "reference_id": 1,
+                "posting_date": date(2024, 1, 1),
+            },
+            db,
+        )
 
 
 def test_payment_rejects_if_ar_would_go_negative():
@@ -196,3 +184,51 @@ def test_payment_rejects_if_ar_would_go_negative():
             },
             db,
         )
+
+
+def test_asset_balance_diagnostic_identifies_negative_ar_and_trace():
+    db = create_session()
+    invoice = seed_invoice(db)
+
+    # Simulate a legacy bad posting where payment was posted before AR creation.
+    postJournalEntries(
+        "shipment",
+        {
+            "event_id": f"shipment:{invoice.id}",
+            "company_id": 1,
+            "invoice_id": invoice.id,
+            "shipment_id": invoice.id,
+            "reference_id": invoice.id,
+            "posting_date": date(2024, 1, 2),
+            "shipped_ratio": Decimal("0.10"),
+        },
+        db,
+    )
+    ar_account_id = next(row["account_id"] for row in get_gl_account_balances(db, account_type="ASSET") if row["account_name"].lower() == "accounts receivable")
+
+    db.add(
+        GLEntry(
+            journal_batch_id=999,
+            account_id=ar_account_id,
+            debit_amount=Decimal("0.00"),
+            credit_amount=Decimal("50.00"),
+            reference_type="payment",
+            reference_id=77,
+            invoice_id=invoice.id,
+            payment_id=77,
+            event_type="payment",
+            event_id="payment:legacy:77",
+            posting_date=date(2024, 1, 1),
+        )
+    )
+    db.flush()
+
+    balances = get_gl_account_balances(db, account_type="ASSET")
+    most_negative = balances[0]
+
+    assert most_negative["account_name"].lower() == "accounts receivable"
+    assert most_negative["balance"] < Decimal("0.00")
+
+    traced_entries = get_gl_entries_for_account(db, most_negative["account_id"])
+    assert len(traced_entries) == 2
+    assert [entry.reference_type for entry in traced_entries] == ["shipment", "payment"]

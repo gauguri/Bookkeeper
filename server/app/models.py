@@ -167,6 +167,43 @@ class GLEntry(Base):
     )
 
 
+class JournalBatch(Base):
+    __tablename__ = "journal_batches"
+
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(50), nullable=False)
+    event_id = Column(String(120), nullable=False)
+    reference_type = Column(String(50), nullable=False)
+    reference_id = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="POSTED")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    posted_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("event_type", "event_id", name="uq_journal_batch_event"),
+        Index("ix_journal_batches_reference", "reference_type", "reference_id"),
+    )
+
+
+class JournalBatchLine(Base):
+    __tablename__ = "journal_batch_lines"
+
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(Integer, ForeignKey("journal_batches.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    debit_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    credit_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    memo = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "((debit_amount > 0 AND credit_amount = 0) OR (credit_amount > 0 AND debit_amount = 0))",
+            name="ck_journal_batch_line_debit_xor_credit",
+        ),
+    )
+
+
 class GLPostingAudit(Base):
     __tablename__ = "gl_posting_audit"
 

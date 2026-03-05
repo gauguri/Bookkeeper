@@ -5,10 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
-from app.models import Account, GLEntry, GLPostingAudit, Inventory, Invoice
+from app.models import Account, GLEntry, GLPostingAudit, Inventory, Invoice, JournalBatch, JournalBatchLine
 
 ZERO = Decimal("0.00")
 LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,8 @@ def _resolve_account(db: Session, company_id: int, *, codes: list[str], names: l
         "cogs": ("COGS", "debit"),
         "unearned": ("LIABILITY", "credit"),
         "customer deposit": ("LIABILITY", "credit"),
+        "bad debt expense": ("EXPENSE", "debit"),
+        "retained earnings": ("EQUITY", "credit"),
     }
     hint = names[0].lower()
     account_type, normal_balance = defaults.get(hint, ("ASSET", "debit"))
@@ -56,11 +58,6 @@ def _resolve_account(db: Session, company_id: int, *, codes: list[str], names: l
     db.add(account)
     db.flush()
     return account
-
-
-def _next_batch_id(db: Session) -> int:
-    current = db.query(func.max(GLEntry.journal_batch_id)).scalar()
-    return int(current or 0) + 1
 
 
 def _assert_balanced(lines: list[dict[str, Any]]) -> None:
@@ -217,8 +214,61 @@ def _validate_revenue_cash_direction(event_type: str, lines: list[dict[str, Any]
         (_money(line.get("credit_amount")) for line in lines if int(line["account_id"]) == revenue_account_id),
         ZERO,
     )
-    if event_type != "cash_sale" and cash_credit > ZERO and revenue_credit > ZERO:
+    if event_type.lower() != "cash_sale" and cash_credit > ZERO and revenue_credit > ZERO:
         raise GLPostingError("Revenue postings must not credit cash unless posting a cash_sale event.")
+
+
+def _save_batch(db: Session, *, event_type: str, context: dict[str, Any], entries: list[dict[str, Any]]) -> int:
+    event_id = str(context["event_id"])
+    existing = (
+        db.query(JournalBatch)
+        .filter(JournalBatch.event_type == event_type, JournalBatch.event_id == event_id)
+        .first()
+    )
+    if existing:
+        return existing.id
+
+    reference_id = int(context.get("reference_id") or context.get("invoice_id") or context.get("payment_id") or 0)
+    batch = JournalBatch(
+        event_type=event_type,
+        event_id=event_id,
+        reference_type=event_type,
+        reference_id=reference_id,
+        status="POSTED",
+        posted_at=datetime.utcnow(),
+    )
+    db.add(batch)
+    db.flush()
+
+    for line in entries:
+        db.add(
+            JournalBatchLine(
+                batch_id=batch.id,
+                account_id=int(line["account_id"]),
+                debit_amount=_money(line["debit_amount"]),
+                credit_amount=_money(line["credit_amount"]),
+                memo=line.get("memo"),
+                created_at=line.get("created_at", datetime.utcnow()),
+            )
+        )
+        db.add(
+            GLEntry(
+                journal_batch_id=batch.id,
+                account_id=int(line["account_id"]),
+                debit_amount=_money(line["debit_amount"]),
+                credit_amount=_money(line["credit_amount"]),
+                reference_type=event_type,
+                reference_id=reference_id,
+                invoice_id=context.get("invoice_id"),
+                shipment_id=context.get("shipment_id"),
+                payment_id=context.get("payment_id"),
+                event_type=event_type,
+                event_id=event_id,
+                posting_date=context.get("posting_date"),
+                created_at=line.get("created_at", datetime.utcnow()),
+            )
+        )
+    return batch.id
 
 
 def postJournalEntry(db: Session, *, event_type: str, context: dict[str, Any], entries: list[dict[str, Any]]) -> int:
@@ -229,26 +279,7 @@ def postJournalEntry(db: Session, *, event_type: str, context: dict[str, Any], e
         entries,
         reference=f"{event_type}:{context.get('reference_id') or context.get('invoice_id') or context.get('payment_id') or 'unknown'}",
     )
-    batch_id = _next_batch_id(db)
-    for line in entries:
-        db.add(
-            GLEntry(
-                journal_batch_id=batch_id,
-                account_id=line["account_id"],
-                debit_amount=_money(line["debit_amount"]),
-                credit_amount=_money(line["credit_amount"]),
-                reference_type=line["reference_type"],
-                reference_id=int(line["reference_id"]),
-                invoice_id=context.get("invoice_id"),
-                shipment_id=context.get("shipment_id"),
-                payment_id=context.get("payment_id"),
-                event_type=event_type,
-                event_id=str(context["event_id"]),
-                posting_date=context.get("posting_date"),
-                created_at=line.get("created_at", datetime.utcnow()),
-            )
-        )
-    return batch_id
+    return _save_batch(db, event_type=event_type, context=context, entries=entries)
 
 
 def _shipment_lines(db: Session, invoice: Invoice, shipped_ratio: Decimal) -> tuple[Decimal, Decimal]:
@@ -266,15 +297,12 @@ def _shipment_lines(db: Session, invoice: Invoice, shipped_ratio: Decimal) -> tu
 
 
 def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> int:
+    event_type = eventType.upper()
     event_id = str(context["event_id"])
     with db.begin_nested():
-        already_posted = (
-            db.query(GLPostingAudit)
-            .filter(GLPostingAudit.event_type == eventType, GLPostingAudit.event_id == event_id)
-            .first()
-        )
-        if already_posted:
-            return already_posted.journal_batch_id
+        existing = db.query(JournalBatch).filter(and_(JournalBatch.event_type == event_type, JournalBatch.event_id == event_id)).first()
+        if existing:
+            return existing.id
 
         company_id = int(context["company_id"])
         cash = _resolve_account(db, company_id, codes=["1000", "10100"], names=["cash"])
@@ -283,14 +311,12 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
         inventory = _resolve_account(db, company_id, codes=["1200", "13100"], names=["inventory"])
         cogs = _resolve_account(db, company_id, codes=["5000", "5100"], names=["cost of goods sold", "cogs"])
         unearned = _resolve_account(db, company_id, codes=["2300", "2200"], names=["unearned", "customer deposit"])
+        bad_debt = _resolve_account(db, company_id, codes=["6100"], names=["bad debt expense"])
 
         lines: list[dict[str, Any]] = []
-        posting_date = context.get("posting_date") or datetime.utcnow().date()
         invoice_id = context.get("invoice_id")
-        shipment_id = context.get("shipment_id")
-        payment_id = context.get("payment_id")
 
-        if eventType == "shipment":
+        if event_type in {"INVOICE_POSTED", "SHIPMENT_POSTED", "SHIPMENT", "SHIPMENT_FOR_PREPAID_ORDER"}:
             invoice: Invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
             if not invoice:
                 raise GLPostingError("Invoice not found for shipment posting.")
@@ -302,31 +328,42 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
             if revenue_amount <= ZERO:
                 raise GLPostingError("Shipment posting amount must be > 0.")
 
-            unearned_available = _posted_unearned_balance(db, invoice.id, unearned.id)
-            unearned_to_recognize = min(unearned_available, revenue_amount)
-            ar_to_recognize = _money(revenue_amount - unearned_to_recognize)
-
-            if ar_to_recognize > ZERO:
+            if event_type == "INVOICE_POSTED":
                 lines.extend([
-                    {"account_id": ar.id, "debit_amount": ar_to_recognize, "credit_amount": ZERO},
-                    {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": ar_to_recognize},
+                    {"account_id": ar.id, "debit_amount": revenue_amount, "credit_amount": ZERO},
+                    {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": revenue_amount},
                 ])
-            if unearned_to_recognize > ZERO:
+            elif event_type == "SHIPMENT_FOR_PREPAID_ORDER":
                 lines.extend([
-                    {"account_id": unearned.id, "debit_amount": unearned_to_recognize, "credit_amount": ZERO},
-                    {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": unearned_to_recognize},
+                    {"account_id": unearned.id, "debit_amount": revenue_amount, "credit_amount": ZERO},
+                    {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": revenue_amount},
                 ])
+            else:
+                unearned_available = _posted_unearned_balance(db, invoice.id, unearned.id)
+                unearned_to_recognize = min(unearned_available, revenue_amount)
+                ar_to_recognize = _money(revenue_amount - unearned_to_recognize)
+                if ar_to_recognize > ZERO:
+                    lines.extend([
+                        {"account_id": ar.id, "debit_amount": ar_to_recognize, "credit_amount": ZERO},
+                        {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": ar_to_recognize},
+                    ])
+                if unearned_to_recognize > ZERO:
+                    lines.extend([
+                        {"account_id": unearned.id, "debit_amount": unearned_to_recognize, "credit_amount": ZERO},
+                        {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": unearned_to_recognize},
+                    ])
 
-            lines.extend([
-                {"account_id": cogs.id, "debit_amount": cogs_amount, "credit_amount": ZERO},
-                {"account_id": inventory.id, "debit_amount": ZERO, "credit_amount": cogs_amount},
-            ])
-        elif eventType == "payment":
+            if cogs_amount > ZERO:
+                lines.extend([
+                    {"account_id": cogs.id, "debit_amount": cogs_amount, "credit_amount": ZERO},
+                    {"account_id": inventory.id, "debit_amount": ZERO, "credit_amount": cogs_amount},
+                ])
+        elif event_type in {"PAYMENT_POSTED", "PAYMENT"}:
             amount = _money(context["amount"])
             if amount <= ZERO:
                 raise GLPostingError("Payment must be greater than zero.")
             invoice_status = (context.get("invoice_status") or "").upper()
-            if invoice_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
+            if invoice_status and invoice_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
                 raise GLPostingError("Payments can only be posted after the invoice has recognized AR.")
             ar_outstanding = _posted_ar_balance(db, int(invoice_id), ar.id)
             if ar_outstanding < amount:
@@ -335,44 +372,95 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
                 {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
                 {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
             ])
-        elif eventType == "cash_sale":
+        elif event_type == "CASH_SALE" or eventType.lower() == "cash_sale":
             amount = _money(context["amount"])
-            if amount <= ZERO:
-                raise GLPostingError("Cash sale amount must be greater than zero.")
             lines.extend([
                 {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
                 {"account_id": revenue.id, "debit_amount": ZERO, "credit_amount": amount},
             ])
-            cogs_amount = _money(context.get("cogs_amount", ZERO))
-            if cogs_amount > ZERO:
-                lines.extend([
-                    {"account_id": cogs.id, "debit_amount": cogs_amount, "credit_amount": ZERO},
-                    {"account_id": inventory.id, "debit_amount": ZERO, "credit_amount": cogs_amount},
-                ])
+        elif event_type == "PREPAYMENT_RECEIVED":
+            amount = _money(context["amount"])
+            lines.extend([
+                {"account_id": cash.id, "debit_amount": amount, "credit_amount": ZERO},
+                {"account_id": unearned.id, "debit_amount": ZERO, "credit_amount": amount},
+            ])
+        elif event_type == "CREDIT_MEMO":
+            amount = _money(context["amount"])
+            lines.extend([
+                {"account_id": revenue.id, "debit_amount": amount, "credit_amount": ZERO},
+                {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
+            ])
+        elif event_type == "WRITE_OFF":
+            amount = _money(context["amount"])
+            lines.extend([
+                {"account_id": bad_debt.id, "debit_amount": amount, "credit_amount": ZERO},
+                {"account_id": ar.id, "debit_amount": ZERO, "credit_amount": amount},
+            ])
         else:
             raise GLPostingError(f"Unsupported eventType: {eventType}")
 
         _validate_revenue_cash_direction(eventType, lines, cash.id, revenue.id)
-        batch_entries = [
-            {
-                "account_id": line["account_id"],
-                "debit_amount": _money(line["debit_amount"]),
-                "credit_amount": _money(line["credit_amount"]),
-                "reference_type": eventType,
-                "reference_id": int(context.get("reference_id") or invoice_id or payment_id or 0),
-                "created_at": datetime.utcnow(),
-            }
-            for line in lines
-        ]
-        batch_id = postJournalEntry(db, event_type=eventType, context=context, entries=batch_entries)
+        batch_entries = [{**line, "created_at": datetime.utcnow()} for line in lines]
+        _assert_balanced(batch_entries)
+        batch_id = postJournalEntry(db, event_type=event_type, context=context, entries=batch_entries)
 
-        db.add(
-            GLPostingAudit(
-                event_type=eventType,
-                event_id=event_id,
-                journal_batch_id=batch_id,
-                payload=str(context),
-            )
-        )
+        db.merge(GLPostingAudit(event_type=event_type, event_id=event_id, journal_batch_id=batch_id, payload=str(context)))
         db.flush()
         return batch_id
+
+
+def run_gl_diagnostics(db: Session) -> dict[str, Any]:
+    negative_assets = []
+    asset_rows = (
+        db.query(
+            Account.id,
+            Account.name,
+            func.coalesce(func.sum(GLEntry.debit_amount), 0).label("debits"),
+            func.coalesce(func.sum(GLEntry.credit_amount), 0).label("credits"),
+        )
+        .join(GLEntry, GLEntry.account_id == Account.id)
+        .filter(func.upper(Account.type) == "ASSET")
+        .group_by(Account.id, Account.name)
+        .all()
+    )
+    for row in asset_rows:
+        bal = _money(row.debits) - _money(row.credits)
+        if bal < ZERO:
+            negative_assets.append({"account_id": row.id, "account_name": row.name, "balance": bal})
+
+    unbalanced_batches = []
+    batch_rows = (
+        db.query(
+            JournalBatch.id,
+            func.coalesce(func.sum(JournalBatchLine.debit_amount), 0).label("debits"),
+            func.coalesce(func.sum(JournalBatchLine.credit_amount), 0).label("credits"),
+        )
+        .join(JournalBatchLine, JournalBatchLine.batch_id == JournalBatch.id)
+        .group_by(JournalBatch.id)
+        .all()
+    )
+    for row in batch_rows:
+        if _money(row.debits) != _money(row.credits):
+            unbalanced_batches.append({"batch_id": row.id, "debits": _money(row.debits), "credits": _money(row.credits)})
+
+    payments_without_ar = (
+        db.query(GLPostingAudit.event_id)
+        .filter(GLPostingAudit.event_type.in_(["PAYMENT", "PAYMENT_POSTED"]))
+        .filter(
+            ~db.query(GLEntry.id)
+            .filter(and_(GLEntry.event_id == GLPostingAudit.event_id, GLEntry.reference_type.in_(["PAYMENT", "PAYMENT_POSTED"]), GLEntry.credit_amount > 0))
+            .exists()
+        )
+        .all()
+    )
+
+    # simple, portable version:
+    posted_invoice_ids = {row[0] for row in db.query(GLEntry.invoice_id).filter(GLEntry.invoice_id.isnot(None)).distinct().all()}
+    missing_revenue = [row.id for row in db.query(Invoice.id).filter(~Invoice.id.in_(posted_invoice_ids)).all()]
+
+    return {
+        "negative_asset_balances": negative_assets,
+        "unbalanced_journal_batches": unbalanced_batches,
+        "payments_without_ar_credit": [row[0] for row in payments_without_ar],
+        "revenue_without_gl_entries": missing_revenue,
+    }

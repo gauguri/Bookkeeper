@@ -8,6 +8,7 @@ result dict suitable for the analytics API.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +22,7 @@ from app.models import (
     Invoice,
     InvoiceLine,
     Item,
+    GLEntry,
     JournalEntry,
     JournalLine,
     Payment,
@@ -28,6 +30,8 @@ from app.models import (
     PurchaseOrderLine,
     Supplier,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 from .engine import (
     OPEN_STATUSES,
@@ -547,42 +551,38 @@ def calc_expense_kpis(db: Session, as_of: date) -> Dict[str, Any]:
 
 
 def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
-    revenue = float(get_revenue_for_period(db, start, end))
-    cogs = float(get_cogs_for_period(db, start, end))
-    gross_profit = revenue - cogs
-
-    # Operating expenses from journal entries
-    opex = float(
-        db.query(func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0))
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
-        .filter(Account.type == "EXPENSE")
-        .filter(JournalEntry.txn_date >= start, JournalEntry.txn_date <= end)
-        .scalar() or 0
+    revenue = float(
+        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "REVENUE")
+        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        .scalar()
+        or 0
+    )
+    expenses = float(
+        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type.in_(("EXPENSE", "COGS")))
+        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        .scalar()
+        or 0
     )
 
-    operating_income = gross_profit - opex
-    net_income = operating_income  # Simplified (no tax/interest yet)
-
-    gross_margin = (gross_profit / revenue * 100) if revenue else 0.0
-    operating_margin = (operating_income / revenue * 100) if revenue else 0.0
-    net_margin = (net_income / revenue * 100) if revenue else 0.0
+    net_income = revenue - expenses
 
     return {
         "revenue": round(revenue, 2),
-        "cogs": round(cogs, 2),
-        "gross_profit": round(gross_profit, 2),
-        "gross_margin": round(gross_margin, 2),
-        "operating_expenses": round(opex, 2),
-        "operating_income": round(operating_income, 2),
-        "operating_margin": round(operating_margin, 2),
+        "cogs": 0.0,
+        "gross_profit": round(revenue - expenses, 2),
+        "gross_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
+        "operating_expenses": round(expenses, 2),
+        "operating_income": round(net_income, 2),
+        "operating_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
         "net_income": round(net_income, 2),
-        "net_margin": round(net_margin, 2),
+        "net_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
         "waterfall": [
             {"label": "Revenue", "value": round(revenue, 2), "type": "total"},
-            {"label": "COGS", "value": round(-cogs, 2), "type": "decrease"},
-            {"label": "Gross Profit", "value": round(gross_profit, 2), "type": "subtotal"},
-            {"label": "Operating Expenses", "value": round(-opex, 2), "type": "decrease"},
+            {"label": "Expenses", "value": round(-expenses, 2), "type": "decrease"},
             {"label": "Net Income", "value": round(net_income, 2), "type": "total"},
         ],
     }
@@ -594,98 +594,63 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
 
 
 def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
-    assets = float(get_account_balances_by_type(db, "ASSET", as_of))
-    liabilities = float(abs(get_account_balances_by_type(db, "LIABILITY", as_of)))
-    equity = float(get_account_balances_by_type(db, "EQUITY", as_of))
-
-    inventory_gl_balance = float(
-        db.query(
-            func.coalesce(
-                func.sum(
-                    case(
-                        (Account.normal_balance == "debit", JournalLine.debit - JournalLine.credit),
-                        else_=JournalLine.credit - JournalLine.debit,
-                    )
-                ),
-                0,
-            )
-        )
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
+    assets = float(
+        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
         .filter(Account.type == "ASSET")
-        .filter(func.lower(Account.name).like("%inventory%"))
-        .filter(JournalEntry.txn_date <= as_of)
+        .filter(GLEntry.posting_date <= as_of)
+        .scalar()
+        or 0
+    )
+    liabilities = float(
+        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "LIABILITY")
+        .filter(GLEntry.posting_date <= as_of)
+        .scalar()
+        or 0
+    )
+    retained_earnings = float(
+        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "EQUITY")
+        .filter(GLEntry.posting_date <= as_of)
         .scalar()
         or 0
     )
 
-    inventory_value = max(inventory_gl_balance, 0.0)
+    income_statement = calc_pnl(db, date(as_of.year, 1, 1), as_of)
+    net_income = float(income_statement["net_income"])
+    total_equity = retained_earnings + net_income
 
-    current_assets_components: List[Dict[str, Any]] = []
-    asset_components = (
-        db.query(
-            Account.id,
-            Account.name,
-            Account.normal_balance,
-            func.coalesce(func.sum(JournalLine.debit), 0).label("total_debits"),
-            func.coalesce(func.sum(JournalLine.credit), 0).label("total_credits"),
-        )
-        .join(JournalLine, JournalLine.account_id == Account.id)
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .filter(Account.type == "ASSET")
-        .filter(JournalEntry.txn_date <= as_of)
-        .group_by(Account.id, Account.name, Account.normal_balance)
-        .all()
-    )
-
-    for component in asset_components:
-        net = float(component.total_debits or 0) - float(component.total_credits or 0)
-        is_inventory = "inventory" in (component.name or "").lower()
-        include_in_current_assets = not is_inventory or net < 0
-        if not include_in_current_assets:
-            continue
-        current_assets_components.append(
-            {
-                "component_name": component.name,
-                "account_ids": [component.id],
-                "total_debits": round(float(component.total_debits or 0), 2),
-                "total_credits": round(float(component.total_credits or 0), 2),
-                "net": round(net, 2),
-                "normal_balance": str(component.normal_balance or "debit").upper(),
-            }
-        )
-
-    current_assets_total = round(sum(item["net"] for item in current_assets_components), 2)
+    diff = round(assets - (liabilities + total_equity), 2)
+    if abs(diff) > 0.01:
+        LOGGER.warning("Financial statement reconciliation warning difference=%s as_of=%s", diff, as_of.isoformat())
 
     return {
         "as_of": as_of,
         "total_assets": round(assets, 2),
         "total_liabilities": round(liabilities, 2),
-        "total_equity": round(equity, 2),
-        "inventory_value": round(inventory_value, 2),
+        "total_equity": round(total_equity, 2),
+        "retained_earnings": round(retained_earnings, 2),
+        "current_period_net_income": round(net_income, 2),
+        "reconciliation_difference": diff,
         "net_assets": round(assets - liabilities, 2),
         "sections": {
-            "assets": {
-                "label": "Assets",
-                "total": round(assets, 2),
-                "items": [
-                    {"label": "Current Assets", "value": current_assets_total},
-                    {"label": "Inventory", "value": round(inventory_value, 2)},
-                ],
-            },
-            "liabilities": {
-                "label": "Liabilities",
-                "total": round(liabilities, 2),
-                "items": [],
-            },
+            "assets": {"label": "Assets", "total": round(assets, 2), "items": []},
+            "liabilities": {"label": "Liabilities", "total": round(liabilities, 2), "items": []},
             "equity": {
                 "label": "Equity",
-                "total": round(equity, 2),
-                "items": [],
+                "total": round(total_equity, 2),
+                "items": [
+                    {"label": "Retained Earnings", "value": round(retained_earnings, 2)},
+                    {"label": "Current Period Net Income", "value": round(net_income, 2)},
+                ],
             },
         },
-        "current_assets_total": current_assets_total,
-        "current_assets_components": sorted(current_assets_components, key=lambda item: item["component_name"].lower()),
+        "income_statement": income_statement,
+        "current_assets_total": round(assets, 2),
+        "current_assets_components": [],
     }
 
 

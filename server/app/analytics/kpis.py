@@ -551,6 +551,7 @@ def calc_expense_kpis(db: Session, as_of: date) -> Dict[str, Any]:
 
 
 def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
+    gl_date_field = "posting_date"
     revenue_gl = float(
         db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
         .join(Account, Account.id == GLEntry.account_id)
@@ -568,10 +569,28 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
         or 0
     )
 
+    invoice_query = (
+        db.query(Invoice)
+        .filter(Invoice.status.in_(REVENUE_STATUSES))
+        .filter(Invoice.issue_date >= start, Invoice.issue_date <= end)
+    )
+    invoices_finalized = invoice_query.count()
+    invoices_posted_to_gl = invoice_query.filter(Invoice.posted_to_gl.is_(True)).count()
+    gl_entries_count_for_revenue = int(
+        db.query(func.count(GLEntry.id))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "REVENUE")
+        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        .scalar()
+        or 0
+    )
+
     revenue_operational = float(get_revenue_for_period(db, start, end))
     revenue = revenue_gl
     net_income = revenue - expenses
     mismatch = round(revenue_gl - revenue_operational, 2)
+    tolerance = 1.0
+    show_mismatch_banner = (revenue_operational > 0 and revenue_gl == 0) or abs(mismatch) > tolerance
 
     return {
         "revenue": round(revenue, 2),
@@ -582,7 +601,21 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
             "gl_revenue": round(revenue_gl, 2),
             "operational_revenue": round(revenue_operational, 2),
             "difference": mismatch,
-            "within_threshold": abs(mismatch) <= 1.0,
+            "within_threshold": abs(mismatch) <= tolerance,
+            "show_banner": show_mismatch_banner,
+            "tolerance": tolerance,
+            "why": [
+                "Invoices not posted to GL",
+                "Missing revenue account mappings",
+                "Period filter mismatch (invoice_date vs posted_at)",
+                "Revenue posted to non-income accounts",
+            ],
+        },
+        "debug": {
+            "invoices_finalized": invoices_finalized,
+            "invoices_posted_to_gl": invoices_posted_to_gl,
+            "gl_entries_count_for_revenue": gl_entries_count_for_revenue,
+            "gl_date_field": gl_date_field,
         },
         "cogs": 0.0,
         "gross_profit": round(revenue - expenses, 2),

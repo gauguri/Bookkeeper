@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Inventory, InventoryReservation, Invoice, InvoiceLine, Item, SalesRequest, SalesRequestLine
+from app.models import Customer, GLEntry, Inventory, InventoryReservation, Invoice, InvoiceLine, Item, SalesRequest, SalesRequestLine
 
 
 @pytest.fixture()
@@ -188,5 +188,37 @@ def test_ship_invoice_rejects_when_on_hand_is_insufficient(client: TestClient):
     try:
         reservation = db.query(InventoryReservation).filter(InventoryReservation.sales_request_id == 1).first()
         assert reservation.released_at is None
+    finally:
+        db_gen.close()
+
+
+def test_send_invoice_posts_to_gl_and_exposes_gl_status(client: TestClient):
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        invoice = db.query(Invoice).filter(Invoice.id == 1).first()
+        invoice.status = "DRAFT"
+        db.commit()
+    finally:
+        db_gen.close()
+
+    response = client.post("/api/invoices/1/send")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "SENT"
+    assert payload["posted_to_gl"] is True
+    assert payload["posted_journal_entry_id"] is not None
+
+    status_response = client.get("/api/invoices/1/gl-status")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["posted_to_gl"] is True
+    assert status_payload["posted_journal_entry_id"] is not None
+
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        rev_entries = db.query(GLEntry).filter(GLEntry.invoice_id == 1).all()
+        assert len(rev_entries) >= 2
     finally:
         db_gen.close()

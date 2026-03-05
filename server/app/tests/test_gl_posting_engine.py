@@ -156,7 +156,7 @@ def test_payment_before_shipment_is_rejected():
     db = create_session()
     invoice = seed_invoice(db)
 
-    with pytest.raises(GLPostingError, match="recognized AR"):
+    with pytest.raises(GLPostingError, match="Negative AR"):
         postJournalEntries(
             "payment",
             {
@@ -284,7 +284,7 @@ def test_post_journal_entry_rejects_unbalanced_batches():
         )
 
 
-def test_invoice_posted_template_and_idempotency():
+def test_invoice_posted_template_is_balanced_and_idempotent():
     db = create_session()
     invoice = seed_invoice(db)
 
@@ -300,7 +300,10 @@ def test_invoice_posted_template_and_idempotency():
 
     assert batch_id == again
     assert db.query(JournalBatch).count() == 1
-    assert db.query(JournalBatchLine).filter(JournalBatchLine.batch_id == batch_id).count() == 4
+    rows, dr, cr = _batch_totals(db, batch_id)
+    assert dr == cr == Decimal("100.00")
+    assert len(rows) == 2
+    assert db.query(JournalBatchLine).filter(JournalBatchLine.batch_id == batch_id).count() == 2
 
 
 def test_credit_memo_and_write_off_templates_balance():
@@ -347,3 +350,25 @@ def test_credit_memo_and_write_off_templates_balance():
     )
     _, dr2, cr2 = _batch_totals(db, wo_batch)
     assert dr2 == cr2 == Decimal("10.00")
+
+
+def test_invoice_posted_splits_subtotal_and_tax():
+    db = create_session()
+    invoice = seed_invoice(db)
+    invoice.subtotal = Decimal("90.00")
+    invoice.tax_total = Decimal("10.00")
+    invoice.total = Decimal("100.00")
+    db.flush()
+
+    batch_id = postJournalEntries("INVOICE_POSTED", {
+        "event_id": f"invoice-posted-tax:{invoice.id}",
+        "company_id": 1,
+        "invoice_id": invoice.id,
+        "reference_id": invoice.id,
+        "posting_date": date(2024, 1, 2),
+    }, db)
+
+    rows = db.query(GLEntry).filter(GLEntry.journal_batch_id == batch_id).all()
+    assert sum((Decimal(r.debit_amount or 0) for r in rows), Decimal("0.00")) == Decimal("100.00")
+    assert sum((Decimal(r.credit_amount or 0) for r in rows), Decimal("0.00")) == Decimal("100.00")
+    assert len(rows) == 3

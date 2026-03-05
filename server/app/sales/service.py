@@ -452,7 +452,7 @@ def apply_payment(
         normalized_status = (invoice.status or "").upper()
         if normalized_status == "VOID":
             raise ValueError("Payments can only be applied to active invoices.")
-        if normalized_status not in {"POSTED", "SHIPPED", "PARTIALLY_PAID"}:
+        if normalized_status not in {"SENT", "POSTED", "SHIPPED", "PARTIALLY_PAID"}:
             raise ValueError("Payment rejected: invoice must be posted/shipped before recording payment.")
     applications_inputs: List[PaymentApplicationInput] = []
     for application in normalized_applications:
@@ -530,7 +530,7 @@ def create_invoice_payment(db: Session, payload: dict) -> Payment:
         raise ValueError("Invoice not found.")
     if invoice.status == "VOID":
         raise ValueError("Cannot record payment for a void invoice.")
-    if (invoice.status or "").upper() not in {"POSTED", "SHIPPED", "PARTIALLY_PAID"}:
+    if (invoice.status or "").upper() not in {"SENT", "POSTED", "SHIPPED", "PARTIALLY_PAID"}:
         raise ValueError("Payment rejected: invoice must be posted/shipped before recording payment.")
 
     recalculate_invoice_balance(db, invoice)

@@ -35,4 +35,5 @@ def test_balance_sheet_reconciliation_difference_is_reported():
 
     assert result["total_assets"] == 500.0
     assert result["total_equity"] == 500.0
+    assert result["inventory_value"] == 0.0
     assert result["reconciliation_difference"] == 0.0

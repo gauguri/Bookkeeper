@@ -598,9 +598,28 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
     liabilities = float(abs(get_account_balances_by_type(db, "LIABILITY", as_of)))
     equity = float(get_account_balances_by_type(db, "EQUITY", as_of))
 
-    inventory_value = float(
-        db.query(func.coalesce(func.sum(Inventory.total_value), 0)).scalar() or 0
+    inventory_gl_balance = float(
+        db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (Account.normal_balance == "debit", JournalLine.debit - JournalLine.credit),
+                        else_=JournalLine.credit - JournalLine.debit,
+                    )
+                ),
+                0,
+            )
+        )
+        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
+        .join(Account, Account.id == JournalLine.account_id)
+        .filter(Account.type == "ASSET")
+        .filter(func.lower(Account.name).like("%inventory%"))
+        .filter(JournalEntry.txn_date <= as_of)
+        .scalar()
+        or 0
     )
+
+    inventory_value = max(inventory_gl_balance, 0.0)
 
     return {
         "total_assets": round(assets, 2),

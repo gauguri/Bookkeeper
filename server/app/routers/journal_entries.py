@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -70,6 +71,8 @@ def list_journal_entries(
     limit: int = Query(50, ge=1, le=200),
     search: Optional[str] = Query(None),
     account_id: Optional[int] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    end_date: Optional[date] = Query(None),
     type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
@@ -77,6 +80,13 @@ def list_journal_entries(
     if search:
         like = f"%{search}%"
         query = query.filter(JournalEntry.description.ilike(like))
+
+    if end_date:
+        query = query.filter(JournalEntry.txn_date <= end_date)
+
+    parsed_account_ids: set[int] = set()
+    if account_ids:
+        parsed_account_ids = {int(value.strip()) for value in account_ids.split(",") if value.strip().isdigit()}
 
     entries = query.limit(limit * 3).all()
     account_records = db.query(Account).all()
@@ -90,7 +100,10 @@ def list_journal_entries(
         credit_line = next((line for line in entry.lines if Decimal(line.credit or 0) > 0), None)
         if not debit_line or not credit_line:
             continue
-        if account_id and account_id not in {debit_line.account_id, credit_line.account_id}:
+        line_account_ids = {debit_line.account_id, credit_line.account_id}
+        if account_id and account_id not in line_account_ids:
+            continue
+        if parsed_account_ids and not (line_account_ids & parsed_account_ids):
             continue
         if type and type not in {account_type_lookup.get(debit_line.account_id), account_type_lookup.get(credit_line.account_id)}:
             continue

@@ -102,12 +102,15 @@ class BalanceSheetSection(BaseModel):
 
 
 class BalanceSheetResponse(BaseModel):
+    as_of: date
     total_assets: float
     total_liabilities: float
     total_equity: float
     inventory_value: float
     net_assets: float
     sections: Dict[str, BalanceSheetSection]
+    current_assets_total: float
+    current_assets_components: List[Dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------

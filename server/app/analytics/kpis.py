@@ -621,7 +621,44 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
 
     inventory_value = max(inventory_gl_balance, 0.0)
 
+    current_assets_components: List[Dict[str, Any]] = []
+    asset_components = (
+        db.query(
+            Account.id,
+            Account.name,
+            Account.normal_balance,
+            func.coalesce(func.sum(JournalLine.debit), 0).label("total_debits"),
+            func.coalesce(func.sum(JournalLine.credit), 0).label("total_credits"),
+        )
+        .join(JournalLine, JournalLine.account_id == Account.id)
+        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
+        .filter(Account.type == "ASSET")
+        .filter(JournalEntry.txn_date <= as_of)
+        .group_by(Account.id, Account.name, Account.normal_balance)
+        .all()
+    )
+
+    for component in asset_components:
+        net = float(component.total_debits or 0) - float(component.total_credits or 0)
+        is_inventory = "inventory" in (component.name or "").lower()
+        include_in_current_assets = not is_inventory or net < 0
+        if not include_in_current_assets:
+            continue
+        current_assets_components.append(
+            {
+                "component_name": component.name,
+                "account_ids": [component.id],
+                "total_debits": round(float(component.total_debits or 0), 2),
+                "total_credits": round(float(component.total_credits or 0), 2),
+                "net": round(net, 2),
+                "normal_balance": str(component.normal_balance or "debit").upper(),
+            }
+        )
+
+    current_assets_total = round(sum(item["net"] for item in current_assets_components), 2)
+
     return {
+        "as_of": as_of,
         "total_assets": round(assets, 2),
         "total_liabilities": round(liabilities, 2),
         "total_equity": round(equity, 2),
@@ -632,7 +669,7 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
                 "label": "Assets",
                 "total": round(assets, 2),
                 "items": [
-                    {"label": "Current Assets", "value": round(assets - inventory_value, 2)},
+                    {"label": "Current Assets", "value": current_assets_total},
                     {"label": "Inventory", "value": round(inventory_value, 2)},
                 ],
             },
@@ -647,6 +684,8 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
                 "items": [],
             },
         },
+        "current_assets_total": current_assets_total,
+        "current_assets_components": sorted(current_assets_components, key=lambda item: item["component_name"].lower()),
     }
 
 

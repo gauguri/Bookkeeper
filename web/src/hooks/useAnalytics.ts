@@ -136,11 +136,21 @@ export type FinancialHealthData = {
 };
 
 export type BalanceSheetData = {
+  as_of: string;
   total_assets: number;
   total_liabilities: number;
   total_equity: number;
   inventory_value: number;
   net_assets: number;
+  current_assets_total: number;
+  current_assets_components: {
+    component_name: string;
+    account_ids: number[];
+    total_debits: number;
+    total_credits: number;
+    net: number;
+    normal_balance: string;
+  }[];
   sections: Record<string, { label: string; total: number; items: { label: string; value: number }[] }>;
 };
 

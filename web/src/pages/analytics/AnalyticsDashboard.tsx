@@ -61,6 +61,7 @@ export default function AnalyticsDashboard() {
   const topKpis = topKpiKeys
     .map((key) => data.kpis.find((k) => k.kpi_key === key))
     .filter(Boolean);
+  const revenueMismatch = !data.revenue_reconciliation.within_threshold;
 
   return (
     <div className="space-y-6">
@@ -84,6 +85,16 @@ export default function AnalyticsDashboard() {
             invertDirection={INVERTED_KPIS.has(kpi!.kpi_key)}
           />
         ))}
+      </div>
+
+      <div className="app-card p-4 text-xs text-muted">
+        <p>Revenue YTD data source: <span className="font-semibold">Operational (Invoices)</span></p>
+        {revenueMismatch && (
+          <p className="mt-2 inline-flex items-center gap-1 text-amber-600">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Revenue mismatch: GL {formatCurrency(data.revenue_reconciliation.gl_revenue)} vs Invoices {formatCurrency(data.revenue_reconciliation.operational_revenue)}
+          </p>
+        )}
       </div>
 
       {/* Charts Row */}

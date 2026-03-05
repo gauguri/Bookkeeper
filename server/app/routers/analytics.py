@@ -40,6 +40,7 @@ from app.analytics.kpis import (
     calc_overdue_receivables,
     calc_pnl,
     calc_quick_ratio,
+    calc_revenue_reconciliation,
     calc_revenue_kpis,
     calc_top_customers_by_outstanding,
     calc_top_vendors_by_spend,
@@ -122,6 +123,7 @@ def analytics_dashboard(
 
     anomalies_raw = detect_transaction_anomalies(db, end)
     pnl = calc_pnl(db, start, end)
+    reconciliation = calc_revenue_reconciliation(db, start, end)
 
     return DashboardResponse(
         kpis=kpis,
@@ -130,6 +132,7 @@ def analytics_dashboard(
         ap_aging=ap_aging,
         anomalies=anomalies_raw[:5],
         pnl_summary=pnl,
+        revenue_reconciliation=reconciliation,
         computed_at=now,
     )
 
@@ -333,6 +336,17 @@ def pnl_analytics(
 ):
     start, end = _resolve_period(period, start_date, end_date)
     return PnlResponse(**calc_pnl(db, start, end))
+
+
+@router.get("/revenue-reconciliation")
+def revenue_reconciliation(
+    period: str = Query("ytd"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    start, end = _resolve_period(period, start_date, end_date)
+    return calc_revenue_reconciliation(db, start, end)
 
 
 # ---------------------------------------------------------------------------

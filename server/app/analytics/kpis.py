@@ -50,6 +50,11 @@ D = Decimal
 ZERO = D("0")
 HUNDRED = D("100")
 
+# The seed chart-of-accounts uses type "INCOME" for revenue accounts while the
+# GL engine's auto-create fallback uses "REVENUE".  Accept both so the P&L
+# correctly aggregates revenue regardless of which label a given account carries.
+REVENUE_ACCOUNT_TYPES = ("REVENUE", "INCOME")
+
 
 def _safe_div(num: Decimal, denom: Decimal) -> Decimal:
     if denom == 0:
@@ -555,7 +560,7 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
     revenue_gl = float(
         db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
         .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "REVENUE")
+        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
         .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
         .scalar()
         or 0
@@ -595,7 +600,7 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
     gl_entries_count_for_revenue = int(
         db.query(func.count(GLEntry.id))
         .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "REVENUE")
+        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
         .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
         .scalar()
         or 0
@@ -653,7 +658,7 @@ def calc_revenue_reconciliation(db: Session, start: date, end: date) -> Dict[str
     gl_revenue = float(
         db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
         .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "REVENUE")
+        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
         .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
         .scalar()
         or 0

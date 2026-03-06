@@ -23,7 +23,14 @@ def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
 
-def _resolve_account(db: Session, company_id: int, *, codes: list[str], names: list[str]) -> Account:
+def _resolve_account(
+    db: Session,
+    company_id: int,
+    *,
+    codes: list[str],
+    names: list[str],
+    preferred_types: list[str] | None = None,
+) -> Account:
     account = (
         db.query(Account)
         .filter(Account.company_id == company_id, Account.code.in_(codes), Account.is_active.is_(True))
@@ -35,6 +42,15 @@ def _resolve_account(db: Session, company_id: int, *, codes: list[str], names: l
 
     lowered = [n.lower() for n in names]
     rows = db.query(Account).filter(Account.company_id == company_id, Account.is_active.is_(True)).all()
+
+    # When preferred_types is given, first pass matches name AND type so that
+    # e.g. "revenue" doesn't accidentally resolve to "Unearned Revenues" (LIABILITY).
+    if preferred_types:
+        type_set = {t.upper() for t in preferred_types}
+        for row in rows:
+            if (row.type or "").upper() in type_set and any(candidate in (row.name or "").lower() for candidate in lowered):
+                return row
+
     for row in rows:
         if any(candidate in (row.name or "").lower() for candidate in lowered):
             return row
@@ -305,14 +321,14 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
             return existing.id
 
         company_id = int(context["company_id"])
-        cash = _resolve_account(db, company_id, codes=["1000", "10100"], names=["cash"])
-        ar = _resolve_account(db, company_id, codes=["1100", "11100"], names=["accounts receivable", "a/r"])
-        revenue = _resolve_account(db, company_id, codes=["4000", "4100"], names=["revenue", "sales"])
-        tax_payable = _resolve_account(db, company_id, codes=["2200", "2100"], names=["sales tax payable", "tax payable"])
-        inventory = _resolve_account(db, company_id, codes=["1200", "13100"], names=["inventory"])
-        cogs = _resolve_account(db, company_id, codes=["5000", "5100"], names=["cost of goods sold", "cogs"])
-        unearned = _resolve_account(db, company_id, codes=["2300", "2200"], names=["unearned", "customer deposit"])
-        bad_debt = _resolve_account(db, company_id, codes=["6100"], names=["bad debt expense"])
+        cash = _resolve_account(db, company_id, codes=["1000", "10100"], names=["cash"], preferred_types=["ASSET"])
+        ar = _resolve_account(db, company_id, codes=["1100", "11100"], names=["accounts receivable", "a/r"], preferred_types=["ASSET"])
+        revenue = _resolve_account(db, company_id, codes=["4000", "4100"], names=["revenue", "sales"], preferred_types=["REVENUE", "INCOME"])
+        tax_payable = _resolve_account(db, company_id, codes=["2200", "2100"], names=["sales tax payable", "tax payable"], preferred_types=["LIABILITY"])
+        inventory = _resolve_account(db, company_id, codes=["1200", "13100"], names=["inventory"], preferred_types=["ASSET"])
+        cogs = _resolve_account(db, company_id, codes=["5000", "5100"], names=["cost of goods sold", "cogs"], preferred_types=["COGS", "EXPENSE"])
+        unearned = _resolve_account(db, company_id, codes=["2300", "24500"], names=["unearned", "customer deposit"], preferred_types=["LIABILITY"])
+        bad_debt = _resolve_account(db, company_id, codes=["6100"], names=["bad debt expense"], preferred_types=["EXPENSE"])
 
         lines: list[dict[str, Any]] = []
         invoice_id = context.get("invoice_id")

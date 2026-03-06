@@ -79,7 +79,9 @@ def test_inventory_sale_net_income_flows_to_equity():
     bs = calc_balance_sheet(db, date(2025, 1, 31))
 
     assert pnl["revenue"] == 1000.0
-    assert pnl["operating_expenses"] == 600.0
+    assert pnl["cogs"] == 600.0
+    assert pnl["gross_profit"] == 400.0
+    assert pnl["operating_expenses"] == 0.0
     assert pnl["net_income"] == 400.0
     assert bs["current_period_net_income"] == 400.0
 

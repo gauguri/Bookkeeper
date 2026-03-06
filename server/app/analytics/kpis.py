@@ -565,10 +565,18 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
         .scalar()
         or 0
     )
-    expenses = float(
+    cogs = float(
         db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
         .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type.in_(("EXPENSE", "COGS")))
+        .filter(Account.type == "COGS")
+        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        .scalar()
+        or 0
+    )
+    operating_expenses = float(
+        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
+        .join(Account, Account.id == GLEntry.account_id)
+        .filter(Account.type == "EXPENSE")
         .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
         .scalar()
         or 0
@@ -608,7 +616,9 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
 
     revenue_operational = float(get_revenue_for_period(db, start, end))
     revenue = revenue_gl
-    net_income = revenue - expenses
+    gross_profit = revenue - cogs
+    operating_income = gross_profit - operating_expenses
+    net_income = operating_income
     mismatch = round(revenue_gl - revenue_operational, 2)
     tolerance = 1.0
     show_mismatch_banner = (revenue_operational > 0 and revenue_gl == 0) or abs(mismatch) > tolerance
@@ -638,21 +648,21 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
             "gl_entries_count_for_revenue": gl_entries_count_for_revenue,
             "gl_date_field": gl_date_field,
         },
-        "cogs": 0.0,
-        "gross_profit": round(revenue - expenses, 2),
-        "gross_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
-        "operating_expenses": round(expenses, 2),
-        "operating_income": round(net_income, 2),
-        "operating_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
+        "cogs": round(cogs, 2),
+        "gross_profit": round(gross_profit, 2),
+        "gross_margin": round((gross_profit / revenue * 100) if revenue else 0.0, 2),
+        "operating_expenses": round(operating_expenses, 2),
+        "operating_income": round(operating_income, 2),
+        "operating_margin": round((operating_income / revenue * 100) if revenue else 0.0, 2),
         "net_income": round(net_income, 2),
         "net_margin": round((net_income / revenue * 100) if revenue else 0.0, 2),
         "waterfall": [
             {"label": "Revenue", "value": round(revenue, 2), "type": "total"},
-            {"label": "Expenses", "value": round(-expenses, 2), "type": "decrease"},
+            {"label": "Cost of Goods Sold", "value": round(-cogs, 2), "type": "decrease"},
+            {"label": "Operating Expenses", "value": round(-operating_expenses, 2), "type": "decrease"},
             {"label": "Net Income", "value": round(net_income, 2), "type": "total"},
         ],
     }
-
 
 def calc_revenue_reconciliation(db: Session, start: date, end: date) -> Dict[str, Any]:
     gl_revenue = float(

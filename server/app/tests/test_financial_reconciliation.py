@@ -135,3 +135,15 @@ def test_draft_invoice_does_not_impact_gl_or_pnl_revenue():
     pnl = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
     assert pnl["revenue"] == 0.0
     assert pnl["revenue_operational"] == 0.0
+
+
+def test_pnl_no_invoices_returns_zeroed_debug_metrics():
+    db = create_session()
+
+    pnl = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
+
+    assert pnl["revenue"] == 0.0
+    assert pnl["revenue_operational"] == 0.0
+    assert pnl["reconciliation"]["show_banner"] is False
+    assert pnl["debug"]["invoices_finalized"] == 0
+    assert pnl["debug"]["invoices_posted_to_gl"] == 0

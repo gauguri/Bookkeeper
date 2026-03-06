@@ -222,3 +222,27 @@ def test_send_invoice_posts_to_gl_and_exposes_gl_status(client: TestClient):
         assert len(rev_entries) >= 2
     finally:
         db_gen.close()
+
+
+def test_ship_invoice_posts_ar_revenue_for_preexisting_sent_unposted_invoice(client: TestClient):
+    response = client.post("/api/invoices/1/ship")
+    assert response.status_code == 200
+
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        invoice = db.query(Invoice).filter(Invoice.id == 1).first()
+        assert invoice is not None
+        assert invoice.status == "SHIPPED"
+        assert invoice.posted_to_gl is True
+        assert invoice.gl_journal_entry_id is not None
+
+        ar_revenue_entries = (
+            db.query(GLEntry)
+            .filter(GLEntry.invoice_id == 1)
+            .filter(GLEntry.event_type == "INVOICE_POSTED")
+            .all()
+        )
+        assert len(ar_revenue_entries) >= 2
+    finally:
+        db_gen.close()

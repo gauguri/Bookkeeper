@@ -178,6 +178,43 @@ export type BalanceSheetData = {
   sections: Record<string, { label: string; total: number; items: { label: string; value: number }[] }>;
 };
 
+
+
+export type OperationalBacklogResponse = {
+  range: string;
+  filters: Record<string, string | number | boolean | null | undefined>;
+  kpis: {
+    total_backlog_value: number;
+    open_sales_requests: number;
+    open_invoices: number;
+    open_lines: number;
+  };
+  item_shortages: Array<{
+    item_id: number;
+    sku: string | null;
+    name: string;
+    on_hand: number;
+    reserved: number;
+    available: number;
+    backlog_qty: number;
+    shortage_qty: number;
+    next_inbound_eta: string | null;
+  }>;
+  customer_backlog: Array<{
+    customer_id: number | null;
+    customer_name: string;
+    backlog_value: number;
+    oldest_request_age_days: number;
+    status_mix: { open: number; partial: number; backordered: number };
+    risk_flag: "green" | "yellow" | "red";
+    risk_reasons: string[];
+  }>;
+  debug: {
+    computed_at: string;
+    source_counts: Record<string, number>;
+  };
+};
+
 export type ForecastData = {
   method: string;
   historical: number[];
@@ -300,5 +337,34 @@ export function useForecast(metric: string, method = "sma", periods = 3) {
         `/analytics/forecast/${metric}?method=${method}&periods=${periods}`
       ),
     staleTime: 300_000,
+  });
+}
+
+
+export function useOperationalBacklog(
+  range = "YTD",
+  filters: {
+    location_id?: string;
+    customer_id?: string;
+    sku?: string;
+    product?: string;
+    status?: string;
+    include_draft?: boolean;
+  } = {}
+) {
+  const query = buildQuery({
+    range,
+    location_id: filters.location_id,
+    customer_id: filters.customer_id,
+    sku: filters.sku,
+    product: filters.product,
+    status: filters.status,
+    include_draft: filters.include_draft ? "true" : undefined,
+  });
+
+  return useQuery({
+    queryKey: ["analytics", "operational-backlog", range, filters],
+    queryFn: () => apiFetch<OperationalBacklogResponse>(`/analytics/operational-backlog${query}`),
+    staleTime: 60_000,
   });
 }

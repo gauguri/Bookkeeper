@@ -23,6 +23,7 @@ from app.analytics.engine import (
     get_expense_trend,
 )
 from app.analytics.forecasting import cash_flow_forecast, forecast_metric
+from app.analytics.operational_backlog import OperationalBacklogFilters, get_operational_backlog
 from app.analytics.kpis import (
     calc_all_kpis,
     calc_ap_aging,
@@ -60,6 +61,7 @@ from app.analytics.schemas import (
     PnlResponse,
     ReceivablesResponse,
     RevenueResponse,
+    OperationalBacklogResponse,
 )
 
 router = APIRouter(
@@ -442,3 +444,36 @@ def forecast_endpoint(
 
     historical = [point["value"] for point in trend]
     return ForecastResponse(**forecast_metric(historical, method, periods))
+
+
+@router.get("/operational-backlog", response_model=OperationalBacklogResponse)
+def operational_backlog_analytics(
+    range: str = Query("YTD"),
+    location_id: Optional[int] = Query(None),
+    customer_id: Optional[int] = Query(None),
+    sku: Optional[str] = Query(None),
+    product: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    include_draft: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    period_map = {
+        "MTD": "current_month",
+        "QTD": "current_quarter",
+        "YTD": "ytd",
+        "LAST_MONTH": "last_month",
+        "LAST_QUARTER": "last_quarter",
+        "LAST_YEAR": "last_year",
+    }
+    resolved = period_map.get(range.upper(), "ytd")
+    start, end = _resolve_period(resolved, None, None)
+    filters = OperationalBacklogFilters(
+        location_id=location_id,
+        customer_id=customer_id,
+        sku=sku,
+        product=product,
+        status=status,
+        include_draft=include_draft,
+    )
+    payload = get_operational_backlog(db, start, end, range.upper(), filters)
+    return OperationalBacklogResponse(**payload)

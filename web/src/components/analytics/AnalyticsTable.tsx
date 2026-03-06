@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { ReactNode, useState } from "react";
 import { ChevronDown, ChevronUp, Download } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
 
 type Column<T> = {
   key: string;
   label: string;
-  format?: (value: any, row: T) => string;
+  format?: (value: any, row: T) => ReactNode;
   align?: "left" | "right" | "center";
   sparkline?: boolean;
 };

@@ -128,7 +128,7 @@ def _get_or_create_company(db: Session) -> Company:
 
 
 def _get_or_create_user(db: Session, company_id: int) -> User:
-    user = db.query(User).filter(User.email == "admin@bedrock.local").first()
+    user = db.query(User).filter(User.email == "admin").first()
     if user:
         if user.company_id != company_id:
             user.company_id = company_id
@@ -138,11 +138,11 @@ def _get_or_create_user(db: Session, company_id: int) -> User:
         user.is_admin = True
         return user
 
-    seed_password = _truncate_to_bcrypt_limit("password123")
+    seed_password = _truncate_to_bcrypt_limit("password123!")
 
     user = User(
         company_id=company_id,
-        email="admin@bedrock.local",
+        email="admin",
         full_name="System Admin",
         # passlib+bcrypt enforces bcrypt's 72-byte input limit.
         password_hash=pwd_context.hash(seed_password),
@@ -325,3 +325,4 @@ def run_seed():
 
 if __name__ == "__main__":
     run_seed()
+

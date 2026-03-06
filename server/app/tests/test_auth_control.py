@@ -32,9 +32,9 @@ def client():
         db.add(company)
         db.flush()
         seed_modules(db)
-        admin = User(company_id=company.id, email="admin@bedrock.local", full_name="Admin", password_hash=hash_password("password123"), is_admin=True, is_active=True, role="admin")
-        staff = User(company_id=company.id, email="staff@bedrock.local", full_name="Staff", password_hash=hash_password("password123"), is_admin=False, is_active=True, role="user")
-        limited_staff = User(company_id=company.id, email="limited@bedrock.local", full_name="Limited", password_hash=hash_password("password123"), is_admin=False, is_active=True, role="user")
+        admin = User(company_id=company.id, email="admin", full_name="Admin", password_hash=hash_password("password123!"), is_admin=True, is_active=True, role="admin")
+        staff = User(company_id=company.id, email="staff", full_name="Staff", password_hash=hash_password("password123!"), is_admin=False, is_active=True, role="user")
+        limited_staff = User(company_id=company.id, email="limited", full_name="Limited", password_hash=hash_password("password123!"), is_admin=False, is_active=True, role="user")
         db.add_all([admin, staff, limited_staff])
         db.flush()
         invoices_module = db.query(Module).filter(Module.key == "INVOICES").first()
@@ -56,7 +56,7 @@ def client():
 
 
 def _login(client: TestClient, email: str):
-    response = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    response = client.post("/api/auth/login", json={"email": email, "password": "password123!"})
     assert response.status_code == 200
     return response.json()["access_token"]
 
@@ -64,7 +64,7 @@ def _login(client: TestClient, email: str):
 @pytest.mark.real_auth
 def test_login_and_me_allowed_modules(client):
     test_client, _ = client
-    token = _login(test_client, "staff@bedrock.local")
+    token = _login(test_client, "staff")
     me = test_client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["allowed_modules"] == ["INVOICES"]
@@ -73,7 +73,7 @@ def test_login_and_me_allowed_modules(client):
 @pytest.mark.real_auth
 def test_non_admin_cannot_call_control(client):
     test_client, _ = client
-    token = _login(test_client, "staff@bedrock.local")
+    token = _login(test_client, "staff")
     response = test_client.get("/api/control/users", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
 
@@ -81,9 +81,9 @@ def test_non_admin_cannot_call_control(client):
         "/api/control/users",
         headers={"Authorization": f"Bearer {token}"},
         json={
-            "email": "new@bedrock.local",
+            "email": "new",
             "full_name": "New User",
-            "password": "password123",
+            "password": "password123!",
             "role": "EMPLOYEE",
             "permissions": ["INVOICES"],
         },
@@ -101,7 +101,7 @@ def test_non_admin_cannot_call_control(client):
 @pytest.mark.real_auth
 def test_module_permission_denies_for_missing_access(client):
     test_client, _ = client
-    token = _login(test_client, "staff@bedrock.local")
+    token = _login(test_client, "staff")
     response = test_client.get("/api/sales-requests", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
 
@@ -112,11 +112,11 @@ def test_module_permission_denies_for_missing_access(client):
 def test_invoice_api_requires_invoices_module(client):
     test_client, _ = client
 
-    invoices_token = _login(test_client, "staff@bedrock.local")
+    invoices_token = _login(test_client, "staff")
     invoices_response = test_client.get("/api/invoices", headers={"Authorization": f"Bearer {invoices_token}"})
     assert invoices_response.status_code == 200
 
-    no_invoices_token = _login(test_client, "limited@bedrock.local")
+    no_invoices_token = _login(test_client, "limited")
     no_invoices_response = test_client.get("/api/invoices", headers={"Authorization": f"Bearer {no_invoices_token}"})
     assert no_invoices_response.status_code == 403
     assert no_invoices_response.json()["detail"] == "Not authorized for module 'INVOICES'"
@@ -127,19 +127,19 @@ def test_invoice_api_requires_invoices_module(client):
 def test_payments_api_requires_payments_module(client):
     test_client, _ = client
 
-    invoices_only = _login(test_client, "staff@bedrock.local")
+    invoices_only = _login(test_client, "staff")
     denied = test_client.get("/api/payments", headers={"Authorization": f"Bearer {invoices_only}"})
     assert denied.status_code == 403
     assert denied.json()["detail"] == "Not authorized for module 'PAYMENTS'"
 
-    sales_requests_only = _login(test_client, "limited@bedrock.local")
+    sales_requests_only = _login(test_client, "limited")
     denied_again = test_client.get("/api/payments", headers={"Authorization": f"Bearer {sales_requests_only}"})
     assert denied_again.status_code == 403
 
 @pytest.mark.real_auth
 def test_login_returns_allowed_modules_in_profile(client):
     test_client, _ = client
-    response = test_client.post("/api/auth/login", json={"email": "limited@bedrock.local", "password": "password123"})
+    response = test_client.post("/api/auth/login", json={"email": "limited", "password": "password123!"})
     assert response.status_code == 200
     body = response.json()
     assert body["user"]["allowed_modules"] == ["SALES_REQUESTS"]
@@ -148,15 +148,15 @@ def test_login_returns_allowed_modules_in_profile(client):
 @pytest.mark.real_auth
 def test_admin_can_manage_user_permissions_and_deactivate(client):
     test_client, _ = client
-    token = _login(test_client, "admin@bedrock.local")
+    token = _login(test_client, "admin")
 
     create_response = test_client.post(
         "/api/control/users",
         headers={"Authorization": f"Bearer {token}"},
         json={
-            "email": "operator@bedrock.local",
+            "email": "operator",
             "full_name": "Operator",
-            "password": "password123",
+            "password": "password123!",
             "role": "EMPLOYEE",
             "permissions": ["INVOICES", "PAYMENTS"],
         },
@@ -180,15 +180,15 @@ def test_admin_can_manage_user_permissions_and_deactivate(client):
 @pytest.mark.real_auth
 def test_control_rejects_invalid_permission(client):
     test_client, _ = client
-    token = _login(test_client, "admin@bedrock.local")
+    token = _login(test_client, "admin")
 
     response = test_client.post(
         "/api/control/users",
         headers={"Authorization": f"Bearer {token}"},
         json={
-            "email": "badperm@bedrock.local",
+            "email": "badperm",
             "full_name": "Bad Permission",
-            "password": "password123",
+            "password": "password123!",
             "role": "EMPLOYEE",
             "permissions": ["NOT_A_REAL_MODULE"],
         },
@@ -199,9 +199,9 @@ def test_control_rejects_invalid_permission(client):
 @pytest.mark.real_auth
 def test_control_reset_password_updates_hash(client):
     test_client, session_local = client
-    token = _login(test_client, "admin@bedrock.local")
+    token = _login(test_client, "admin")
     with session_local() as db:
-        staff_id = db.query(User.id).filter(User.email == "staff@bedrock.local").scalar()
+        staff_id = db.query(User.id).filter(User.email == "staff").scalar()
 
     response = test_client.post(
         f"/api/control/users/{staff_id}/reset-password",
@@ -218,11 +218,11 @@ def test_control_reset_password_updates_hash(client):
 @pytest.mark.real_auth
 def test_create_sales_request_uses_authenticated_user_id(client):
     test_client, session_local = client
-    token = _login(test_client, "admin@bedrock.local")
+    token = _login(test_client, "admin")
     with session_local() as db:
         customer_id = db.query(Customer.id).first()[0]
         item_id = db.query(Item.id).first()[0]
-        admin_user_id = db.query(User.id).filter(User.email == "admin@bedrock.local").first()[0]
+        admin_user_id = db.query(User.id).filter(User.email == "admin").first()[0]
 
     payload = {
         "customer_id": customer_id,
@@ -233,3 +233,4 @@ def test_create_sales_request_uses_authenticated_user_id(client):
     response = test_client.post("/api/sales-requests", json=payload, headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 201
     assert response.json()["created_by_user_id"] == admin_user_id
+

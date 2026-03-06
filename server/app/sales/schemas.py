@@ -127,6 +127,8 @@ class InvoiceResponse(InvoiceBase):
     sales_request_id: Optional[int] = None
     shipped_at: Optional[datetime] = None
     posted_to_gl: bool = False
+    gl_journal_entry_id: Optional[int] = None
+    gl_posted_at: Optional[datetime] = None
     posted_journal_entry_id: Optional[int] = None
     posted_at: Optional[datetime] = None
     gl_posting_last_error: Optional[str] = None
@@ -154,6 +156,8 @@ class InvoiceGLPostingStatus(BaseModel):
     invoice_id: int
     invoice_number: str
     posted_to_gl: bool
+    gl_journal_entry_id: Optional[int] = None
+    gl_posted_at: Optional[datetime] = None
     posted_journal_entry_id: Optional[int] = None
     posted_at: Optional[datetime] = None
     last_error: Optional[str] = None

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_module
 from app.accounting.gl_engine import postJournalEntries
+from app.services.gl_posting_service import InvoiceGLPostingError, post_invoice_to_gl
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory.service import SOURCE_INVOICE, SOURCE_SALES_REQUEST, create_inventory_movement, get_source_reserved_qty_map, release_reservations
@@ -393,33 +394,18 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         raise HTTPException(status_code=404, detail="Invoice not found.")
     if invoice.status != "DRAFT":
         raise HTTPException(status_code=400, detail="Only draft invoices can be sent.")
-    invoice.status = "SENT"
 
     try:
         LOGGER.info("invoice_gl_posting_started", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "status": invoice.status, "subtotal": str(invoice.subtotal), "tax_total": str(invoice.tax_total), "total": str(invoice.total), "currency": "USD"})
-        batch_id = postJournalEntries(
-            "INVOICE_POSTED",
-            {
-                "event_id": f"invoice-posted:{invoice.id}",
-                "company_id": 1,
-                "invoice_id": invoice.id,
-                "reference_id": invoice.id,
-                "posting_date": invoice.issue_date,
-            },
-            db,
-        )
-        invoice.posted_to_gl = True
-        invoice.posted_journal_entry_id = batch_id
-        invoice.posted_at = datetime.utcnow()
-        invoice.gl_posting_last_error = None
-        LOGGER.info("invoice_gl_posting_succeeded", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "journal_entry_id": batch_id, "posted_at": invoice.posted_at.isoformat()})
-    except Exception as exc:
-        invoice.posted_to_gl = False
-        invoice.gl_posting_last_error = str(exc)
+        batch_id = post_invoice_to_gl(db, invoice.id, company_id=1)
+        invoice.status = "SENT"
+        LOGGER.info("invoice_gl_posting_succeeded", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "journal_entry_id": batch_id, "posted_at": invoice.gl_posted_at.isoformat() if invoice.gl_posted_at else None})
+        db.commit()
+    except InvoiceGLPostingError as exc:
+        db.rollback()
         LOGGER.exception("invoice_gl_posting_failed", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number})
         raise HTTPException(status_code=400, detail=f"Failed to post invoice to GL: {exc}")
 
-    db.commit()
     db.refresh(invoice)
     return invoice
 
@@ -512,6 +498,8 @@ def get_invoice_gl_status(invoice_id: int, db: Session = Depends(get_db), _=Depe
         invoice_id=invoice.id,
         invoice_number=invoice.invoice_number,
         posted_to_gl=bool(invoice.posted_to_gl),
+        gl_journal_entry_id=invoice.gl_journal_entry_id,
+        gl_posted_at=invoice.gl_posted_at,
         posted_journal_entry_id=invoice.posted_journal_entry_id,
         posted_at=invoice.posted_at,
         last_error=invoice.gl_posting_last_error,

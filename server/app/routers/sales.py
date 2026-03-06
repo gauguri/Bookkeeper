@@ -394,42 +394,53 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         raise HTTPException(status_code=404, detail="Invoice not found.")
 
     old_status = invoice.status
-    posted_to_gl_before = bool(invoice.posted_to_gl)
-    prior_journal_entry_id = invoice.gl_journal_entry_id
+    request_path = f"/api/invoices/{invoice_id}/send"
     if old_status not in {"DRAFT", "SENT", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
         raise HTTPException(status_code=400, detail="Only draft or active invoices can be finalized.")
 
     try:
+        LOGGER.info(
+            "invoice_finalize_api_entry",
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="send_invoice",
+            ),
+        )
+        LOGGER.info(
+            "invoice_finalize_before_status_change",
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="send_invoice",
+            ),
+        )
         if old_status == "DRAFT":
             invoice.status = "SENT"
 
         LOGGER.info(
-            "invoice_finalize_entrypoint",
-            extra={
-                "invoice_id": invoice.id,
-                "invoice_number": invoice.invoice_number,
-                "old_status": old_status,
-                "new_status": invoice.status,
-                "total_amount": str(invoice.total),
-                "subtotal": str(invoice.subtotal),
-                "tax_amount": str(invoice.tax_total),
-                "posted_to_gl_before": posted_to_gl_before,
-                "journal_entry_id": prior_journal_entry_id,
-            },
+            "invoice_finalize_after_status_change",
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="send_invoice",
+            ),
         )
         LOGGER.info(
             "invoice_finalize_before_gl_posting",
-            extra={
-                "invoice_id": invoice.id,
-                "invoice_number": invoice.invoice_number,
-                "old_status": old_status,
-                "new_status": invoice.status,
-                "total_amount": str(invoice.total),
-                "subtotal": str(invoice.subtotal),
-                "tax_amount": str(invoice.tax_total),
-                "posted_to_gl_before": posted_to_gl_before,
-                "journal_entry_id": prior_journal_entry_id,
-            },
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="send_invoice",
+            ),
         )
         batch_id = post_invoice_to_gl(db, invoice.id, company_id=1)
         db.commit()
@@ -437,33 +448,28 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         LOGGER.info(
             "invoice_finalize_after_commit",
             extra={
-                "invoice_id": invoice.id,
-                "invoice_number": invoice.invoice_number,
-                "old_status": old_status,
-                "new_status": invoice.status,
-                "total_amount": str(invoice.total),
-                "subtotal": str(invoice.subtotal),
-                "tax_amount": str(invoice.tax_total),
-                "posted_to_gl_before": posted_to_gl_before,
-                "posted_to_gl_after": bool(invoice.posted_to_gl),
-                "journal_entry_id": batch_id,
+                **_invoice_log_payload(
+                    invoice,
+                    prior_status=old_status,
+                    new_status=invoice.status,
+                    request_path=request_path,
+                    function_name="send_invoice",
+                ),
+                "posted_to_gl": bool(invoice.posted_to_gl),
+                "gl_journal_entry_id": batch_id,
             },
         )
     except InvoiceGLPostingError as exc:
         db.rollback()
         LOGGER.exception(
             "invoice_finalize_failed",
-            extra={
-                "invoice_id": invoice.id,
-                "invoice_number": invoice.invoice_number,
-                "old_status": old_status,
-                "new_status": invoice.status,
-                "total_amount": str(invoice.total),
-                "subtotal": str(invoice.subtotal),
-                "tax_amount": str(invoice.tax_total),
-                "posted_to_gl_before": posted_to_gl_before,
-                "journal_entry_id": prior_journal_entry_id,
-            },
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="send_invoice",
+            ),
         )
         raise HTTPException(status_code=400, detail=f"Failed to post invoice to GL: {exc}")
 
@@ -522,6 +528,34 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
         )
 
     release_reservations(db, source_type=source_type, source_id=source_id)
+
+    old_status = invoice.status
+    request_path = f"/api/invoices/{invoice_id}/ship"
+    try:
+        LOGGER.info(
+            "invoice_ship_before_gl_posting",
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="ship_invoice",
+            ),
+        )
+        post_invoice_to_gl(db, invoice.id, company_id=1)
+    except InvoiceGLPostingError as exc:
+        db.rollback()
+        LOGGER.exception(
+            "invoice_ship_gl_posting_failed",
+            extra=_invoice_log_payload(
+                invoice,
+                prior_status=old_status,
+                new_status=invoice.status,
+                request_path=request_path,
+                function_name="ship_invoice",
+            ),
+        )
+        raise HTTPException(status_code=400, detail=f"Failed to post invoice to GL before shipping: {exc}")
 
     postJournalEntries(
         "shipment_cogs",
@@ -828,3 +862,18 @@ def get_customer_revenue(
     _=Depends(require_module(ModuleKey.REPORTS.value)),
 ):
     return customer_revenue(db, start_date, end_date)
+def _invoice_log_payload(invoice: Invoice, *, prior_status: str, new_status: str, request_path: str, function_name: str) -> dict:
+    return {
+        "invoice_id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "prior_status": prior_status,
+        "new_status": new_status,
+        "subtotal": str(invoice.subtotal),
+        "tax_amount": str(invoice.tax_total),
+        "total_amount": str(invoice.total),
+        "posted_to_gl": bool(invoice.posted_to_gl),
+        "gl_journal_entry_id": invoice.gl_journal_entry_id,
+        "request_path": request_path,
+        "function_name": function_name,
+    }
+

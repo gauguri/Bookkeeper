@@ -316,6 +316,33 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
 
         lines: list[dict[str, Any]] = []
         invoice_id = context.get("invoice_id")
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first() if invoice_id is not None else None
+        LOGGER.info(
+            "invoice_gl_posting_after_account_resolution",
+            extra={
+                "invoice_id": invoice_id,
+                "invoice_number": invoice.invoice_number if invoice else None,
+                "prior_status": invoice.status if invoice else None,
+                "new_status": invoice.status if invoice else None,
+                "subtotal": str(invoice.subtotal) if invoice else None,
+                "tax_amount": str(invoice.tax_total) if invoice else None,
+                "total_amount": str(invoice.total) if invoice else None,
+                "posted_to_gl": bool(invoice.posted_to_gl) if invoice else None,
+                "gl_journal_entry_id": invoice.gl_journal_entry_id if invoice else None,
+                "request_path": "service:post_invoice_to_gl",
+                "function_name": "postJournalEntries",
+                "resolved_accounts": {
+                    "cash": cash.id,
+                    "ar": ar.id,
+                    "revenue": revenue.id,
+                    "tax_payable": tax_payable.id,
+                    "inventory": inventory.id,
+                    "cogs": cogs.id,
+                    "unearned": unearned.id,
+                    "bad_debt": bad_debt.id,
+                },
+            },
+        )
 
         if event_type == "INVOICE_POSTED":
             invoice: Invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
@@ -411,6 +438,42 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
         LOGGER.info("gl_posting_prepared", extra={"event_type": event_type, "event_id": event_id, "invoice_id": invoice_id, "company_id": company_id, "lines": [{"account_id": int(line["account_id"]), "debit": str(_money(line["debit_amount"])), "credit": str(_money(line["credit_amount"]))} for line in lines]})
         _assert_balanced(batch_entries)
         batch_id = postJournalEntry(db, event_type=event_type, context=context, entries=batch_entries)
+        LOGGER.info(
+            "invoice_gl_posting_after_journal_header_insert",
+            extra={
+                "invoice_id": invoice_id,
+                "invoice_number": invoice.invoice_number if invoice else None,
+                "prior_status": invoice.status if invoice else None,
+                "new_status": invoice.status if invoice else None,
+                "subtotal": str(invoice.subtotal) if invoice else None,
+                "tax_amount": str(invoice.tax_total) if invoice else None,
+                "total_amount": str(invoice.total) if invoice else None,
+                "posted_to_gl": bool(invoice.posted_to_gl) if invoice else None,
+                "gl_journal_entry_id": batch_id,
+                "request_path": "service:post_invoice_to_gl",
+                "function_name": "postJournalEntries",
+                "event_type": event_type,
+            },
+        )
+
+        inserted_lines = db.query(JournalBatchLine).filter(JournalBatchLine.batch_id == batch_id).count()
+        LOGGER.info(
+            "invoice_gl_posting_after_journal_lines_insert",
+            extra={
+                "invoice_id": invoice_id,
+                "invoice_number": invoice.invoice_number if invoice else None,
+                "prior_status": invoice.status if invoice else None,
+                "new_status": invoice.status if invoice else None,
+                "subtotal": str(invoice.subtotal) if invoice else None,
+                "tax_amount": str(invoice.tax_total) if invoice else None,
+                "total_amount": str(invoice.total) if invoice else None,
+                "posted_to_gl": bool(invoice.posted_to_gl) if invoice else None,
+                "gl_journal_entry_id": batch_id,
+                "request_path": "service:post_invoice_to_gl",
+                "function_name": "postJournalEntries",
+                "journal_lines_inserted": inserted_lines,
+            },
+        )
 
         LOGGER.info("gl_posting_completed", extra={"event_type": event_type, "event_id": event_id, "invoice_id": invoice_id, "journal_batch_id": batch_id, "posted_at": datetime.utcnow().isoformat()})
         db.merge(GLPostingAudit(event_type=event_type, event_id=event_id, journal_batch_id=batch_id, payload=str(context)))

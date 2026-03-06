@@ -111,7 +111,7 @@ def test_finalize_invoice_posts_to_gl_and_updates_profit_loss(client: TestClient
         assert debit_total == credit_total
 
         income_account_ids = {
-            account.id for account in db.query(Account.id).filter(func.upper(Account.type) == "REVENUE").all()
+            account.id for account in db.query(Account.id).filter(func.upper(Account.type).in_(("REVENUE", "INCOME"))).all()
         }
         income_credits = [line for line in lines if line.account_id in income_account_ids and Decimal(line.credit_amount or 0) > 0]
         assert income_credits
@@ -135,12 +135,12 @@ def test_missing_account_mapping_throws_explicit_error(client: TestClient, monke
 
     original_resolve_account = gl_engine._resolve_account
 
-    def fail_on_revenue_mapping(db, company_id, *, codes, names):
+    def fail_on_revenue_mapping(db, company_id, *, codes, names, preferred_types=None):
         if "revenue" in [name.lower() for name in names]:
             raise GLPostingError(
                 f"Cannot post invoice {created['invoice_number']} to GL: missing revenue account mapping for line item 1"
             )
-        return original_resolve_account(db, company_id, codes=codes, names=names)
+        return original_resolve_account(db, company_id, codes=codes, names=names, preferred_types=preferred_types)
 
     monkeypatch.setattr("app.accounting.gl_engine._resolve_account", fail_on_revenue_mapping)
 

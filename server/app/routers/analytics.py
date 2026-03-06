@@ -335,7 +335,26 @@ def pnl_analytics(
     db: Session = Depends(get_db),
 ):
     start, end = _resolve_period(period, start_date, end_date)
-    return PnlResponse(**calc_pnl(db, start, end))
+    result = calc_pnl(db, start, end)
+
+    reconciliation = result.get("reconciliation") or {}
+    reconciliation.setdefault("gl_revenue", 0.0)
+    reconciliation.setdefault("operational_revenue", 0.0)
+    reconciliation.setdefault("difference", 0.0)
+    reconciliation.setdefault("within_threshold", True)
+    reconciliation.setdefault("show_banner", False)
+    reconciliation.setdefault("tolerance", 1.0)
+    reconciliation.setdefault("why", [])
+    result["reconciliation"] = reconciliation
+
+    debug = result.get("debug") or {}
+    debug.setdefault("invoices_finalized", 0)
+    debug.setdefault("invoices_posted_to_gl", 0)
+    debug.setdefault("gl_entries_count_for_revenue", 0)
+    debug.setdefault("gl_date_field", "posting_date")
+    result["debug"] = debug
+
+    return PnlResponse(**result)
 
 
 @router.get("/revenue-reconciliation")

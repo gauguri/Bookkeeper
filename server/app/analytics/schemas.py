@@ -77,12 +77,30 @@ class WaterfallItem(BaseModel):
     type: str = "total"  # total | increase | decrease | subtotal
 
 
+class PnlReconciliation(BaseModel):
+    gl_revenue: float = 0.0
+    operational_revenue: float = 0.0
+    difference: float = 0.0
+    within_threshold: bool = True
+    show_banner: bool = False
+    tolerance: float = 1.0
+    why: List[str] = Field(default_factory=list)
+
+
+class PnlDebugMetrics(BaseModel):
+    invoices_finalized: int = 0
+    invoices_posted_to_gl: int = 0
+    gl_entries_count_for_revenue: int = 0
+    gl_date_field: str = "posting_date"
+
+
 class PnlResponse(BaseModel):
     revenue: float
     revenue_gl: float = 0
     revenue_operational: float = 0
     revenue_data_source: str = "GL (Posted Entries)"
-    reconciliation: Dict[str, Any] = Field(default_factory=dict)
+    reconciliation: PnlReconciliation = Field(default_factory=PnlReconciliation)
+    debug: PnlDebugMetrics = Field(default_factory=PnlDebugMetrics)
     cogs: float
     gross_profit: float
     gross_margin: float

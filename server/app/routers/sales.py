@@ -392,21 +392,81 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found.")
-    if invoice.status != "DRAFT":
-        raise HTTPException(status_code=400, detail="Only draft invoices can be sent.")
+
+    old_status = invoice.status
+    posted_to_gl_before = bool(invoice.posted_to_gl)
+    prior_journal_entry_id = invoice.gl_journal_entry_id
+    if old_status not in {"DRAFT", "SENT", "SHIPPED", "PARTIALLY_PAID", "PAID"}:
+        raise HTTPException(status_code=400, detail="Only draft or active invoices can be finalized.")
 
     try:
-        LOGGER.info("invoice_gl_posting_started", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "status": invoice.status, "subtotal": str(invoice.subtotal), "tax_total": str(invoice.tax_total), "total": str(invoice.total), "currency": "USD"})
+        if old_status == "DRAFT":
+            invoice.status = "SENT"
+
+        LOGGER.info(
+            "invoice_finalize_entrypoint",
+            extra={
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "old_status": old_status,
+                "new_status": invoice.status,
+                "total_amount": str(invoice.total),
+                "subtotal": str(invoice.subtotal),
+                "tax_amount": str(invoice.tax_total),
+                "posted_to_gl_before": posted_to_gl_before,
+                "journal_entry_id": prior_journal_entry_id,
+            },
+        )
+        LOGGER.info(
+            "invoice_finalize_before_gl_posting",
+            extra={
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "old_status": old_status,
+                "new_status": invoice.status,
+                "total_amount": str(invoice.total),
+                "subtotal": str(invoice.subtotal),
+                "tax_amount": str(invoice.tax_total),
+                "posted_to_gl_before": posted_to_gl_before,
+                "journal_entry_id": prior_journal_entry_id,
+            },
+        )
         batch_id = post_invoice_to_gl(db, invoice.id, company_id=1)
-        invoice.status = "SENT"
-        LOGGER.info("invoice_gl_posting_succeeded", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "journal_entry_id": batch_id, "posted_at": invoice.gl_posted_at.isoformat() if invoice.gl_posted_at else None})
         db.commit()
+        db.refresh(invoice)
+        LOGGER.info(
+            "invoice_finalize_after_commit",
+            extra={
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "old_status": old_status,
+                "new_status": invoice.status,
+                "total_amount": str(invoice.total),
+                "subtotal": str(invoice.subtotal),
+                "tax_amount": str(invoice.tax_total),
+                "posted_to_gl_before": posted_to_gl_before,
+                "posted_to_gl_after": bool(invoice.posted_to_gl),
+                "journal_entry_id": batch_id,
+            },
+        )
     except InvoiceGLPostingError as exc:
         db.rollback()
-        LOGGER.exception("invoice_gl_posting_failed", extra={"invoice_id": invoice.id, "invoice_number": invoice.invoice_number})
+        LOGGER.exception(
+            "invoice_finalize_failed",
+            extra={
+                "invoice_id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "old_status": old_status,
+                "new_status": invoice.status,
+                "total_amount": str(invoice.total),
+                "subtotal": str(invoice.subtotal),
+                "tax_amount": str(invoice.tax_total),
+                "posted_to_gl_before": posted_to_gl_before,
+                "journal_entry_id": prior_journal_entry_id,
+            },
+        )
         raise HTTPException(status_code=400, detail=f"Failed to post invoice to GL: {exc}")
 
-    db.refresh(invoice)
     return invoice
 
 

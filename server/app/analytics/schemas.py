@@ -279,6 +279,45 @@ class ForecastResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+
+
+class OperationalBacklogKpis(BaseModel):
+    total_backlog_value: Decimal
+    open_sales_requests: int
+    open_invoices: int
+    open_lines: int = 0
+
+
+class OperationalBacklogItemRow(BaseModel):
+    item_id: int
+    sku: Optional[str] = None
+    name: str
+    on_hand: Decimal
+    reserved: Decimal
+    available: Decimal
+    backlog_qty: Decimal
+    shortage_qty: Decimal
+    next_inbound_eta: Optional[date] = None
+
+
+class OperationalBacklogCustomerRow(BaseModel):
+    customer_id: Optional[int] = None
+    customer_name: str
+    backlog_value: Decimal
+    oldest_request_age_days: int
+    status_mix: Dict[str, int]
+    risk_flag: str
+    risk_reasons: List[str] = Field(default_factory=list)
+
+
+class OperationalBacklogResponse(BaseModel):
+    range: str
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    kpis: OperationalBacklogKpis
+    item_shortages: List[OperationalBacklogItemRow]
+    customer_backlog: List[OperationalBacklogCustomerRow]
+    debug: Dict[str, Any] = Field(default_factory=dict)
+
 class DashboardResponse(BaseModel):
     kpis: List[KpiResponse]
     revenue_trend: List[TimeSeriesPoint]

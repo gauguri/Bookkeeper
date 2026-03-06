@@ -1,206 +1,181 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { apiFetch } from "../api";
-import { currency } from "../utils/format";
+import { useMemo } from "react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import DashboardFilter from "../components/analytics/DashboardFilter";
+import AnalyticsTable from "../components/analytics/AnalyticsTable";
+import { useOperationalBacklog } from "../hooks/useAnalytics";
+import { formatCurrency } from "../utils/formatters";
 
-type BacklogSummary = {
-  total_backlog_value: number;
-  open_sales_requests_count: number;
-  open_invoices_count: number;
+type RangeValue = "MTD" | "QTD" | "YTD" | "LAST_MONTH" | "LAST_QUARTER" | "LAST_YEAR";
+
+const periodToRange: Record<string, RangeValue> = {
+  current_month: "MTD",
+  current_quarter: "QTD",
+  ytd: "YTD",
+  last_month: "LAST_MONTH",
+  last_quarter: "LAST_QUARTER",
+  last_year: "LAST_YEAR",
 };
 
-type BacklogConsumer = {
-  source_type: string;
-  source_id: number;
-  source_number: string;
-  source_status: string;
-  customer: string;
-  reserved_qty: number;
-  backlog_value: number;
-  age_days: number;
-};
-
-type BacklogItem = {
-  item_id: number;
-  item_name: string;
-  on_hand_qty: number;
-  reserved_qty: number;
-  available_qty: number;
-  backlog_qty: number;
-  shortage_qty: number;
-  next_inbound_eta?: string | null;
-  consumers: BacklogConsumer[];
-};
-
-type BacklogCustomer = {
-  customer: string;
-  backlog_value: number;
-  oldest_request_age_days: number;
-  status_mix: string;
-  risk_flag: "LOW" | "MEDIUM" | "HIGH" | string;
+const rangeToPeriod: Record<RangeValue, string> = {
+  MTD: "current_month",
+  QTD: "current_quarter",
+  YTD: "ytd",
+  LAST_MONTH: "last_month",
+  LAST_QUARTER: "last_quarter",
+  LAST_YEAR: "last_year",
 };
 
 export default function BacklogPage() {
-  const [summary, setSummary] = useState<BacklogSummary | null>(null);
-  const [items, setItems] = useState<BacklogItem[]>([]);
-  const [customers, setCustomers] = useState<BacklogCustomer[]>([]);
-  const [activeItemId, setActiveItemId] = useState<number | null>(null);
-  const [error, setError] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const loadData = async () => {
-    setError("");
-    try {
-      const [summaryData, itemData, customerData] = await Promise.all([
-        apiFetch<BacklogSummary>("/backlog/summary"),
-        apiFetch<BacklogItem[]>("/backlog/items"),
-        apiFetch<BacklogCustomer[]>("/backlog/customers")
-      ]);
-      setSummary(summaryData);
-      setItems(itemData);
-      setCustomers(customerData);
-      if (!activeItemId && itemData.length > 0) {
-        setActiveItemId(itemData[0].item_id);
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const range = (searchParams.get("range") || "YTD") as RangeValue;
+  const filters = {
+    location_id: searchParams.get("location_id") || undefined,
+    customer_id: searchParams.get("customer_id") || undefined,
+    sku: searchParams.get("sku") || undefined,
+    product: searchParams.get("product") || undefined,
+    status: searchParams.get("status") || undefined,
+    include_draft: searchParams.get("include_draft") === "true",
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const { data, isLoading, error, refetch, isFetching } = useOperationalBacklog(range, filters);
 
-  const activeItem = useMemo(() => items.find((row) => row.item_id === activeItemId) ?? null, [activeItemId, items]);
+  const applyFilter = (key: string, value?: string | boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === undefined || value === "" || value === false) {
+      next.delete(key);
+    } else {
+      next.set(key, String(value));
+    }
+    setSearchParams(next, { replace: true });
+  };
+
+  const kpis = data?.kpis;
+
+  const customerRows = useMemo(
+    () =>
+      (data?.customer_backlog || []).map((row) => ({
+        ...row,
+        status_mix_display: `Open: ${row.status_mix.open ?? 0} | Partial: ${row.status_mix.partial ?? 0} | Backordered: ${row.status_mix.backordered ?? 0}`,
+      })),
+    [data?.customer_backlog]
+  );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Operational Backlog</h1>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="app-card h-32 animate-pulse bg-gray-100 dark:bg-gray-800" />
+          ))}
+        </div>
+        <div className="app-card h-64 animate-pulse bg-gray-100 dark:bg-gray-800" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="app-card p-8 text-center">
+        <AlertTriangle className="mx-auto h-8 w-8 text-amber-500" />
+        <p className="mt-2 text-sm text-muted">Failed to load backlog data. Please try again.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Operational Backlog</h2>
-          <p className="text-sm text-muted">Open demand vs inventory reservations with shortage risk visibility.</p>
+          <h1 className="text-2xl font-bold">Operational Backlog</h1>
+          <p className="text-xs text-muted">Open demand vs inventory reservations with shortage risk visibility.</p>
         </div>
-        <button className="app-button-secondary" onClick={loadData}>Refresh</button>
-      </header>
+        <div className="flex items-center gap-2">
+          <button className="app-button-secondary inline-flex items-center gap-2" onClick={() => void refetch()}>
+            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh
+          </button>
+          <DashboardFilter
+            period={rangeToPeriod[range] ?? "ytd"}
+            onPeriodChange={(period) => applyFilter("range", periodToRange[period] ?? "YTD")}
+          />
+        </div>
+      </div>
 
-      {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+      <div className="app-card p-4">
+        <div className="grid gap-3 md:grid-cols-5">
+          <input className="app-input" placeholder="Location / Warehouse" value={filters.location_id ?? ""} onChange={(e) => applyFilter("location_id", e.target.value)} />
+          <input className="app-input" placeholder="Customer ID" value={filters.customer_id ?? ""} onChange={(e) => applyFilter("customer_id", e.target.value)} />
+          <input className="app-input" placeholder="Product" value={filters.product ?? ""} onChange={(e) => applyFilter("product", e.target.value)} />
+          <input className="app-input" placeholder="SKU" value={filters.sku ?? ""} onChange={(e) => applyFilter("sku", e.target.value)} />
+          <select className="app-select" value={filters.status ?? ""} onChange={(e) => applyFilter("status", e.target.value)}>
+            <option value="">All Status</option>
+            <option value="OPEN">Open</option>
+            <option value="PARTIAL">Partially Fulfilled</option>
+            <option value="BACKORDERED">Backordered</option>
+          </select>
+        </div>
+        <label className="mt-3 inline-flex items-center gap-2 text-xs text-muted">
+          <input type="checkbox" checked={filters.include_draft} onChange={(e) => applyFilter("include_draft", e.target.checked)} /> Include Draft
+        </label>
+      </div>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="app-card p-5">
-          <p className="text-xs uppercase text-muted">Total backlog value</p>
-          <p className="mt-2 text-2xl font-semibold">{currency(summary?.total_backlog_value ?? 0)}</p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="app-card p-4">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">Total Backlog Value ($)</p>
+          <p className="mt-2 text-2xl font-bold">{formatCurrency(Number(kpis?.total_backlog_value ?? 0), true)}</p>
+          <p className="text-xs text-muted">{kpis?.open_lines ?? 0} open lines</p>
         </div>
-        <div className="app-card p-5">
-          <p className="text-xs uppercase text-muted">Open sales requests</p>
-          <p className="mt-2 text-2xl font-semibold">{summary?.open_sales_requests_count ?? 0}</p>
+        <div className="app-card p-4">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">Open Sales Requests</p>
+          <p className="mt-2 text-2xl font-bold">{kpis?.open_sales_requests ?? 0}</p>
         </div>
-        <div className="app-card p-5">
-          <p className="text-xs uppercase text-muted">Open invoices</p>
-          <p className="mt-2 text-2xl font-semibold">{summary?.open_invoices_count ?? 0}</p>
-        </div>
-      </section>
+        <Link to="/analytics/receivables?status=open" className="app-card block p-4">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">Open Invoices</p>
+          <p className="mt-2 text-2xl font-bold">{kpis?.open_invoices ?? 0}</p>
+        </Link>
+      </div>
 
-      <section className="app-card overflow-x-auto">
-        <div className="border-b border-muted/20 px-4 py-3">
-          <h3 className="text-lg font-semibold">Item shortages</h3>
-        </div>
-        <table className="w-full text-left text-sm">
-          <thead className="text-xs uppercase text-muted">
-            <tr>
-              <th className="px-4 py-3">Item</th>
-              <th className="px-4 py-3">On Hand</th>
-              <th className="px-4 py-3">Reserved</th>
-              <th className="px-4 py-3">Available</th>
-              <th className="px-4 py-3">Backlog Qty</th>
-              <th className="px-4 py-3">Shortage Qty</th>
-              <th className="px-4 py-3">Next inbound ETA</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((row) => (
-              <tr
-                key={row.item_id}
-                className={`cursor-pointer border-t border-muted/20 ${row.item_id === activeItemId ? "bg-primary/5" : ""}`}
-                onClick={() => setActiveItemId(row.item_id)}
-              >
-                <td className="px-4 py-3 font-medium">{row.item_name}</td>
-                <td className="px-4 py-3">{Number(row.on_hand_qty).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(row.reserved_qty).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(row.available_qty).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(row.backlog_qty).toFixed(2)}</td>
-                <td className={`px-4 py-3 font-semibold ${row.shortage_qty > 0 ? "text-rose-500" : "text-emerald-500"}`}>{Number(row.shortage_qty).toFixed(2)}</td>
-                <td className="px-4 py-3">{row.next_inbound_eta ? new Date(row.next_inbound_eta).toLocaleDateString() : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <AnalyticsTable
+        title="Item shortages"
+        columns={[
+          { key: "item", label: "Item", format: (_v, row) => <Link className="text-primary hover:underline" to={`/inventory${row.sku ? `?sku=${encodeURIComponent(row.sku)}` : ""}`}>{row.name}{row.sku ? ` (${row.sku})` : ""}</Link> },
+          { key: "on_hand", label: "On Hand", align: "right" },
+          { key: "reserved", label: "Reserved", align: "right" },
+          { key: "available", label: "Available", align: "right" },
+          { key: "backlog_qty", label: "Backlog Qty", align: "right" },
+          { key: "shortage_qty", label: "Shortage Qty", align: "right" },
+          { key: "next_inbound_eta", label: "Next Inbound ETA", format: (v) => (v ? new Date(v).toLocaleDateString() : "—") },
+        ]}
+        data={data.item_shortages}
+      />
 
-      <section className="app-card overflow-x-auto">
-        <div className="border-b border-muted/20 px-4 py-3">
-          <h3 className="text-lg font-semibold">Customer backlog</h3>
-        </div>
-        <table className="w-full text-left text-sm">
-          <thead className="text-xs uppercase text-muted">
-            <tr>
-              <th className="px-4 py-3">Customer</th>
-              <th className="px-4 py-3">Backlog $</th>
-              <th className="px-4 py-3">Oldest request age</th>
-              <th className="px-4 py-3">Status mix</th>
-              <th className="px-4 py-3">Risk flag</th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((row) => (
-              <tr key={row.customer} className="border-t border-muted/20">
-                <td className="px-4 py-3 font-medium">{row.customer}</td>
-                <td className="px-4 py-3">{currency(row.backlog_value)}</td>
-                <td className="px-4 py-3">{row.oldest_request_age_days} days</td>
-                <td className="px-4 py-3">{row.status_mix}</td>
-                <td className={`px-4 py-3 font-semibold ${row.risk_flag === "HIGH" ? "text-rose-500" : row.risk_flag === "MEDIUM" ? "text-amber-500" : "text-emerald-500"}`}>{row.risk_flag}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <AnalyticsTable
+        title="Customer backlog"
+        columns={[
+          {
+            key: "customer_name",
+            label: "Customer",
+            format: (v, row) => <Link className="text-primary hover:underline" to={`/sales/customers/${row.customer_id}`}>{v}</Link>,
+          },
+          { key: "backlog_value", label: "Backlog $", align: "right", format: (v) => formatCurrency(Number(v), true) },
+          { key: "oldest_request_age_days", label: "Oldest Request Age", format: (v) => `${v} days` },
+          { key: "status_mix_display", label: "Status Mix" },
+          {
+            key: "risk_flag",
+            label: "Risk Flag",
+            format: (v) => <span className={v === "red" ? "text-rose-500" : v === "yellow" ? "text-amber-500" : "text-emerald-500"}>{String(v).toUpperCase()}</span>,
+          },
+        ]}
+        data={customerRows}
+      />
 
-      {activeItem ? (
-        <section className="app-card space-y-4 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold">Reservation consumers: {activeItem.item_name}</h3>
-              <p className="text-sm text-muted">Sales requests or invoices currently consuming inventory reservations.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link className="app-button" to="/purchasing/purchase-orders">Create PO</Link>
-              <Link className="app-button-secondary" to="/sales-requests">Prioritize shipments</Link>
-            </div>
-          </div>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-muted">
-              <tr>
-                <th className="px-2 py-2">Source</th>
-                <th className="px-2 py-2">Customer</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="px-2 py-2">Reserved Qty</th>
-                <th className="px-2 py-2">Backlog $</th>
-                <th className="px-2 py-2">Age</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeItem.consumers.map((consumer) => (
-                <tr key={`${consumer.source_type}-${consumer.source_id}`} className="border-t border-muted/20">
-                  <td className="px-2 py-2">{consumer.source_type === "invoice" ? "Invoice" : "SR"} {consumer.source_number}</td>
-                  <td className="px-2 py-2">{consumer.customer}</td>
-                  <td className="px-2 py-2">{consumer.source_status}</td>
-                  <td className="px-2 py-2">{Number(consumer.reserved_qty).toFixed(2)}</td>
-                  <td className="px-2 py-2">{currency(consumer.backlog_value)}</td>
-                  <td className="px-2 py-2">{consumer.age_days} days</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      ) : null}
+      {data.item_shortages.length === 0 && (
+        <div className="app-card p-8 text-center text-sm text-muted">No open demand found for the selected filters.</div>
+      )}
     </div>
   );
 }

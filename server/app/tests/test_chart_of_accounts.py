@@ -96,40 +96,77 @@ def test_delete_in_use_account_returns_conflict(client: TestClient):
     assert response.json()["detail"] == "Cannot delete account that is in use."
 
 
-def test_bulk_import_chart_of_accounts(client: TestClient):
+def test_chart_of_accounts_import_format(client: TestClient):
+    response = client.get("/api/chart-of-accounts/import-format")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["required_fields"] == ["code", "name", "type"]
+    assert "parent_code" in payload["optional_fields"]
+    assert payload["sample_csv"].startswith("code,name,type")
+
+
+def test_chart_of_accounts_import_preview_reports_create_and_update(client: TestClient):
     response = client.post(
-        "/api/chart-of-accounts/bulk-import",
+        "/api/chart-of-accounts/import-preview",
         json={
-            "csv_data": "2000,Accounts Payable,Liability,Current Liability,null\n2100,Trade Payables,Liability,null,2000"
+            "csv_data": "code,name,type,subtype,description,parent_code,is_active\n1000,Cash Control,ASSET,Cash,Updated cash account,,true\n2100,Trade Payables,LIABILITY,Current Liability,Vendor obligations,,true",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["create_count"] == 1
+    assert payload["summary"]["update_count"] == 1
+    assert payload["summary"]["error_rows"] == 0
+
+
+def test_chart_of_accounts_import_executes_create_and_update(client: TestClient):
+    response = client.post(
+        "/api/chart-of-accounts/import",
+        json={
+            "csv_data": "code,name,type,subtype,description,parent_code,is_active\n1000,Cash Control,ASSET,Cash,Updated cash account,,true\n2000,Accounts Payable,LIABILITY,Current Liability,Payables control,,true\n2100,Trade Payables,LIABILITY,Current Liability,Vendor obligations,2000,true",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
         },
     )
     assert response.status_code == 201
-    data = response.json()
-    assert data["created_count"] == 2
+    payload = response.json()
+    assert payload["summary"]["create_count"] == 2
+    assert payload["summary"]["update_count"] == 1
+    assert len(payload["imported_accounts"]) == 3
 
     accounts_response = client.get("/api/chart-of-accounts")
     assert accounts_response.status_code == 200
     accounts_by_code = {account["code"]: account for account in accounts_response.json()}
-    assert "2000" in accounts_by_code
-    assert "2100" in accounts_by_code
+    assert accounts_by_code["1000"]["name"] == "Cash Control"
     assert accounts_by_code["2000"]["type"] == "LIABILITY"
-    assert accounts_by_code["2000"]["subtype"] == "Current Liability"
-    assert accounts_by_code["2100"]["parent_account"] is not None
+    assert accounts_by_code["2100"]["parent_account"]["code"] == "2000"
 
 
-def test_bulk_import_with_missing_parent_returns_bad_request(client: TestClient):
+def test_chart_of_accounts_import_preview_reports_missing_parent(client: TestClient):
     response = client.post(
-        "/api/chart-of-accounts/bulk-import",
-        json={"csv_data": "2200,Deferred Revenue,Liability,null,9999"},
+        "/api/chart-of-accounts/import-preview",
+        json={
+            "csv_data": "code,name,type,subtype,description,parent_code,is_active\n2200,Deferred Revenue,LIABILITY,Current Liability,Deferred rev,9999,true",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["error_rows"] == 1
+    assert "Parent account code '9999'" in payload["rows"][0]["messages"][0]
+
+
+def test_chart_of_accounts_import_rejects_execution_when_preview_has_errors(client: TestClient):
+    response = client.post(
+        "/api/chart-of-accounts/import",
+        json={
+            "csv_data": "code,name,type,subtype,description,parent_code,is_active\n2200,Deferred Revenue,BALANCE,Current Liability,Deferred rev,,true",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
     )
     assert response.status_code == 400
-    assert "Unable to resolve parent account codes" in response.json()["detail"]
-
-
-def test_bulk_import_with_invalid_type_returns_bad_request(client: TestClient):
-    response = client.post(
-        "/api/chart-of-accounts/bulk-import",
-        json={"csv_data": "2200,Deferred Revenue,Balance,null,null"},
-    )
-    assert response.status_code == 400
-    assert "Invalid account type" in response.json()["detail"]
+    assert "Resolve validation issues" in response.json()["detail"]

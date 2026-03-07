@@ -1,3 +1,4 @@
+import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,6 +12,7 @@ from app.module_keys import MODULE_KEYS
 
 router = APIRouter(prefix="/api/control", tags=["control"], dependencies=[Depends(require_admin)])
 
+PASSWORD_POLICY_MESSAGE = "Password must be at least 8 characters and include a letter, a number, and a special character"
 
 
 class ControlModulesResponse(BaseModel):
@@ -69,9 +71,21 @@ def _serialize_user(db: Session, user: User) -> dict:
     }
 
 
+def _normalize_user_id(value: str) -> str:
+    user_id = (value or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID is required")
+    return user_id
+
+
 def _validate_password(password: str) -> None:
-    if len(password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if (
+        len(password) < 8
+        or re.search(r"[A-Za-z]", password) is None
+        or re.search(r"\d", password) is None
+        or re.search(r"[^A-Za-z0-9]", password) is None
+    ):
+        raise HTTPException(status_code=400, detail=PASSWORD_POLICY_MESSAGE)
 
 
 def _validate_permissions(permissions: list[str]) -> None:
@@ -93,9 +107,10 @@ def list_users(db: Session = Depends(get_db)):
 
 @router.post("/users", status_code=status.HTTP_201_CREATED, response_model=ControlUserResponse)
 def create_user(payload: ControlUserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User.id).filter(User.email == payload.email).first()
+    user_id = _normalize_user_id(payload.email)
+    existing = db.query(User.id).filter(User.email == user_id).first()
     if existing:
-        raise HTTPException(status_code=409, detail="Email already exists")
+        raise HTTPException(status_code=409, detail="User ID already exists")
 
     _validate_password(payload.password)
     _validate_permissions(payload.permissions)
@@ -107,7 +122,7 @@ def create_user(payload: ControlUserCreate, db: Session = Depends(get_db)):
 
     user = User(
         company_id=company_id,
-        email=payload.email,
+        email=user_id,
         full_name=payload.full_name,
         password_hash=hash_password(payload.password),
         is_admin=is_admin,

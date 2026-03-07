@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
@@ -22,6 +23,8 @@ from app.module_keys import MODULE_DEFINITIONS
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+PASSWORD_POLICY_MESSAGE = "Password must be at least 8 characters and include a letter, a number, and a special character"
+
 
 class LoginPayload(BaseModel):
     email: str
@@ -34,20 +37,20 @@ class BootstrapStatusResponse(BaseModel):
 
 class BootstrapAdminPayload(BaseModel):
     email: str
-    password: str = Field(min_length=10)
+    password: str
     full_name: str | None = None
 
 
 class BootstrapUserPayload(BaseModel):
     email: str
-    password: str = Field(min_length=10)
+    password: str
     full_name: str | None = None
     role: Literal["ADMIN", "EMPLOYEE"]
     permissions: list[str] = Field(default_factory=list)
 
 
 class DevResetPayload(BaseModel):
-    password: str = Field(default="password123!", min_length=10)
+    password: str = Field(default="password123!")
 
 
 def _serialize_user(user: User) -> dict:
@@ -59,6 +62,23 @@ def _serialize_user(user: User) -> dict:
         "is_active": user.is_active,
         "role": "ADMIN" if user.is_admin else "EMPLOYEE",
     }
+
+
+def _normalize_user_id(value: str) -> str:
+    user_id = (value or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID is required")
+    return user_id
+
+
+def _validate_password(password: str) -> None:
+    if (
+        len(password) < 8
+        or re.search(r"[A-Za-z]", password) is None
+        or re.search(r"\d", password) is None
+        or re.search(r"[^A-Za-z0-9]", password) is None
+    ):
+        raise HTTPException(status_code=400, detail=PASSWORD_POLICY_MESSAGE)
 
 
 def _users_count(db: Session) -> int:
@@ -100,6 +120,9 @@ def bootstrap_status(db: Session = Depends(get_db)):
 
 @router.post("/bootstrap/admin", status_code=status.HTTP_201_CREATED)
 def bootstrap_admin(payload: BootstrapAdminPayload, db: Session = Depends(get_db)):
+    user_id = _normalize_user_id(payload.email)
+    _validate_password(payload.password)
+
     try:
         if db.bind and db.bind.dialect.name == "postgresql":
             db.execute(text("LOCK TABLE users IN EXCLUSIVE MODE"))
@@ -111,7 +134,7 @@ def bootstrap_admin(payload: BootstrapAdminPayload, db: Session = Depends(get_db
         company = _get_or_create_company(db)
         user = User(
             company_id=company.id,
-            email=payload.email,
+            email=user_id,
             full_name=payload.full_name,
             password_hash=hash_password(payload.password),
             role="admin",
@@ -159,14 +182,17 @@ def bootstrap_users(
     try:
         seed_modules(db)
         for item in payload:
-            exists = db.query(User.id).filter(User.email == item.email).first()
+            user_id = _normalize_user_id(item.email)
+            _validate_password(item.password)
+
+            exists = db.query(User.id).filter(User.email == user_id).first()
             if exists:
-                raise HTTPException(status_code=409, detail=f"Email already exists: {item.email}")
+                raise HTTPException(status_code=409, detail=f"User ID already exists: {user_id}")
 
             is_admin = item.role == "ADMIN"
             user = User(
                 company_id=company_id,
-                email=item.email,
+                email=user_id,
                 full_name=item.full_name,
                 password_hash=hash_password(item.password),
                 role="admin" if is_admin else "employee",
@@ -185,7 +211,7 @@ def bootstrap_users(
         raise
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="One or more emails already exist")
+        raise HTTPException(status_code=409, detail="One or more user IDs already exist")
 
     return {"created": len(created_users), "users": created_users}
 
@@ -197,13 +223,14 @@ def dev_reset_admin(payload: DevResetPayload, db: Session = Depends(get_db)):
     if env_name != "development" or not allow_reset:
         raise HTTPException(status_code=404, detail="Not found")
 
+    _validate_password(payload.password)
     seed_modules(db)
     company = _get_or_create_company(db)
-    admin = db.query(User).filter(User.email == "admin@bedrock.local").first()
+    admin = db.query(User).filter(User.email == "admin").first()
     if not admin:
         admin = User(
             company_id=company.id,
-            email="admin@bedrock.local",
+            email="admin",
             full_name="System Admin",
             password_hash=hash_password(payload.password),
             role="admin",
@@ -231,9 +258,10 @@ def login(payload: LoginPayload, db: Session = Depends(get_db)):
     if _users_count(db) == 0:
         raise HTTPException(status_code=403, detail="Bootstrap required before login")
 
-    user = db.query(User).filter(User.email == payload.email).first()
+    user_id = _normalize_user_id(payload.email)
+    user = db.query(User).filter(User.email == user_id).first()
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid user ID or password")
 
     allowed_modules = get_allowed_modules(current_user=user, db=db)
 

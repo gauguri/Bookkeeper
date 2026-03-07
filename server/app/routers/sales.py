@@ -476,6 +476,38 @@ def send_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     return invoice
 
 
+# ---------------------------------------------------------------------------
+# GL backfill – post all finalized-but-unposted invoices to the GL
+# ---------------------------------------------------------------------------
+
+_BACKFILL_STATUSES = {"SENT", "SHIPPED", "PARTIALLY_PAID", "PAID"}
+
+
+@router.post("/invoices/backfill-gl")
+def backfill_invoice_gl_postings(
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.INVOICES.value)),
+):
+    """Find all finalized invoices that were never posted to GL and post them."""
+    unposted = (
+        db.query(Invoice)
+        .filter(Invoice.status.in_(_BACKFILL_STATUSES), Invoice.posted_to_gl.is_(False))
+        .order_by(Invoice.id.asc())
+        .all()
+    )
+
+    posted, errors = [], []
+    for invoice in unposted:
+        try:
+            batch_id = post_invoice_to_gl(db, invoice.id, company_id=1)
+            db.commit()
+            posted.append({"invoice_id": invoice.id, "batch_id": batch_id})
+        except InvoiceGLPostingError as exc:
+            db.rollback()
+            errors.append({"invoice_id": invoice.id, "error": str(exc)})
+            LOGGER.warning("backfill_gl_skip invoice_id=%s error=%s", invoice.id, exc)
+
+    return {"posted": len(posted), "errors": len(errors), "details": {"posted": posted, "errors": errors}}
 
 
 @router.post("/invoices/{invoice_id}/ship", response_model=schemas.InvoiceResponse)

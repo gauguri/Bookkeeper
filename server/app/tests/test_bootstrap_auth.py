@@ -39,21 +39,33 @@ def test_bootstrap_status_true_when_users_empty(client):
 
 
 @pytest.mark.real_auth
-def test_bootstrap_admin_can_only_be_created_once(client):
+def test_bootstrap_admin_can_use_plain_user_id_and_only_be_created_once(client):
     test_client, _ = client
 
     first = test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "admin@bedrock.local", "password": "password123!", "full_name": "Admin User"},
+        json={"email": "admin", "password": "password123!", "full_name": "Admin User"},
     )
     assert first.status_code == 201
-    assert first.json()["user"]["email"] == "admin@bedrock.local"
+    assert first.json()["user"]["email"] == "admin"
 
     second = test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "other-admin@bedrock.local", "password": "anotherpass123!"},
+        json={"email": "other-admin", "password": "anotherpass123!"},
     )
     assert second.status_code == 409
+
+
+@pytest.mark.real_auth
+def test_bootstrap_admin_rejects_weak_password(client):
+    test_client, _ = client
+
+    response = test_client.post(
+        "/api/auth/bootstrap/admin",
+        json={"email": "admin", "password": "password"},
+    )
+    assert response.status_code == 400
+    assert "at least 8 characters" in response.json()["detail"]
 
 
 @pytest.mark.real_auth
@@ -62,7 +74,7 @@ def test_bootstrap_status_false_after_admin_created(client):
 
     test_client.post(
         "/api/auth/bootstrap/admin",
-        json={"email": "admin@bedrock.local", "password": "password123!", "full_name": "Admin User"},
+        json={"email": "admin", "password": "password123!", "full_name": "Admin User"},
     )
 
     status_response = test_client.get("/api/auth/bootstrap/status")
@@ -84,6 +96,6 @@ def test_dev_reset_admin_is_flag_gated(client, monkeypatch):
     assert allowed.status_code == 204
 
     with session_local() as db:
-        user = db.query(User).filter(User.email == "admin@bedrock.local").first()
+        user = db.query(User).filter(User.email == "admin").first()
         assert user is not None
         assert user.is_admin is True

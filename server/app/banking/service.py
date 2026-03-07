@@ -50,7 +50,6 @@ def list_bank_accounts(db: Session) -> list[BankAccount]:
     _purge_legacy_placeholder_bank_accounts(db)
     return db.query(BankAccount).order_by(BankAccount.name.asc()).all()
 
-
 def get_dashboard_metrics(db: Session) -> dict:
     accounts = list_bank_accounts(db)
 
@@ -97,7 +96,6 @@ def get_dashboard_metrics(db: Session) -> dict:
         "category_breakdown": category_breakdown,
         "reconciliation_progress": progress,
     }
-
 
 def list_transactions(
     db: Session,

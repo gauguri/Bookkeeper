@@ -40,7 +40,7 @@ def main() -> None:
 
         income_account_ids = {
             row[0]
-            for row in db.query(Account.id).filter(func.upper(Account.type) == "REVENUE").all()
+            for row in db.query(Account.id).filter(func.upper(Account.type).in_(("REVENUE", "INCOME"))).all()
         }
         income_credit_lines = [
             line for line in lines if line.account_id in income_account_ids and Decimal(line.credit_amount or 0) > 0
@@ -50,7 +50,7 @@ def main() -> None:
         pnl_revenue = (
             db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
             .join(Account, Account.id == GLEntry.account_id)
-            .filter(func.upper(Account.type) == "REVENUE")
+            .filter(func.upper(Account.type).in_(("REVENUE", "INCOME")))
             .filter(GLEntry.posting_date == invoice.issue_date)
             .scalar()
             or Decimal("0")

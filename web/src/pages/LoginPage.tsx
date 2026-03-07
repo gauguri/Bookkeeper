@@ -9,8 +9,8 @@ import "./LoginPage.css";
 
 export default function LoginPage() {
   const { login, token, loading, isAdmin, allowedModules } = useAuth();
-  const [email, setEmail] = useState("admin@bedrock.local");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("admin");
+  const [password, setPassword] = useState("password123!");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

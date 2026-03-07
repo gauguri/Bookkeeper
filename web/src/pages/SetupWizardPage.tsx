@@ -1,15 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiRequestError, apiFetch } from "../api";
-import { MODULES } from "../constants/modules";
 import { APP_NAME } from "../branding";
+import { MODULES } from "../constants/modules";
 
 type BootstrapStatus = { needs_bootstrap: boolean };
 type ModuleOption = { key: string; name: string };
 
 type AdditionalUser = {
-  email: string;
-  full_name: string;
+  userId: string;
+  fullName: string;
   password: string;
   role: "ADMIN" | "EMPLOYEE";
   permissions: string[];
@@ -35,13 +35,19 @@ const MODULE_OPTIONS: ModuleOption[] = [
   { key: MODULES.REPORTS, name: "Reports" }
 ];
 
+const PASSWORD_RULE_MESSAGE = "Password must be at least 8 characters and include a letter, a number, and a special character.";
+
 const EMPTY_USER: AdditionalUser = {
-  email: "",
-  full_name: "",
+  userId: "",
+  fullName: "",
   password: "",
   role: "EMPLOYEE",
   permissions: []
 };
+
+function hasValidPassword(value: string) {
+  return value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value);
+}
 
 export default function SetupWizardPage() {
   const navigate = useNavigate();
@@ -50,7 +56,7 @@ export default function SetupWizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [adminEmail, setAdminEmail] = useState("admin@bedrock.local");
+  const [adminUserId, setAdminUserId] = useState("admin");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
   const [adminToken, setAdminToken] = useState<string | null>(null);
@@ -58,8 +64,8 @@ export default function SetupWizardPage() {
   const [users, setUsers] = useState<AdditionalUser[]>([{ ...EMPTY_USER }]);
 
   const canCreateAdmin = useMemo(
-    () => adminEmail.trim() && adminPassword.length >= 10 && adminPassword === adminConfirmPassword,
-    [adminEmail, adminConfirmPassword, adminPassword]
+    () => adminUserId.trim() && hasValidPassword(adminPassword) && adminPassword === adminConfirmPassword,
+    [adminConfirmPassword, adminPassword, adminUserId]
   );
 
   useEffect(() => {
@@ -93,7 +99,7 @@ export default function SetupWizardPage() {
   const createAdmin = async (event: FormEvent) => {
     event.preventDefault();
     if (!canCreateAdmin) {
-      setError("Use a valid email, a 10+ character password, and matching confirmation.");
+      setError(`Use a user ID, ${PASSWORD_RULE_MESSAGE.toLowerCase()}, and matching confirmation.`);
       return;
     }
 
@@ -102,7 +108,7 @@ export default function SetupWizardPage() {
     try {
       const response = await apiFetch<{ access_token: string }>("/auth/bootstrap/admin", {
         method: "POST",
-        body: JSON.stringify({ email: adminEmail, password: adminPassword })
+        body: JSON.stringify({ email: adminUserId.trim(), password: adminPassword })
       });
       setAdminToken(response.access_token);
       setStep(2);
@@ -125,33 +131,28 @@ export default function SetupWizardPage() {
       return;
     }
 
-    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const candidateUsers = users.filter(
-      (user) => user.email.trim().length > 0 || user.password.trim().length > 0 || user.full_name.trim().length > 0
+      (user) => user.userId.trim().length > 0 || user.password.trim().length > 0 || user.fullName.trim().length > 0
     );
 
     for (const user of candidateUsers) {
-      if (!user.email.trim()) {
-        setError("Each additional user must include an email.");
-        return;
-      }
-      if (!EMAIL_REGEX.test(user.email.trim())) {
-        setError(`Invalid email format for ${user.email || "a user"}.`);
+      if (!user.userId.trim()) {
+        setError("Each additional user must include a user ID.");
         return;
       }
       if (!user.password.trim()) {
-        setError(`Password is required for ${user.email}.`);
+        setError(`Password is required for ${user.userId}.`);
         return;
       }
-      if (user.password.length < 8) {
-        setError(`Password must be at least 8 characters for ${user.email}.`);
+      if (!hasValidPassword(user.password)) {
+        setError(`${PASSWORD_RULE_MESSAGE} (${user.userId})`);
         return;
       }
     }
 
     const payload: BootstrapUserCreate[] = candidateUsers.map((user) => ({
-      email: user.email.trim(),
-      full_name: user.full_name.trim() || undefined,
+      email: user.userId.trim(),
+      full_name: user.fullName.trim() || undefined,
       password: user.password,
       role: user.role,
       permissions: user.role === "ADMIN" ? [] : user.permissions
@@ -191,13 +192,13 @@ export default function SetupWizardPage() {
         {step === 1 ? (
           <form className="space-y-4" onSubmit={createAdmin}>
             <h2 className="text-lg font-semibold">Create initial admin user</h2>
-            <input className="app-input w-full" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} placeholder="Admin email" />
+            <input className="app-input w-full" value={adminUserId} onChange={(event) => setAdminUserId(event.target.value)} placeholder="Admin user ID" />
             <input
               className="app-input w-full"
               type="password"
               value={adminPassword}
               onChange={(event) => setAdminPassword(event.target.value)}
-              placeholder="Password (10+ characters)"
+              placeholder="Password (8+ chars, letter, number, special character)"
             />
             <input
               className="app-input w-full"
@@ -206,7 +207,7 @@ export default function SetupWizardPage() {
               onChange={(event) => setAdminConfirmPassword(event.target.value)}
               placeholder="Confirm password"
             />
-            <button className="app-button-primary" type="submit" disabled={busy || !canCreateAdmin}>
+            <button className="app-button-primary" type="submit" disabled={busy}>
               {busy ? "Creating..." : "Create admin"}
             </button>
           </form>
@@ -220,14 +221,14 @@ export default function SetupWizardPage() {
                 <div className="grid gap-3 md:grid-cols-2">
                   <input
                     className="app-input w-full"
-                    value={user.email}
-                    onChange={(event) => updateUser(index, { email: event.target.value })}
-                    placeholder="Email"
+                    value={user.userId}
+                    onChange={(event) => updateUser(index, { userId: event.target.value })}
+                    placeholder="User ID"
                   />
                   <input
                     className="app-input w-full"
-                    value={user.full_name}
-                    onChange={(event) => updateUser(index, { full_name: event.target.value })}
+                    value={user.fullName}
+                    onChange={(event) => updateUser(index, { fullName: event.target.value })}
                     placeholder="Full name"
                   />
                   <input
@@ -235,7 +236,7 @@ export default function SetupWizardPage() {
                     type="password"
                     value={user.password}
                     onChange={(event) => updateUser(index, { password: event.target.value })}
-                    placeholder="Password (8+ characters)"
+                    placeholder="Password (8+ chars, letter, number, special character)"
                   />
                   <select className="app-input w-full" value={user.role} onChange={(event) => updateUser(index, { role: event.target.value as "ADMIN" | "EMPLOYEE" })}>
                     <option value="ADMIN">Admin</option>

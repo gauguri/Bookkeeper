@@ -18,7 +18,6 @@ def _to_decimal(value: str | None) -> Decimal | None:
         return None
 
 
-
 def _is_legacy_placeholder_account(account: BankAccount) -> bool:
     return (
         account.name == "Operating Account"
@@ -33,9 +32,8 @@ def _is_legacy_placeholder_account(account: BankAccount) -> bool:
 
 
 def _purge_legacy_placeholder_bank_accounts(db: Session) -> None:
-    placeholder_accounts = db.query(BankAccount).all()
     removed = False
-    for account in placeholder_accounts:
+    for account in db.query(BankAccount).all():
         if not _is_legacy_placeholder_account(account):
             continue
         has_transactions = db.query(BankTransaction.id).filter(BankTransaction.bank_account_id == account.id).first() is not None
@@ -54,6 +52,7 @@ def list_bank_accounts(db: Session) -> list[BankAccount]:
 
 def get_dashboard_metrics(db: Session) -> dict:
     accounts = list_bank_accounts(db)
+
     txns = db.query(BankTransaction).all()
     cash_balance = sum((Decimal(a.current_balance or a.opening_balance or 0) for a in accounts), Decimal("0"))
     unreconciled = sum(1 for t in txns if t.status in {"new", "categorized", "matched"})

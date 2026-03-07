@@ -18,28 +18,42 @@ def _to_decimal(value: str | None) -> Decimal | None:
         return None
 
 
-def list_bank_accounts(db: Session) -> list[BankAccount]:
-    return db.query(BankAccount).order_by(BankAccount.name.asc()).all()
 
+def _is_legacy_placeholder_account(account: BankAccount) -> bool:
+    return (
+        account.name == "Operating Account"
+        and account.institution == "Bedrock Bank"
+        and account.account_type == "checking"
+        and account.last4 == "1209"
+        and (account.currency or "USD") == "USD"
+        and Decimal(account.opening_balance or 0) == Decimal("250000.00")
+        and Decimal(account.current_balance or 0) == Decimal("287450.12")
+        and account.status == "active"
+    )
+
+
+def _purge_legacy_placeholder_bank_accounts(db: Session) -> None:
+    placeholder_accounts = db.query(BankAccount).all()
+    removed = False
+    for account in placeholder_accounts:
+        if not _is_legacy_placeholder_account(account):
+            continue
+        has_transactions = db.query(BankTransaction.id).filter(BankTransaction.bank_account_id == account.id).first() is not None
+        has_reconciliations = db.query(ReconciliationSession.id).filter(ReconciliationSession.bank_account_id == account.id).first() is not None
+        if has_transactions or has_reconciliations:
+            continue
+        db.delete(account)
+        removed = True
+    if removed:
+        db.commit()
+
+
+def list_bank_accounts(db: Session) -> list[BankAccount]:
+    _purge_legacy_placeholder_bank_accounts(db)
+    return db.query(BankAccount).order_by(BankAccount.name.asc()).all()
 
 def get_dashboard_metrics(db: Session) -> dict:
     accounts = list_bank_accounts(db)
-    if not accounts:
-        starter = BankAccount(
-            name="Operating Account",
-            institution="Bedrock Bank",
-            account_type="checking",
-            last4="1209",
-            currency="USD",
-            opening_balance=Decimal("250000.00"),
-            current_balance=Decimal("287450.12"),
-            status="active",
-        )
-        db.add(starter)
-        db.commit()
-        db.refresh(starter)
-        accounts = [starter]
-
     txns = db.query(BankTransaction).all()
     cash_balance = sum((Decimal(a.current_balance or a.opening_balance or 0) for a in accounts), Decimal("0"))
     unreconciled = sum(1 for t in txns if t.status in {"new", "categorized", "matched"})
@@ -49,17 +63,18 @@ def get_dashboard_metrics(db: Session) -> dict:
     reconciled_this_month = sum(1 for t in txns if t.status == "reconciled" and t.posted_date >= month_start)
 
     trend = []
-    running = cash_balance - Decimal("5000")
-    for i in range(11, -1, -1):
-        trend_day = date.today() - timedelta(days=i)
-        running += Decimal("380") - Decimal(i * 8)
-        trend.append({"day": trend_day, "balance": running.quantize(Decimal("0.01"))})
+    if accounts:
+        running = cash_balance - Decimal("5000")
+        for i in range(11, -1, -1):
+            trend_day = date.today() - timedelta(days=i)
+            running += Decimal("380") - Decimal(i * 8)
+            trend.append({"day": trend_day, "balance": running.quantize(Decimal("0.01"))})
 
     by_category: dict[str, Decimal] = {}
     for txn in txns:
         category = txn.category or "Uncategorized"
         by_category[category] = by_category.get(category, Decimal("0")) + abs(Decimal(txn.amount or 0))
-    category_breakdown = [{"category": k, "value": v.quantize(Decimal('0.01'))} for k, v in sorted(by_category.items(), key=lambda i: i[1], reverse=True)[:6]]
+    category_breakdown = [{"category": k, "value": v.quantize(Decimal("0.01"))} for k, v in sorted(by_category.items(), key=lambda i: i[1], reverse=True)[:6]]
 
     progress = []
     for account in accounts:
@@ -82,7 +97,6 @@ def get_dashboard_metrics(db: Session) -> dict:
         "category_breakdown": category_breakdown,
         "reconciliation_progress": progress,
     }
-
 
 def list_transactions(
     db: Session,
@@ -296,3 +310,4 @@ def close_reconciliation_session(db: Session, reconciliation_session_id: int, fo
     db.commit()
     db.refresh(session)
     return session
+

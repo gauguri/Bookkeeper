@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { FileUp, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import { useAuth } from "../auth";
+import { MODULES } from "../constants/modules";
 
 type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE" | "COGS" | "OTHER";
 
@@ -22,6 +25,7 @@ type ChartAccount = {
   parent_account?: ParentSummary | null;
   created_at: string;
   updated_at: string;
+  balance?: number;
 };
 
 type AccountForm = {
@@ -57,6 +61,8 @@ const typeLabel: Record<AccountType, string> = {
 };
 
 export default function ChartOfAccountsPage() {
+  const navigate = useNavigate();
+  const { isAdmin, allowedModules } = useAuth();
   const [accounts, setAccounts] = useState<ChartAccount[]>([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccountType | "ALL">("ALL");
@@ -67,6 +73,8 @@ export default function ChartOfAccountsPage() {
   const [form, setForm] = useState<AccountForm>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const canImport = isAdmin || allowedModules.includes(MODULES.IMPORT);
 
   const loadAccounts = async () => {
     setLoading(true);
@@ -96,6 +104,9 @@ export default function ChartOfAccountsPage() {
     () => accounts.filter((account) => account.id !== editingId),
     [accounts, editingId]
   );
+
+  const activeCount = accounts.filter((account) => account.is_active).length;
+  const parentedCount = accounts.filter((account) => account.parent_account_id).length;
 
   const openCreateForm = () => {
     setFormOpen(true);
@@ -177,24 +188,52 @@ export default function ChartOfAccountsPage() {
 
   return (
     <section className="mx-auto w-full max-w-6xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Accounting</p>
           <h1 className="text-3xl font-semibold">Chart of Accounts</h1>
-          <p className="text-muted">Manage your accounting categories and posting accounts.</p>
+          <p className="max-w-3xl text-muted">
+            Govern operational and statutory account structures with controlled master-data maintenance, hierarchical rollups,
+            and a dedicated import workbench for ERP-scale onboarding.
+          </p>
         </div>
-        <button className="app-button" onClick={openCreateForm}>
-          <Plus className="h-4 w-4" /> New account
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {canImport ? (
+            <button className="app-button-secondary" onClick={() => navigate("/accounts/bulk-import")}>
+              <FileUp className="h-4 w-4" /> Import
+            </button>
+          ) : null}
+          <button className="app-button" onClick={openCreateForm}>
+            <Plus className="h-4 w-4" /> New account
+          </button>
+        </div>
       </div>
 
-      {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>}
+      {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
 
-      {formOpen && (
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="app-card p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Accounts Loaded</p>
+          <p className="mt-3 text-3xl font-semibold">{accounts.length}</p>
+          <p className="mt-1 text-sm text-muted">Current search scope</p>
+        </div>
+        <div className="app-card p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Active Accounts</p>
+          <p className="mt-3 text-3xl font-semibold">{activeCount}</p>
+          <p className="mt-1 text-sm text-muted">Posting-ready accounts in result set</p>
+        </div>
+        <div className="app-card p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Hierarchy Coverage</p>
+          <p className="mt-3 text-3xl font-semibold">{parentedCount}</p>
+          <p className="mt-1 text-sm text-muted">Accounts linked to a parent structure</p>
+        </div>
+      </div>
+
+      {formOpen ? (
         <form className="app-card space-y-4 p-6" onSubmit={submitForm}>
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold">{editingId ? "Edit account" : "New account"}</h2>
-            <span className="app-badge border-primary/30 bg-primary/10 text-primary">COA</span>
+            <span className="app-badge border-primary/30 bg-primary/10 text-primary">COA Master Data</span>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-2 text-sm text-muted">
@@ -226,7 +265,7 @@ export default function ChartOfAccountsPage() {
               <select className="app-input" value={form.parent_account_id} onChange={(event) => setForm({ ...form, parent_account_id: event.target.value })}>
                 <option value="">None</option>
                 {parentOptions.map((account) => (
-                  <option key={account.id} value={account.id}>{account.name}</option>
+                  <option key={account.id} value={account.id}>{account.code ? `${account.code} � ${account.name}` : account.name}</option>
                 ))}
               </select>
             </label>
@@ -244,33 +283,33 @@ export default function ChartOfAccountsPage() {
             <button className="app-button" type="submit" disabled={saving}>{saving ? "Saving..." : "Save"}</button>
           </div>
         </form>
-      )}
+      ) : null}
 
       <div className="app-card space-y-4 p-6">
         <div className="grid gap-3 md:grid-cols-[2fr_1fr_auto_auto]">
           <input
             className="app-input"
-            placeholder="Search accounts"
+            placeholder="Search by code, name, or hierarchy"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <select className="app-input" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as AccountType | "ALL")}>
+          <select className="app-input" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as AccountType | "ALL") }>
             <option value="ALL">All Types</option>
             {accountTypes.map((accountType) => (
               <option key={accountType} value={accountType}>{typeLabel[accountType]}</option>
             ))}
           </select>
           <button className="app-button-secondary" onClick={() => setActiveOnly((prev) => !prev)}>
-            {activeOnly ? "Active only" : "All"}
+            {activeOnly ? "Active only" : "All statuses"}
           </button>
           <button className="app-button-secondary" onClick={() => loadAccounts()}>Search</button>
         </div>
 
         {loading ? (
-          <div className="rounded-xl border border-border bg-surface px-4 py-8 text-center text-sm text-muted">Loading accounts…</div>
+          <div className="rounded-xl border border-border bg-surface px-4 py-8 text-center text-sm text-muted">Loading accounts...</div>
         ) : accounts.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-8 text-center text-sm text-muted">
-            No accounts yet. Create your first account.
+            No accounts yet. Create your first account{canImport ? " or launch the import workbench." : "."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -289,11 +328,11 @@ export default function ChartOfAccountsPage() {
               <tbody>
                 {accounts.map((account) => (
                   <tr key={account.id} className="border-b border-border/50">
-                    <td className="px-3 py-2">{account.code || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{account.code || "-"}</td>
                     <td className="px-3 py-2 font-medium">{account.name}</td>
                     <td className="px-3 py-2">{typeLabel[account.type]}</td>
-                    <td className="px-3 py-2">{account.subtype || "—"}</td>
-                    <td className="px-3 py-2">{account.parent_account?.name || "—"}</td>
+                    <td className="px-3 py-2">{account.subtype || "-"}</td>
+                    <td className="px-3 py-2">{account.parent_account ? `${account.parent_account.code || ""} ${account.parent_account.name}`.trim() : "-"}</td>
                     <td className="px-3 py-2">
                       <span className={`app-badge ${account.is_active ? "border-success/30 bg-success/10 text-success" : "border-border bg-secondary text-muted"}`}>
                         {account.is_active ? "Active" : "Inactive"}

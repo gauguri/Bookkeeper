@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, condecimal
 
 DecimalValue = condecimal(max_digits=14, decimal_places=2)
 SupplierStatus = Literal["active", "inactive"]
+SupplierImportConflictStrategy = Literal["CREATE_ONLY", "UPDATE_EXISTING", "UPSERT"]
+SupplierImportRowAction = Literal["CREATE", "UPDATE", "SKIP", "ERROR"]
+SupplierImportRowStatus = Literal["VALID", "ERROR"]
+SupplierImportRecordAction = Literal["CREATED", "UPDATED"]
 
 
 class SupplierBase(BaseModel):
@@ -139,3 +143,59 @@ class SupplierItemBySupplierResponse(SupplierItemBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierImportFieldSpec(BaseModel):
+    field: str
+    label: str
+    required: bool
+    description: str
+    accepted_values: List[str] = Field(default_factory=list)
+    example: Optional[str] = None
+
+
+class SupplierImportFormatResponse(BaseModel):
+    delimiter: str = ","
+    has_header: bool = True
+    required_fields: List[str]
+    optional_fields: List[str]
+    fields: List[SupplierImportFieldSpec]
+    sample_csv: str
+    notes: List[str]
+
+
+class SupplierImportRequest(BaseModel):
+    csv_data: str
+    has_header: bool = True
+    conflict_strategy: SupplierImportConflictStrategy = "UPSERT"
+
+
+class SupplierImportSummary(BaseModel):
+    total_rows: int
+    valid_rows: int
+    error_rows: int
+    create_count: int
+    update_count: int
+    skip_count: int
+
+
+class SupplierImportRowResult(BaseModel):
+    row_number: int
+    name: Optional[str] = None
+    email: Optional[str] = None
+    status_value: Optional[SupplierStatus] = None
+    action: SupplierImportRowAction
+    status: SupplierImportRowStatus
+    messages: List[str]
+
+
+class SupplierImportSupplierResult(BaseModel):
+    id: int
+    name: str
+    action: SupplierImportRecordAction
+
+
+class SupplierImportResponse(BaseModel):
+    summary: SupplierImportSummary
+    rows: List[SupplierImportRowResult]
+    imported_suppliers: List[SupplierImportSupplierResult]

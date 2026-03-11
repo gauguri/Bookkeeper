@@ -459,3 +459,140 @@ def test_api_purchase_order_rejects_items_not_mapped_to_supplier(client_with_fk)
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Item Widget is not mapped to supplier Mapped Supply. Link supplier to item before creating PO."
+
+def test_api_supplier_import_format_contract(client):
+    response = client.get("/api/suppliers/import-format")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["required_fields"] == ["name"]
+    assert "legal_name" in payload["optional_fields"]
+    assert "default_lead_time_days" in payload["optional_fields"]
+    assert "name,legal_name,website" in payload["sample_csv"]
+
+
+def test_api_supplier_import_preview_reports_row_errors(client):
+    response = client.post(
+        "/api/suppliers/import-preview",
+        json={
+            "csv_data": "name,default_lead_time_days,status\n,abc,paused",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["error_rows"] == 1
+    assert payload["rows"][0]["status"] == "ERROR"
+    assert "Supplier name is required." in payload["rows"][0]["messages"]
+    assert "Lead time days must be a whole number." in payload["rows"][0]["messages"]
+    assert "Status must be active or inactive." in payload["rows"][0]["messages"]
+
+
+def test_api_supplier_import_creates_supplier_with_all_new_supplier_fields(client):
+    csv_data = "\n".join(
+        [
+            "name,legal_name,website,contact_name,email,phone,tax_id,remit_to_address,ship_from_address,default_lead_time_days,payment_terms,currency,status,shipping_terms,notes,address",
+            "Regatta Granites India,Regatta Granites India Private Limited,https://www.regattagranitesindia.com/,Sundeep Gandotra,sgandotra@regattagranitesindia.com,+91 9910066990,GSTIN-123,Remit Lane 1,Ship Lane 2,90,Net 30,USD,active,FOB,Preferred supplier,General address",
+        ]
+    )
+
+    preview = client.post(
+        "/api/suppliers/import-preview",
+        json={
+            "csv_data": csv_data,
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.json()["summary"]["error_rows"] == 0
+
+    response = client.post(
+        "/api/suppliers/import",
+        json={
+            "csv_data": csv_data,
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["summary"]["create_count"] == 1
+    assert payload["imported_suppliers"][0]["action"] == "CREATED"
+
+    suppliers = client.get("/api/suppliers").json()
+    created = next((supplier for supplier in suppliers if supplier["name"] == "Regatta Granites India"), None)
+    assert created is not None
+    assert created["legal_name"] == "Regatta Granites India Private Limited"
+    assert created["website"] == "https://www.regattagranitesindia.com/"
+    assert created["contact_name"] == "Sundeep Gandotra"
+    assert created["email"] == "sgandotra@regattagranitesindia.com"
+    assert created["phone"] == "+91 9910066990"
+    assert created["tax_id"] == "GSTIN-123"
+    assert created["remit_to_address"] == "Remit Lane 1"
+    assert created["ship_from_address"] == "Ship Lane 2"
+    assert created["default_lead_time_days"] == 90
+    assert created["payment_terms"] == "Net 30"
+    assert created["currency"] == "USD"
+    assert created["status"] == "active"
+    assert created["shipping_terms"] == "FOB"
+    assert created["notes"] == "Preferred supplier"
+
+
+def test_api_supplier_import_upsert_updates_existing_supplier_by_name(client):
+    existing = client.post(
+        "/api/suppliers",
+        json={
+            "name": "North Ridge Stone",
+            "email": "old@northridge.test",
+            "phone": "111-111-1111",
+            "payment_terms": "Net 30",
+            "currency": "USD",
+        },
+    )
+    assert existing.status_code == 201
+
+    csv_data = "\n".join(
+        [
+            "name,email,phone,payment_terms,currency,status",
+            "North Ridge Stone,new@northridge.test,222-222-2222,Net 45,EUR,inactive",
+        ]
+    )
+
+    response = client.post(
+        "/api/suppliers/import",
+        json={
+            "csv_data": csv_data,
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["summary"]["update_count"] == 1
+    assert payload["imported_suppliers"][0]["action"] == "UPDATED"
+
+    supplier = client.get(f"/api/suppliers/{existing.json()['id']}").json()
+    assert supplier["email"] == "new@northridge.test"
+    assert supplier["phone"] == "222-222-2222"
+    assert supplier["payment_terms"] == "Net 45"
+    assert supplier["currency"] == "EUR"
+    assert supplier["status"] == "inactive"
+
+
+def test_api_supplier_import_rejects_import_when_preview_has_errors(client):
+    response = client.post(
+        "/api/suppliers/import",
+        json={
+            "csv_data": "name,website\nAcme Stone,example.com",
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Import preview contains errors. Resolve validation issues before importing."

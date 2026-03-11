@@ -756,7 +756,11 @@ def create_item_supplier(item_id: int, payload: schemas.SupplierItemCreate, db: 
         raise HTTPException(status_code=409, detail="Supplier already linked to item.")
 
     link = SupplierItem(item=item, supplier_id=payload.supplier_id, **payload.model_dump(exclude={"supplier_id"}))
-    if link.default_unit_cost is None:
+    payload_fields = payload.model_fields_set
+    if "supplier_cost" not in payload_fields and "default_unit_cost" not in payload_fields:
+        link.supplier_cost = item.unit_price
+        link.default_unit_cost = item.unit_price
+    elif link.default_unit_cost is None:
         link.default_unit_cost = link.supplier_cost
     db.add(link)
     db.flush()
@@ -850,7 +854,11 @@ def create_supplier_items(
             continue
         data = entry.model_dump(exclude={"item_id"})
         link = SupplierItem(item_id=entry.item_id, supplier_id=supplier_id, **data)
-        if link.default_unit_cost is None:
+        entry_fields = entry.model_fields_set
+        if "supplier_cost" not in entry_fields and "default_unit_cost" not in entry_fields:
+            link.supplier_cost = item.unit_price
+            link.default_unit_cost = item.unit_price
+        elif link.default_unit_cost is None:
             link.default_unit_cost = link.supplier_cost
         db.add(link)
         db.flush()
@@ -895,7 +903,4 @@ def delete_supplier_item(supplier_id: int, supplier_item_id: int, db: Session = 
     db.delete(link)
     db.commit()
     return {"status": "ok"}
-
-
-
 

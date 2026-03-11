@@ -262,7 +262,7 @@ def list_supplier_items(supplier_id: int, db: Session = Depends(get_db)):
 @router.post("/suppliers/{supplier_id}/items", response_model=List[schemas.SupplierItemBySupplierResponse], status_code=status.HTTP_201_CREATED)
 def create_supplier_items(
     supplier_id: int,
-    payload: List[schemas.SupplierItemCreateForSupplier] = Body(...),
+    payload: schemas.SupplierItemCreateForSupplier | List[schemas.SupplierItemCreateForSupplier] = Body(...),
     db: Session = Depends(get_db),
 ):
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
@@ -270,14 +270,15 @@ def create_supplier_items(
         raise HTTPException(status_code=404, detail="Supplier not found.")
 
     created_links: List[SupplierItem] = []
-    for entry in payload:
+    entries = payload if isinstance(payload, list) else [payload]
+    for entry in entries:
         item = db.query(Item).filter(Item.id == entry.item_id).first()
         if not item:
             raise HTTPException(status_code=404, detail=f"Item not found: {entry.item_id}")
         existing = db.query(SupplierItem).filter(SupplierItem.item_id == entry.item_id, SupplierItem.supplier_id == supplier_id).first()
         if existing:
             continue
-        data = entry.model_dump()
+        data = entry.model_dump(exclude={"item_id"})
         link = SupplierItem(item_id=entry.item_id, supplier_id=supplier_id, **data)
         if link.default_unit_cost is None:
             link.default_unit_cost = link.supplier_cost
@@ -324,3 +325,4 @@ def delete_supplier_item(supplier_id: int, supplier_item_id: int, db: Session = 
     db.delete(link)
     db.commit()
     return {"status": "ok"}
+

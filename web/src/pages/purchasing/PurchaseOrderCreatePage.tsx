@@ -4,14 +4,15 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiFetch, createPurchaseOrder, PurchaseOrderPayload, sendPurchaseOrder } from "../../api";
 import { formatCurrency } from "../../utils/formatters";
 
-type Supplier = { id: number; name: string; email?: string | null; phone?: string | null; lead_time_days?: number | null };
+type Supplier = { id: number; name: string; email?: string | null; phone?: string | null; lead_time_days?: number | null; default_lead_time_days?: number | null };
 type Item = { id: number; name: string; sku?: string | null; preferred_supplier_id?: number | null; preferred_landed_cost?: number | null };
 type SupplierItem = {
   item_id: number;
   item_name: string;
   sku?: string | null;
   supplier_sku?: string | null;
-  default_unit_cost?: number | null;
+  default_unit_cost?: number | string | null;
+  supplier_cost?: number | string | null;
 };
 type CreateLine = { item_id: string; quantity: string; unit_cost: string };
 type InventoryPrefillLine = { item_id: number; quantity?: number; qty?: number };
@@ -19,6 +20,11 @@ type LocationState = { prefillLines?: InventoryPrefillLine[]; supplierId?: numbe
 
 const cardClass = "app-card space-y-4 p-5";
 const emptyLine = (): CreateLine => ({ item_id: "", quantity: "1", unit_cost: "0" });
+const resolveSupplierUnitCost = (item?: SupplierItem | null) => {
+  if (!item) return "0";
+  const candidate = item.default_unit_cost ?? item.supplier_cost ?? 0;
+  return String(candidate);
+};
 
 export default function PurchaseOrderCreatePage() {
   const navigate = useNavigate();
@@ -148,7 +154,7 @@ export default function PurchaseOrderCreatePage() {
         ...prev,
         supplier_contact: supplier.phone ?? "",
         supplier_email: supplier.email ?? "",
-        expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : prev.expected_lead_time
+        expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : supplier.default_lead_time_days != null ? String(supplier.default_lead_time_days) : prev.expected_lead_time
       }));
     }
 
@@ -164,9 +170,13 @@ export default function PurchaseOrderCreatePage() {
         let removedCount = 0;
         setForm((prev) => {
           const nextLines = prev.lines.map((line) => {
-            if (!line.item_id || allowed.has(line.item_id)) return line;
-            removedCount += 1;
-            return { ...line, item_id: "", unit_cost: "0" };
+            if (!line.item_id) return line;
+            if (!allowed.has(line.item_id)) {
+              removedCount += 1;
+              return { ...line, item_id: "", unit_cost: "0" };
+            }
+            const matched = data.find((item) => String(item.item_id) === line.item_id);
+            return matched ? { ...line, unit_cost: resolveSupplierUnitCost(matched) } : line;
           });
           return { ...prev, lines: nextLines };
         });
@@ -433,9 +443,10 @@ export default function PurchaseOrderCreatePage() {
 
             {supplierSelected && !supplierItemsLoading && hasMappedItems ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full table-fixed text-left text-sm">
+                  <colgroup><col className="w-[54%]" /><col className="w-[12%]" /><col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[6%]" /></colgroup>
                   <thead className="text-xs uppercase text-muted">
-                    <tr><th className="py-2">Item</th><th className="py-2">Qty</th><th className="py-2">Unit cost</th><th className="py-2">Line total</th><th className="py-2" /></tr>
+                    <tr><th className="py-2 pr-2">Item</th><th className="py-2 pr-2">Qty</th><th className="py-2 pr-2">Unit cost</th><th className="py-2 pr-2 text-right">Line total</th><th className="py-2 text-right" /></tr>
                   </thead>
                   <tbody>
                     {form.lines.map((line, index) => {
@@ -464,7 +475,7 @@ export default function PurchaseOrderCreatePage() {
                                 const selectedItem = supplierItems.find((item) => item.item_id === selectedId);
                                 setLine(index, {
                                   item_id: event.target.value,
-                                  unit_cost: selectedItem?.default_unit_cost != null ? String(selectedItem.default_unit_cost) : line.unit_cost
+                                  unit_cost: selectedItem ? resolveSupplierUnitCost(selectedItem) : line.unit_cost
                                 });
                               }}
                             >
@@ -478,10 +489,10 @@ export default function PurchaseOrderCreatePage() {
                               ))}
                             </select>
                           </td>
-                          <td className="py-2 pr-2"><input className="app-input w-24" type="number" min="0" step="0.01" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} /></td>
-                          <td className="py-2 pr-2"><input className="app-input w-32" type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => setLine(index, { unit_cost: event.target.value })} /></td>
-                          <td className="py-2 font-medium">{formatCurrency(lineTotal)}</td>
-                          <td className="py-2 text-right"><button className="app-button-ghost" onClick={() => removeLine(index)}><Trash2 className="h-4 w-4" /></button></td>
+                          <td className="py-2 pr-2 align-top"><input className="app-input w-full" type="number" min="0" step="0.01" value={line.quantity} onChange={(event) => setLine(index, { quantity: event.target.value })} /></td>
+                          <td className="py-2 pr-2 align-top"><input className="app-input w-full" type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => setLine(index, { unit_cost: event.target.value })} /></td>
+                          <td className="py-2 pr-2 text-right font-medium align-top">{formatCurrency(lineTotal)}</td>
+                          <td className="py-2 text-right align-top"><button className="app-button-ghost" onClick={() => removeLine(index)}><Trash2 className="h-4 w-4" /></button></td>
                         </tr>
                       );
                     })}
@@ -502,3 +513,5 @@ export default function PurchaseOrderCreatePage() {
     </section>
   );
 }
+
+

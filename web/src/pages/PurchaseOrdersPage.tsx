@@ -24,6 +24,14 @@ type Item = {
   name: string;
 };
 
+type SupplierCatalogItem = {
+  item_id: number;
+  item_name: string;
+  item_sku?: string | null;
+  default_unit_cost: number | string;
+  supplier_cost?: number | string;
+};
+
 type PurchaseOrderListRow = {
   id: number;
   po_number: string;
@@ -93,6 +101,7 @@ export default function PurchaseOrdersPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderListRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [supplierCatalogItems, setSupplierCatalogItems] = useState<SupplierCatalogItem[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -130,6 +139,42 @@ export default function PurchaseOrdersPage() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    const supplierId = Number(form.supplier_id);
+    if (!supplierId) {
+      setSupplierCatalogItems([]);
+      return;
+    }
+
+    let isCancelled = false;
+    const loadSupplierCatalog = async () => {
+      try {
+        const catalog = await apiFetch<SupplierCatalogItem[]>(`/suppliers/${supplierId}/items`);
+        if (isCancelled) return;
+        setSupplierCatalogItems(catalog);
+        setForm((prev) => ({
+          ...prev,
+          lines: prev.lines.map((line) => {
+            const matched = catalog.find((entry) => entry.item_id === Number(line.item_id));
+            if (!matched) return line;
+            return {
+              ...line,
+              unit_cost: String(matched.default_unit_cost ?? matched.supplier_cost ?? line.unit_cost ?? "0"),
+            };
+          }),
+        }));
+      } catch {
+        if (!isCancelled) {
+          setSupplierCatalogItems([]);
+        }
+      }
+    };
+
+    void loadSupplierCatalog();
+    return () => {
+      isCancelled = true;
+    };
+  }, [form.supplier_id]);
   const resetForm = () => {
     setEditingId(null);
     setFormOpen(false);
@@ -303,11 +348,25 @@ export default function PurchaseOrdersPage() {
   const updateLine = (index: number, key: keyof FormLine, value: string) => {
     setForm((prev) => ({
       ...prev,
-      lines: prev.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, [key]: value } : line))
+      lines: prev.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) return line;
+        if (key !== "item_id") {
+          return { ...line, [key]: value };
+        }
+        const matched = supplierCatalogItems.find((entry) => entry.item_id === Number(value));
+        return {
+          ...line,
+          item_id: value,
+          unit_cost: matched ? String(matched.default_unit_cost ?? matched.supplier_cost ?? "0") : line.unit_cost,
+        };
+      })
     }));
   };
 
   const addLine = () => setForm((prev) => ({ ...prev, lines: [...prev.lines, emptyLine()] }));
+  const lineItemOptions = supplierCatalogItems.length
+    ? supplierCatalogItems.map((entry) => ({ id: entry.item_id, name: entry.item_sku ? `${entry.item_name} (${entry.item_sku})` : entry.item_name }))
+    : items;
   const removeLine = (index: number) => {
     setForm((prev) => ({ ...prev, lines: prev.lines.filter((_, lineIndex) => lineIndex !== index) }));
   };
@@ -400,7 +459,7 @@ export default function PurchaseOrdersPage() {
           </div>
 
           <div className="mt-6 max-w-5xl space-y-4 border-t border-border pt-4">
-            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[200px_6rem_8rem_7rem_6rem] md:items-center md:gap-3">
+            <div className="hidden text-xs font-medium uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(0,1.8fr)_7rem_8rem_7rem_6rem] md:items-center md:gap-4">
               <span className="pl-1">Item</span>
               <span>Qty</span>
               <span>Unit cost</span>
@@ -409,7 +468,7 @@ export default function PurchaseOrdersPage() {
             </div>
             {form.lines.map((line, index) => (
               <div key={index} className="rounded-xl border border-muted/30 px-3 py-2">
-                <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-[200px_6rem_8rem_7rem_6rem] md:items-center">
+                <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-[minmax(0,1.8fr)_7rem_8rem_7rem_6rem] md:items-center">
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Item</span>
                     <select
@@ -418,7 +477,7 @@ export default function PurchaseOrdersPage() {
                       onChange={(event) => updateLine(index, "item_id", event.target.value)}
                     >
                       <option value="">Select item</option>
-                      {items.map((item) => (
+                      {lineItemOptions.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.name}
                         </option>
@@ -428,7 +487,7 @@ export default function PurchaseOrdersPage() {
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Qty</span>
                     <input
-                      className="app-input h-10 w-24 rounded-lg px-3"
+                      className="app-input h-10 w-full rounded-lg px-3"
                       type="number"
                       min="0"
                       step="0.01"
@@ -440,7 +499,7 @@ export default function PurchaseOrdersPage() {
                   <label className="space-y-1 text-sm md:space-y-0">
                     <span className="md:sr-only">Unit cost</span>
                     <input
-                      className="app-input h-10 w-32 rounded-lg px-3"
+                      className="app-input h-10 w-full rounded-lg px-3"
                       type="number"
                       min="0"
                       step="0.01"
@@ -449,7 +508,7 @@ export default function PurchaseOrdersPage() {
                       placeholder="Unit cost"
                     />
                   </label>
-                  <p className="w-28 text-right text-sm font-medium md:pt-0.5">
+                  <p className="text-right text-sm font-medium md:pt-0.5">
                     ${(Number(line.quantity || 0) * Number(line.unit_cost || 0)).toFixed(2)}
                   </p>
                   <div className="flex w-full md:w-24 md:justify-end">
@@ -589,3 +648,4 @@ export default function PurchaseOrdersPage() {
     </div>
   );
 }
+

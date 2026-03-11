@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import require_module
@@ -102,6 +102,8 @@ IMPORT_SAMPLE_CSV = "\n".join(
 )
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+SUPPLIER_EMAIL_MAX_LENGTH = Supplier.__table__.c.email.type.length or 255
+SUPPLIER_PHONE_MAX_LENGTH = Supplier.__table__.c.phone.type.length or 255
 
 
 def _normalize_nullable_string(value: Any) -> Optional[str]:
@@ -131,6 +133,20 @@ def _parse_supplier_status(value: Optional[str]) -> Optional[str]:
     return None
 
 
+def _normalize_supplier_email(value: Optional[str]) -> tuple[Optional[str], bool]:
+    if value is None:
+        return None, True
+    raw = value.strip()
+    if not raw:
+        return None, True
+    parts = [part.strip().strip("'\"") for part in re.split(r"[;,]", raw) if part.strip()]
+    if not parts:
+        return None, True
+    if any(not EMAIL_RE.match(part) for part in parts):
+        return raw, False
+    return "; ".join(parts), True
+
+
 def _supplier_csv_format_response() -> schemas.SupplierImportFormatResponse:
     return schemas.SupplierImportFormatResponse(
         delimiter=",",
@@ -158,6 +174,7 @@ def _supplier_csv_format_response() -> schemas.SupplierImportFormatResponse:
         notes=[
             "Supplier name is required and used as the matching key for update/upsert operations.",
             "Website must be a valid URL including http:// or https://.",
+            "Email supports single or multiple addresses separated by semicolon/comma.",
             "Status accepts active or inactive. Blank defaults to active.",
             "Conflict strategy controls whether existing supplier names are created, updated, or both.",
         ],
@@ -330,9 +347,16 @@ def _build_supplier_payload(raw_row: dict[str, Any]) -> tuple[Optional[dict[str,
     if not name:
         messages.append("Supplier name is required.")
 
-    email = _normalize_nullable_string(raw_row.get("email"))
-    if email and not EMAIL_RE.match(email):
-        messages.append("Email must be a valid email address.")
+    raw_email = _normalize_nullable_string(raw_row.get("email"))
+    email, email_valid = _normalize_supplier_email(raw_email)
+    if raw_email and not email_valid:
+        messages.append("Email must be a valid email address or a semicolon/comma-separated list of valid email addresses.")
+    if email and len(email) > SUPPLIER_EMAIL_MAX_LENGTH:
+        messages.append(f"Email exceeds max length of {SUPPLIER_EMAIL_MAX_LENGTH} characters.")
+
+    raw_phone = _normalize_nullable_string(raw_row.get("phone"))
+    if raw_phone and len(raw_phone) > SUPPLIER_PHONE_MAX_LENGTH:
+        messages.append(f"Phone exceeds max length of {SUPPLIER_PHONE_MAX_LENGTH} characters.")
 
     status_value = _parse_supplier_status(_normalize_nullable_string(raw_row.get("status")))
     if status_value is None:
@@ -353,7 +377,7 @@ def _build_supplier_payload(raw_row: dict[str, Any]) -> tuple[Optional[dict[str,
         "tax_id": _normalize_nullable_string(raw_row.get("tax_id")),
         "contact_name": _normalize_nullable_string(raw_row.get("contact_name")),
         "email": email,
-        "phone": _normalize_nullable_string(raw_row.get("phone")),
+        "phone": raw_phone,
         "address": _normalize_nullable_string(raw_row.get("address")),
         "remit_to_address": _normalize_nullable_string(raw_row.get("remit_to_address")),
         "ship_from_address": _normalize_nullable_string(raw_row.get("ship_from_address")),
@@ -468,6 +492,20 @@ def _analyze_supplier_import(payload: schemas.SupplierImportRequest, db: Session
         "analysis_rows": analysis_rows,
     }
 
+def _safe_supplier_import_flush(db: Session, row_number: int) -> None:
+    try:
+        db.flush()
+    except DataError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Import failed at row {row_number}: one or more field values exceed current database limits. "
+                "Run latest migrations or shorten long email/phone values."
+            ),
+        ) from None
+
+
 @router.get("/suppliers", response_model=List[schemas.SupplierResponse])
 def list_suppliers(
     page: int = Query(1, ge=1),
@@ -567,7 +605,7 @@ def import_suppliers(payload: schemas.SupplierImportRequest, db: Session = Depen
         if row["action"] == "CREATE":
             supplier = Supplier(**supplier_payload)
             db.add(supplier)
-            db.flush()
+            _safe_supplier_import_flush(db, row["row_number"])
             imported_suppliers.append(
                 schemas.SupplierImportSupplierResult(
                     id=supplier.id,
@@ -583,7 +621,7 @@ def import_suppliers(payload: schemas.SupplierImportRequest, db: Session = Depen
                 raise HTTPException(status_code=400, detail="Supplier matching key could not be resolved during import.")
             for key, value in supplier_payload.items():
                 setattr(supplier, key, value)
-            db.flush()
+            _safe_supplier_import_flush(db, row["row_number"])
             imported_suppliers.append(
                 schemas.SupplierImportSupplierResult(
                     id=supplier.id,
@@ -594,6 +632,12 @@ def import_suppliers(payload: schemas.SupplierImportRequest, db: Session = Depen
 
     try:
         db.commit()
+    except DataError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Supplier import failed because one or more values exceed current database limits.",
+        ) from None
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Supplier import failed due to a constraint conflict.") from None
@@ -851,4 +895,7 @@ def delete_supplier_item(supplier_id: int, supplier_item_id: int, db: Session = 
     db.delete(link)
     db.commit()
     return {"status": "ok"}
+
+
+
 

@@ -490,7 +490,7 @@ class Supplier(Base):
     website = Column(String(255), nullable=True)
     tax_id = Column(String(100), nullable=True)
     email = Column(String(255), nullable=True)
-    phone = Column(String(50), nullable=True)
+    phone = Column(String(255), nullable=True)
     status = Column(String(20), nullable=False, default="active")
     contact_name = Column(String(200), nullable=True)
     address = Column(Text, nullable=True)
@@ -2020,3 +2020,4 @@ class InvJournalEntry(Base):
         Index("ix_inv_journal_entries_txn", "transaction_id"),
         Index("ix_inv_journal_entries_status", "status"),
     )
+

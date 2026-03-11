@@ -490,6 +490,44 @@ def test_api_supplier_import_preview_reports_row_errors(client):
     assert "Status must be active or inactive." in payload["rows"][0]["messages"]
 
 
+def test_api_supplier_import_preview_accepts_multiple_emails(client):
+    csv_data = "name,email\nRSVS Granites,\"sukhumar@rsvsgranites.com; padhu@rsvsgranites.com\""
+
+    response = client.post(
+        "/api/suppliers/import-preview",
+        json={
+            "csv_data": csv_data,
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["error_rows"] == 0
+    assert payload["rows"][0]["status"] == "VALID"
+
+
+
+def test_api_supplier_import_preview_rejects_too_long_phone(client):
+    long_phone = "1" * 260
+    csv_data = f"name,phone\nLong Phone Supplier,{long_phone}"
+
+    response = client.post(
+        "/api/suppliers/import-preview",
+        json={
+            "csv_data": csv_data,
+            "has_header": True,
+            "conflict_strategy": "UPSERT",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["error_rows"] == 1
+    assert any("Phone exceeds max length" in message for message in payload["rows"][0]["messages"])
+
+
 def test_api_supplier_import_creates_supplier_with_all_new_supplier_fields(client):
     csv_data = "\n".join(
         [
@@ -596,3 +634,5 @@ def test_api_supplier_import_rejects_import_when_preview_has_errors(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Import preview contains errors. Resolve validation issues before importing."
+
+

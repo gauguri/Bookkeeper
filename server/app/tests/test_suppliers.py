@@ -636,3 +636,34 @@ def test_api_supplier_import_rejects_import_when_preview_has_errors(client):
     assert response.json()["detail"] == "Import preview contains errors. Resolve validation issues before importing."
 
 
+
+def test_api_create_supplier_items_defaults_cost_to_item_unit_price_when_costs_missing(client):
+    supplier = client.post("/api/suppliers", json={"name": "Price Seed Supply"}).json()
+    item = client.post("/api/items", json={"name": "Premium Monument", "unit_price": 200.0, "is_active": True}).json()
+
+    response = client.post(
+        f"/api/suppliers/{supplier['id']}/items",
+        json=[{"item_id": item["id"]}],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["default_unit_cost"] == "200.00"
+    assert payload[0]["item_unit_price"] == "200.00"
+
+
+def test_api_create_item_supplier_defaults_cost_to_item_unit_price_when_costs_missing(client):
+    supplier = client.post("/api/suppliers", json={"name": "Single Link Supply"}).json()
+    item = client.post("/api/items", json={"name": "Memorial Stone", "unit_price": 125.0, "is_active": True}).json()
+
+    response = client.post(
+        f"/api/items/{item['id']}/suppliers",
+        json={"supplier_id": supplier["id"]},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["default_unit_cost"] == "125.00"
+    assert payload["supplier_cost"] == "125.00"
+

@@ -107,6 +107,19 @@ def test_create_supplier():
     assert supplier.id is not None
     assert supplier.name == "Northwind"
 
+def test_create_supplier_ap_defaults_are_populated():
+    db = create_session()
+    supplier = Supplier(name="Northwind")
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+
+    assert supplier.ap_requires_three_way_match is True
+    assert supplier.ap_duplicate_check_mode == "WARN"
+    assert supplier.ap_auto_approve_threshold == Decimal("0")
+    assert supplier.ap_amount_tolerance == Decimal("0")
+    assert supplier.ap_quantity_tolerance_pct == Decimal("0")
+
 
 def test_create_supplier_item_link_with_costs():
     db = create_session()
@@ -380,6 +393,23 @@ def test_api_delete_purchase_order_returns_conflict_when_sent(client_with_fk):
         == "Cannot delete purchase order because it has dependent records (inventory landed / send log). Use Cancel instead or remove dependencies."
     )
 
+
+
+def test_api_create_supplier_items_accepts_list_payload(client):
+    supplier = client.post("/api/suppliers", json={"name": "Primary Supply"}).json()
+    item = client.post("/api/items", json={"name": "Widget A", "unit_price": 10.0, "is_active": True}).json()
+
+    response = client.post(
+        f"/api/suppliers/{supplier['id']}/items",
+        json=[{"item_id": item["id"], "supplier_cost": 7.25, "supplier_sku": "SUP-A"}],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["item_id"] == item["id"]
+    assert payload[0]["supplier_sku"] == "SUP-A"
+    assert payload[0]["default_unit_cost"] == "7.25"
 
 def test_api_list_supplier_items_for_purchase_orders_returns_supplier_scoped_catalog(client):
     supplier = client.post("/api/suppliers", json={"name": "Primary Supply"}).json()

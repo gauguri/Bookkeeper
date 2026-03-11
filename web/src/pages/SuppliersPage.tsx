@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Building2, Download, FileUp, Plus, Search, Settings2, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import { formatCurrency } from "../utils/formatters";
 
@@ -81,7 +80,6 @@ const emptyForm = {
 };
 
 export default function SuppliersPage() {
-  const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierUniverse, setSupplierUniverse] = useState<Supplier[]>([]);
   const [supplierCatalogMetrics, setSupplierCatalogMetrics] = useState<Record<number, SupplierCatalogMetrics>>({});
@@ -322,7 +320,7 @@ export default function SuppliersPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {ranges.map((r) => <button key={r} className={`app-button-secondary ${range === r ? "ring-2 ring-primary/30" : ""}`} onClick={() => setRange(r)}>{r}</button>)}
-          <button className="app-button-secondary" onClick={() => navigate("/procurement/suppliers/import")}><FileUp className="h-4 w-4" /> Import</button>
+          <a className="app-button-secondary inline-flex items-center gap-2" href="/procurement/suppliers/import"><FileUp className="h-4 w-4" /> Import</a>
           <button className="app-button-secondary"><Download className="h-4 w-4" /> Export</button>
           <button className="app-button" onClick={openCreateModal}><Plus className="h-4 w-4" /> New Supplier</button>
         </div>
@@ -373,7 +371,7 @@ export default function SuppliersPage() {
               </div>
             </div>
             {loading ? <div className="h-52 animate-pulse rounded-xl bg-secondary" /> : suppliers.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-10 text-center"><Building2 className="mx-auto mb-2 h-8 w-8 text-muted" /><p className="text-lg font-semibold">No suppliers yet</p><p className="text-sm text-muted">Add your first supplier or import your vendor master.</p><div className="mt-4 flex justify-center gap-2"><button className="app-button" onClick={openCreateModal}>Add your first supplier</button><button className="app-button-secondary" onClick={() => navigate("/procurement/suppliers/import")}>Import suppliers</button></div></div>
+              <div className="rounded-xl border border-dashed p-10 text-center"><Building2 className="mx-auto mb-2 h-8 w-8 text-muted" /><p className="text-lg font-semibold">No suppliers yet</p><p className="text-sm text-muted">Add your first supplier or import your vendor master.</p><div className="mt-4 flex justify-center gap-2"><button className="app-button" onClick={openCreateModal}>Add your first supplier</button><a className="app-button-secondary inline-flex items-center gap-2" href="/procurement/suppliers/import">Import suppliers</a></div></div>
             ) : (
               <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="text-left text-xs uppercase tracking-wider text-muted"><tr><th /><th>Supplier Name</th><th>Status</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Lead Time</th><th>Catalog Items</th><th>Preferred Items</th><th>Spend (YTD)</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{suppliers.map((s) => { const count = supplierCatalogMetrics[s.id]?.count ?? 0; return <tr key={s.id} className={`border-t ${columnsCompact ? "" : "h-14"}`}><td><input type="checkbox" checked={selectedRows.includes(s.id)} onChange={() => setSelectedRows((prev) => prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id])} /></td><td><button className="font-medium hover:underline" onClick={() => openSupplier(s)}>{s.name}</button></td><td><span className={`app-badge ${s.status === "active" ? "border-success/30 bg-success/10 text-success" : ""}`}>{s.status}</span></td><td>{s.contact_name ?? "-"}</td><td>{s.email ?? "-"}</td><td>{s.phone ?? "-"}</td><td>{s.default_lead_time_days ?? "-"}</td><td>{count}</td><td>{supplierCatalogMetrics[s.id]?.preferred ?? 0}</td><td>{formatCurrency(0)}</td><td>{new Date(s.updated_at).toLocaleDateString()}</td><td><div className="flex gap-2"><button className="app-button-ghost" onClick={() => openSupplier(s)}>View</button><button className="app-button-ghost" onClick={() => openEditModal(s)}>Edit</button><button className="app-button-ghost" onClick={() => { openSupplier(s); setSelectedTab("catalog"); }}>Map Items</button></div></td></tr>; })}</tbody></table></div>
             )}
@@ -453,4 +451,5 @@ export default function SuppliersPage() {
     </section>
   );
 }
+
 

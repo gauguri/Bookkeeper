@@ -17,6 +17,7 @@ import BacklogPage from "./pages/BacklogPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ItemsPage from "./pages/ItemsPage";
+import ItemsBulkImportPage from "./pages/ItemsBulkImportPage";
 import LoginPage from "./pages/LoginPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import NoAccessPage from "./pages/NoAccessPage";
@@ -228,6 +229,7 @@ export default function App() {
             <Route path="/sales/customers" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomersPage /></ProtectedRoute>} />
             <Route path="/sales/customers/:customerId" element={<ProtectedRoute moduleKey={MODULES.CUSTOMERS}><CustomerProfilePage /></ProtectedRoute>} />
             <Route path="/sales/items" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsPage /></ProtectedRoute>} />
+            <Route path="/sales/items/import" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemsBulkImportPage /></ProtectedRoute>} />
             <Route path="/sales/items/:itemId" element={<ProtectedRoute moduleKey={MODULES.ITEMS}><ItemProfilePage /></ProtectedRoute>} />
             <Route path="/sales-requests" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestsPage /></ProtectedRoute>} />
             <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestDetailPage /></ProtectedRoute>} />

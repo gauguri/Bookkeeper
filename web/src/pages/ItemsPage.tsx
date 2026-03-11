@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus, Search, Package, DollarSign, AlertTriangle, TrendingDown,
-  ChevronDown, ChevronUp, ArrowUpDown, SlidersHorizontal, X,
+  ChevronDown, ChevronUp, ArrowUpDown, SlidersHorizontal, X, Upload,
 } from "lucide-react";
 import {
   useItemsEnriched, useItemsSummary, useCreateItem,
@@ -103,9 +103,14 @@ export default function ItemsPage() {
           <h1 className="text-2xl font-bold">Product Catalog</h1>
           <p className="text-sm text-muted">Manage pricing, inventory, and supplier costs across your product portfolio.</p>
         </div>
-        <button className="app-button" onClick={() => setShowForm(true)}>
-          <Plus className="h-4 w-4" /> New Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="app-button-secondary" onClick={() => navigate("/sales/items/import")}>
+            <Upload className="h-4 w-4" /> Import
+          </button>
+          <button className="app-button" onClick={() => setShowForm(true)}>
+            <Plus className="h-4 w-4" /> New Item
+          </button>
+        </div>
       </div>
 
       {/* ── Summary KPI Bar ── */}
@@ -409,3 +414,4 @@ export default function ItemsPage() {
     </section>
   );
 }
+

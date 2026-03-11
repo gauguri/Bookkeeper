@@ -39,6 +39,7 @@ import SalesRequestEditPage from "./pages/SalesRequestEditPage";
 import SalesRequestsPage from "./pages/SalesRequestsPage";
 import SetupWizardPage from "./pages/SetupWizardPage";
 import SuppliersPage from "./pages/SuppliersPage";
+import SuppliersBulkImportPage from "./pages/SuppliersBulkImportPage";
 import PurchaseOrderCreatePage from "./pages/purchasing/PurchaseOrderCreatePage";
 import POHubPage from "./pages/purchasing/POHubPage";
 import CustomerProfilePage from "./pages/CustomerProfilePage";
@@ -257,6 +258,7 @@ export default function App() {
             <Route path="/accounts/bulk-import" element={<ProtectedRoute moduleKey={MODULES.IMPORT}><ChartOfAccountsBulkImportPage /></ProtectedRoute>} />
             <Route path="/purchasing/po-hub/*" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><POHubPage /></ProtectedRoute>} />
             <Route path="/procurement/suppliers" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
+            <Route path="/procurement/suppliers/import" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersBulkImportPage /></ProtectedRoute>} />
             <Route path="/procurement/suppliers/:id" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
             <Route path="/purchasing/suppliers" element={<Navigate to="/procurement/suppliers" replace />} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
@@ -283,3 +285,4 @@ export default function App() {
     </Routes>
   );
 }
+

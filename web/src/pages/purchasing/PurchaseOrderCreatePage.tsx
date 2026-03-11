@@ -5,7 +5,7 @@ import { apiFetch, createPurchaseOrder, PurchaseOrderPayload, sendPurchaseOrder 
 import { formatCurrency } from "../../utils/formatters";
 
 type Supplier = { id: number; name: string; email?: string | null; phone?: string | null; lead_time_days?: number | null; default_lead_time_days?: number | null };
-type Item = { id: number; name: string; sku?: string | null; preferred_supplier_id?: number | null; preferred_landed_cost?: number | null };
+type Item = { id: number; name: string; sku?: string | null; unit_price?: number | null; preferred_supplier_id?: number | null; preferred_landed_cost?: number | null };
 type SupplierItem = {
   item_id: number;
   item_name: string;
@@ -20,10 +20,17 @@ type LocationState = { prefillLines?: InventoryPrefillLine[]; supplierId?: numbe
 
 const cardClass = "app-card space-y-4 p-5";
 const emptyLine = (): CreateLine => ({ item_id: "", quantity: "1", unit_cost: "0" });
-const resolveSupplierUnitCost = (item?: SupplierItem | null) => {
-  if (!item) return "0";
-  const candidate = item.default_unit_cost ?? item.supplier_cost ?? 0;
-  return String(candidate);
+const resolveSupplierUnitCost = (item?: SupplierItem | null, fallbackItem?: Item | null) => {
+  const supplierDefault = Number(item?.default_unit_cost ?? 0);
+  if (supplierDefault > 0) return String(supplierDefault);
+
+  const supplierCost = Number(item?.supplier_cost ?? 0);
+  if (supplierCost > 0) return String(supplierCost);
+
+  const listPrice = Number(fallbackItem?.unit_price ?? 0);
+  if (listPrice > 0) return String(listPrice);
+
+  return "0";
 };
 
 export default function PurchaseOrderCreatePage() {
@@ -35,7 +42,7 @@ export default function PurchaseOrderCreatePage() {
   const [items, setItems] = useState<Item[]>([]);
   const [supplierItems, setSupplierItems] = useState<SupplierItem[]>([]);
   const [supplierItemsLoading, setSupplierItemsLoading] = useState(false);
-  const [lineSearch, setLineSearch] = useState<Record<number, string>>({});
+  const [itemSearch, setItemSearch] = useState("");
   const [supplierChangeWarning, setSupplierChangeWarning] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -176,7 +183,8 @@ export default function PurchaseOrderCreatePage() {
               return { ...line, item_id: "", unit_cost: "0" };
             }
             const matched = data.find((item) => String(item.item_id) === line.item_id);
-            return matched ? { ...line, unit_cost: resolveSupplierUnitCost(matched) } : line;
+            const fallbackItem = items.find((item) => String(item.id) === line.item_id);
+            return matched ? { ...line, unit_cost: resolveSupplierUnitCost(matched, fallbackItem) } : line;
           });
           return { ...prev, lines: nextLines };
         });
@@ -197,7 +205,7 @@ export default function PurchaseOrderCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [form.supplier_id, suppliers]);
+  }, [form.supplier_id, suppliers, items]);
 
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
@@ -442,7 +450,14 @@ export default function PurchaseOrderCreatePage() {
             ) : null}
 
             {supplierSelected && !supplierItemsLoading && hasMappedItems ? (
-              <div className="overflow-x-auto">
+              <div className="space-y-3">
+                <input
+                  className="app-input w-full max-w-md"
+                  placeholder="Search items"
+                  value={itemSearch}
+                  onChange={(event) => setItemSearch(event.target.value)}
+                />
+                <div className="overflow-x-auto">
                 <table className="w-full table-fixed text-left text-sm">
                   <colgroup><col className="w-[54%]" /><col className="w-[12%]" /><col className="w-[16%]" /><col className="w-[12%]" /><col className="w-[6%]" /></colgroup>
                   <thead className="text-xs uppercase text-muted">
@@ -451,7 +466,7 @@ export default function PurchaseOrderCreatePage() {
                   <tbody>
                     {form.lines.map((line, index) => {
                       const lineTotal = Number(line.quantity || 0) * Number(line.unit_cost || 0);
-                      const query = (lineSearch[index] ?? "").toLowerCase();
+                      const query = itemSearch.toLowerCase();
                       const filteredItems = supplierItems.filter((item) => {
                         const option = `${item.item_name} ${item.sku ?? ""} ${item.supplier_sku ?? ""}`.toLowerCase();
                         return option.includes(query);
@@ -460,12 +475,6 @@ export default function PurchaseOrderCreatePage() {
                       return (
                         <tr key={`line-${index}`} className="border-t border-border/50 align-top">
                           <td className="py-2 pr-2">
-                            <input
-                              className="app-input mb-2 w-full"
-                              placeholder="Search items"
-                              value={lineSearch[index] ?? ""}
-                              onChange={(event) => setLineSearch((prev) => ({ ...prev, [index]: event.target.value }))}
-                            />
                             <select
                               className="app-select w-full"
                               disabled={!supplierSelected}
@@ -473,9 +482,10 @@ export default function PurchaseOrderCreatePage() {
                               onChange={(event) => {
                                 const selectedId = Number(event.target.value);
                                 const selectedItem = supplierItems.find((item) => item.item_id === selectedId);
+                                const fallbackItem = items.find((item) => item.id === selectedId);
                                 setLine(index, {
                                   item_id: event.target.value,
-                                  unit_cost: selectedItem ? resolveSupplierUnitCost(selectedItem) : line.unit_cost
+                                  unit_cost: resolveSupplierUnitCost(selectedItem, fallbackItem)
                                 });
                               }}
                             >
@@ -498,6 +508,7 @@ export default function PurchaseOrderCreatePage() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             ) : null}
 
@@ -513,5 +524,9 @@ export default function PurchaseOrderCreatePage() {
     </section>
   );
 }
+
+
+
+
 
 

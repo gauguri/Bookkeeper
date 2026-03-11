@@ -48,6 +48,7 @@ type SupplierItem = {
 };
 
 type Item = { id: number; name: string; sku?: string | null; unit_price: number };
+type SupplierCatalogMetrics = { count: number; preferred: number };
 type Queue = "all" | "needs_attention" | "active" | "inactive" | "missing_catalog" | "high_lead_time";
 
 const ranges = ["MTD", "QTD", "YTD", "12M"];
@@ -80,6 +81,8 @@ const emptyForm = {
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierUniverse, setSupplierUniverse] = useState<Supplier[]>([]);
+  const [supplierCatalogMetrics, setSupplierCatalogMetrics] = useState<Record<number, SupplierCatalogMetrics>>({});
   const [summary, setSummary] = useState<SupplierSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -106,12 +109,32 @@ export default function SuppliersPage() {
     setLoading(true);
     setError("");
     try {
-      const [supplierData, summaryData, itemData] = await Promise.all([
-        apiFetch<Supplier[]>(`/suppliers?search=${encodeURIComponent(search)}&queue=${queue === "all" ? "" : queue}`),
+      const supplierSearch = encodeURIComponent(search);
+      const [supplierData, supplierUniverseData, summaryData, itemData] = await Promise.all([
+        apiFetch<Supplier[]>(`/suppliers?search=${supplierSearch}&queue=${queue === "all" ? "" : queue}`),
+        apiFetch<Supplier[]>(`/suppliers?search=${supplierSearch}&queue=`),
         apiFetch<SupplierSummary>(`/suppliers/summary?range=${range}`),
         apiFetch<Item[]>("/items"),
       ]);
+      const catalogMetricsEntries = await Promise.all(
+        supplierUniverseData.map(async (supplier) => {
+          try {
+            const supplierCatalog = await apiFetch<SupplierItem[]>(`/suppliers/${supplier.id}/items`);
+            return [
+              supplier.id,
+              {
+                count: supplierCatalog.length,
+                preferred: supplierCatalog.filter((entry) => entry.is_preferred).length,
+              },
+            ] as const;
+          } catch {
+            return [supplier.id, { count: 0, preferred: 0 }] as const;
+          }
+        }),
+      );
       setSuppliers(supplierData);
+      setSupplierUniverse(supplierUniverseData);
+      setSupplierCatalogMetrics(Object.fromEntries(catalogMetricsEntries));
       setSummary(summaryData);
       setItems(itemData);
     } catch (err) {
@@ -139,16 +162,16 @@ export default function SuppliersPage() {
   };
 
   const queueCounts = useMemo(() => ({
-    needs_attention: suppliers.filter((s) => !s.email || !s.phone || !s.remit_to_address).length,
-    active: suppliers.filter((s) => s.status === "active").length,
-    inactive: suppliers.filter((s) => s.status === "inactive").length,
-    missing_catalog: suppliers.filter((s) => s.status === "active").filter((s) => !catalog.some((c) => c.supplier_id === s.id)).length,
-    high_lead_time: suppliers.filter((s) => (s.default_lead_time_days ?? 0) > 30).length,
-    all: suppliers.length,
-  }), [suppliers, catalog]);
+    needs_attention: supplierUniverse.filter((s) => !s.email || !s.phone || !s.remit_to_address).length,
+    active: supplierUniverse.filter((s) => s.status === "active").length,
+    inactive: supplierUniverse.filter((s) => s.status === "inactive").length,
+    missing_catalog: supplierUniverse.filter((s) => s.status === "active").filter((s) => (supplierCatalogMetrics[s.id]?.count ?? 0) === 0).length,
+    high_lead_time: supplierUniverse.filter((s) => (s.default_lead_time_days ?? 0) > 30).length,
+    all: supplierUniverse.length,
+  }), [supplierUniverse, supplierCatalogMetrics]);
 
-  const spendData = suppliers.slice(0, 10).map((s) => ({ name: s.name, spend: 0 }));
-  const leadTimeData = [0, 7, 14, 30, 45].map((bucket, index) => ({ bucket: `${bucket}+`, count: suppliers.filter((s) => (s.default_lead_time_days ?? 0) >= bucket && (index === 4 || (s.default_lead_time_days ?? 0) < [7, 14, 30, 45, 999][index + 1])).length }));
+  const spendData = supplierUniverse.slice(0, 10).map((s) => ({ name: s.name, spend: 0 }));
+  const leadTimeData = [0, 7, 14, 30, 45].map((bucket, index) => ({ bucket: `${bucket}+`, count: supplierUniverse.filter((s) => (s.default_lead_time_days ?? 0) >= bucket && (index === 4 || (s.default_lead_time_days ?? 0) < [7, 14, 30, 45, 999][index + 1])).length }));
   const onTimeData = [{ name: "On-time", value: summary?.on_time_delivery_percent ?? 0 }, { name: "Late", value: 100 - (summary?.on_time_delivery_percent ?? 0) }];
 
   const saveSupplier = async (addCatalog = false) => {
@@ -350,7 +373,7 @@ export default function SuppliersPage() {
             {loading ? <div className="h-52 animate-pulse rounded-xl bg-secondary" /> : suppliers.length === 0 ? (
               <div className="rounded-xl border border-dashed p-10 text-center"><Building2 className="mx-auto mb-2 h-8 w-8 text-muted" /><p className="text-lg font-semibold">No suppliers yet</p><p className="text-sm text-muted">Add your first supplier or import your vendor master.</p><div className="mt-4 flex justify-center gap-2"><button className="app-button" onClick={openCreateModal}>Add your first supplier</button><button className="app-button-secondary">Import suppliers</button></div></div>
             ) : (
-              <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="text-left text-xs uppercase tracking-wider text-muted"><tr><th /><th>Supplier Name</th><th>Status</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Lead Time</th><th>Catalog Items</th><th>Preferred Items</th><th>Spend (YTD)</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{suppliers.map((s) => { const count = catalog.filter((c) => c.supplier_id === s.id).length; return <tr key={s.id} className={`border-t ${columnsCompact ? "" : "h-14"}`}><td><input type="checkbox" checked={selectedRows.includes(s.id)} onChange={() => setSelectedRows((prev) => prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id])} /></td><td><button className="font-medium hover:underline" onClick={() => openSupplier(s)}>{s.name}</button></td><td><span className={`app-badge ${s.status === "active" ? "border-success/30 bg-success/10 text-success" : ""}`}>{s.status}</span></td><td>{s.contact_name ?? "-"}</td><td>{s.email ?? "-"}</td><td>{s.phone ?? "-"}</td><td>{s.default_lead_time_days ?? "-"}</td><td>{count}</td><td>{catalog.filter((c) => c.supplier_id === s.id && c.is_preferred).length}</td><td>{formatCurrency(0)}</td><td>{new Date(s.updated_at).toLocaleDateString()}</td><td><div className="flex gap-2"><button className="app-button-ghost" onClick={() => openSupplier(s)}>View</button><button className="app-button-ghost" onClick={() => openEditModal(s)}>Edit</button><button className="app-button-ghost" onClick={() => { openSupplier(s); setSelectedTab("catalog"); }}>Map Items</button></div></td></tr>; })}</tbody></table></div>
+              <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="text-left text-xs uppercase tracking-wider text-muted"><tr><th /><th>Supplier Name</th><th>Status</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Lead Time</th><th>Catalog Items</th><th>Preferred Items</th><th>Spend (YTD)</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{suppliers.map((s) => { const count = supplierCatalogMetrics[s.id]?.count ?? 0; return <tr key={s.id} className={`border-t ${columnsCompact ? "" : "h-14"}`}><td><input type="checkbox" checked={selectedRows.includes(s.id)} onChange={() => setSelectedRows((prev) => prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id])} /></td><td><button className="font-medium hover:underline" onClick={() => openSupplier(s)}>{s.name}</button></td><td><span className={`app-badge ${s.status === "active" ? "border-success/30 bg-success/10 text-success" : ""}`}>{s.status}</span></td><td>{s.contact_name ?? "-"}</td><td>{s.email ?? "-"}</td><td>{s.phone ?? "-"}</td><td>{s.default_lead_time_days ?? "-"}</td><td>{count}</td><td>{supplierCatalogMetrics[s.id]?.preferred ?? 0}</td><td>{formatCurrency(0)}</td><td>{new Date(s.updated_at).toLocaleDateString()}</td><td><div className="flex gap-2"><button className="app-button-ghost" onClick={() => openSupplier(s)}>View</button><button className="app-button-ghost" onClick={() => openEditModal(s)}>Edit</button><button className="app-button-ghost" onClick={() => { openSupplier(s); setSelectedTab("catalog"); }}>Map Items</button></div></td></tr>; })}</tbody></table></div>
             )}
           </div>
         </div>
@@ -428,3 +451,5 @@ export default function SuppliersPage() {
     </section>
   );
 }
+
+

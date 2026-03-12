@@ -119,6 +119,20 @@ export default function PurchaseOrdersPage() {
     lines: [emptyLine()]
   });
 
+  const previewDebitAccountLabel = useMemo(() => {
+    if (!preview) return "Inventory";
+    const account = preview.accounts.find((entry) => String(entry.id) === inventoryAccountId);
+    if (!account) return "Inventory";
+    return account.code ? `${account.code} - ${account.name}` : account.name;
+  }, [preview, inventoryAccountId]);
+
+  const previewCreditAccountLabel = useMemo(() => {
+    if (!preview) return "Cash";
+    const account = preview.accounts.find((entry) => String(entry.id) === creditAccountId);
+    if (!account) return "Cash";
+    return account.code ? `${account.code} - ${account.name}` : account.name;
+  }, [preview, creditAccountId]);
+
   const loadData = async () => {
     try {
       const [poData, supplierData, itemData] = await Promise.all([
@@ -633,8 +647,8 @@ export default function PurchaseOrdersPage() {
               </label>
             </div>
             <div className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
-              <p>Debit Inventory +${Number(preview.total).toFixed(2)}</p>
-              <p>Credit Cash -${Number(preview.total).toFixed(2)}</p>
+              <p>Debit {previewDebitAccountLabel} +${Number(preview.total).toFixed(2)}</p>
+              <p>Credit {previewCreditAccountLabel} -${Number(preview.total).toFixed(2)}</p>
             </div>
             {preview.posted_journal_entry_id ? <p className="text-sm text-primary">This PO is already posted. Entry #{preview.posted_journal_entry_id}.</p> : null}
             <div className="flex justify-end gap-2">
@@ -648,4 +662,3 @@ export default function PurchaseOrdersPage() {
     </div>
   );
 }
-

@@ -83,9 +83,9 @@ class SupplierSummaryResponse(BaseModel):
 
 
 class SupplierItemBase(BaseModel):
-    supplier_cost: DecimalValue = Field(0, ge=0)
-    freight_cost: DecimalValue = Field(0, ge=0)
-    tariff_cost: DecimalValue = Field(0, ge=0)
+    supplier_cost: DecimalValue = Field(Decimal("0.00"), ge=0)
+    freight_cost: DecimalValue = Field(Decimal("0.00"), ge=0)
+    tariff_cost: DecimalValue = Field(Decimal("0.00"), ge=0)
     default_unit_cost: Optional[DecimalValue] = Field(None, ge=0)
     supplier_sku: Optional[str] = None
     lead_time_days: Optional[int] = Field(None, ge=0)

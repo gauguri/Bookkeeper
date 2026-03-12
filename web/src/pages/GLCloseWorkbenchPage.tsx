@@ -10,7 +10,7 @@ export default function GLCloseWorkbenchPage() {
   const period = new Date().getMonth() + 1;
 
   useEffect(() => {
-    apiFetch<{ ledger_id: number }>("/gl/bootstrap").then((res) => setLedgerId(res.ledger_id));
+    apiFetch<{ ledger_id: number }>("/gl/bootstrap", { method: "POST" }).then((res) => setLedgerId(res.ledger_id));
   }, []);
 
   useEffect(() => {

@@ -143,6 +143,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     "/inventory",
     "/sales/command-center",
     "/analytics",
+    "/expenses",
     "/accounting/gl",
     "/invoices",
     "/sales/invoices",
@@ -287,4 +288,5 @@ export default function App() {
     </Routes>
   );
 }
+
 

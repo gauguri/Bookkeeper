@@ -6,8 +6,35 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.accounting.service import create_journal_entry
+from app.gl import schemas as gl_schemas
+from app.gl import service as gl_service
 from app.inventory.service import land_inventory_from_purchase_order, receive_inventory
-from app.models import Account, Item, PurchaseOrder, PurchaseOrderLine, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.models import (
+    Account,
+    CompanyCode,
+    FiscalYearVariant,
+    GLAccount,
+    GLLedger,
+    GLPostingLink,
+    Item,
+    PurchaseOrder,
+    PurchaseOrderLine,
+    PurchaseOrderSendLog,
+    Supplier,
+    SupplierItem,
+)
+
+
+COA_TO_GL_TYPE = {
+    "ASSET": "ASSET",
+    "LIABILITY": "LIABILITY",
+    "EQUITY": "EQUITY",
+    "INCOME": "REVENUE",
+    "REVENUE": "REVENUE",
+    "EXPENSE": "EXPENSE",
+    "COGS": "EXPENSE",
+    "OTHER": "EXPENSE",
+}
 
 
 def _next_po_number(db: Session) -> str:
@@ -184,6 +211,216 @@ def find_cash_account(db: Session) -> Account | None:
     )
 
 
+def _normal_balance_for_type(account_type: str) -> str:
+    return "DEBIT" if account_type in {"ASSET", "EXPENSE"} else "CREDIT"
+
+
+def _bootstrap_gl_context(db: Session, company_id: int | None) -> tuple[CompanyCode, GLLedger]:
+    company_code = None
+    if company_id is not None:
+        company_code = db.query(CompanyCode).filter(CompanyCode.id == company_id).first()
+
+    if not company_code:
+        company_code = db.query(CompanyCode).order_by(CompanyCode.id.asc()).first()
+
+    if not company_code:
+        code = str(company_id or 1000).zfill(4)
+        company_code = CompanyCode(code=code, name="Main Company", base_currency="USD")
+        db.add(company_code)
+        db.flush()
+
+    fyv = db.query(FiscalYearVariant).filter(FiscalYearVariant.name == "K4").first()
+    if not fyv:
+        fyv = FiscalYearVariant(name="K4", periods_per_year=12, special_periods=4)
+        db.add(fyv)
+        db.flush()
+
+    ledger = (
+        db.query(GLLedger)
+        .filter(GLLedger.company_code_id == company_code.id, GLLedger.is_leading.is_(True))
+        .order_by(GLLedger.id.asc())
+        .first()
+    )
+    if not ledger:
+        ledger = GLLedger(
+            company_code_id=company_code.id,
+            name="Leading Ledger",
+            currency=company_code.base_currency or "USD",
+            fiscal_year_variant_id=fyv.id,
+            is_leading=True,
+        )
+        db.add(ledger)
+        db.flush()
+
+    return company_code, ledger
+
+
+def _sync_gl_accounts_from_coa(db: Session, company_code_id: int, company_id: int | None) -> None:
+    coa_accounts = []
+    if company_id is not None:
+        coa_accounts = db.query(Account).filter(Account.company_id == company_id).all()
+    if not coa_accounts:
+        coa_accounts = db.query(Account).filter(Account.company_id == company_code_id).all()
+    if not coa_accounts:
+        fallback_company = db.query(Account.company_id).order_by(Account.company_id.asc()).first()
+        if fallback_company is not None:
+            coa_accounts = db.query(Account).filter(Account.company_id == fallback_company[0]).all()
+
+    existing = {
+        row.account_number: row
+        for row in db.query(GLAccount).filter(GLAccount.company_code_id == company_code_id).all()
+    }
+    for coa in coa_accounts:
+        account_code = (coa.code or "").strip()
+        if not account_code:
+            continue
+        mapped_type = COA_TO_GL_TYPE.get((coa.type or "").upper(), "EXPENSE")
+        gl_account = existing.get(account_code)
+        if not gl_account:
+            gl_account = GLAccount(
+                company_code_id=company_code_id,
+                account_number=account_code,
+                name=coa.name,
+                account_type=mapped_type,
+                normal_balance=_normal_balance_for_type(mapped_type),
+                is_control_account=False,
+                is_active=bool(coa.is_active),
+            )
+            db.add(gl_account)
+            existing[account_code] = gl_account
+            continue
+
+        gl_account.name = coa.name
+        gl_account.account_type = mapped_type
+        gl_account.normal_balance = _normal_balance_for_type(mapped_type)
+        gl_account.is_active = bool(coa.is_active)
+
+    db.flush()
+
+
+def _resolve_gl_account_id(
+    db: Session,
+    *,
+    coa_account_id: int,
+    company_code_id: int,
+    company_id: int | None,
+) -> int:
+    coa_account = db.query(Account).filter(Account.id == coa_account_id).first()
+    if not coa_account:
+        raise ValueError("One or more accounts were not found.")
+
+    _sync_gl_accounts_from_coa(db, company_code_id=company_code_id, company_id=company_id)
+
+    gl_account = None
+    if coa_account.code:
+        gl_account = (
+            db.query(GLAccount)
+            .filter(
+                GLAccount.company_code_id == company_code_id,
+                GLAccount.account_number == coa_account.code,
+            )
+            .first()
+        )
+
+    if not gl_account:
+        gl_account = (
+            db.query(GLAccount)
+            .filter(
+                GLAccount.company_code_id == company_code_id,
+                GLAccount.name == coa_account.name,
+            )
+            .order_by(GLAccount.id.asc())
+            .first()
+        )
+
+    if not gl_account:
+        mapped_type = COA_TO_GL_TYPE.get((coa_account.type or "").upper(), "EXPENSE")
+        gl_account = GLAccount(
+            company_code_id=company_code_id,
+            account_number=(coa_account.code or str(coa_account.id)).strip(),
+            name=coa_account.name,
+            account_type=mapped_type,
+            normal_balance=_normal_balance_for_type(mapped_type),
+            is_control_account=False,
+            is_active=bool(coa_account.is_active),
+        )
+        db.add(gl_account)
+        db.flush()
+
+    return gl_account.id
+
+
+def _post_purchase_order_receipt_to_gl(
+    db: Session,
+    *,
+    po: PurchaseOrder,
+    entry_date: date,
+    memo: str | None,
+    inventory_account_id: int,
+    cash_account_id: int,
+    amount: Decimal,
+    company_id: int | None,
+) -> None:
+    existing_link = (
+        db.query(GLPostingLink)
+        .filter(GLPostingLink.source_module == "PURCHASE_ORDER", GLPostingLink.source_id == po.id)
+        .first()
+    )
+    if existing_link:
+        raise ValueError("This purchase order was already posted. You can view the existing entry.")
+
+    company_code, ledger = _bootstrap_gl_context(db, company_id=company_id)
+    debit_gl_account_id = _resolve_gl_account_id(
+        db,
+        coa_account_id=inventory_account_id,
+        company_code_id=company_code.id,
+        company_id=company_id,
+    )
+    credit_gl_account_id = _resolve_gl_account_id(
+        db,
+        coa_account_id=cash_account_id,
+        company_code_id=company_code.id,
+        company_id=company_id,
+    )
+
+    payload = gl_schemas.JournalCreate(
+        company_code_id=company_code.id,
+        ledger_id=ledger.id,
+        document_type="PO",
+        posting_date=entry_date,
+        document_date=entry_date,
+        currency=ledger.currency or company_code.base_currency or "USD",
+        reference=po.po_number,
+        header_text=memo or f"PO {po.po_number} landed cost",
+        source_module="PURCHASING",
+        created_by="system",
+        idempotency_key=f"purchase_order_receipt:{po.id}",
+        lines=[
+            gl_schemas.JournalLineIn(
+                gl_account_id=debit_gl_account_id,
+                description=f"PO {po.po_number} landed cost",
+                debit_amount=amount,
+                credit_amount=Decimal("0.00"),
+            ),
+            gl_schemas.JournalLineIn(
+                gl_account_id=credit_gl_account_id,
+                description=f"PO {po.po_number} landed cost",
+                debit_amount=Decimal("0.00"),
+                credit_amount=amount,
+            ),
+        ],
+    )
+    header = gl_service.create_journal(db, payload)
+    gl_service.post_journal(db, header, posted_by="system")
+    db.add(
+        GLPostingLink(
+            source_module="PURCHASE_ORDER",
+            source_id=po.id,
+            gl_journal_header_id=header.id,
+        )
+    )
+    db.flush()
+
 def post_purchase_order_receipt(
     db: Session,
     *,
@@ -193,7 +430,12 @@ def post_purchase_order_receipt(
     inventory_account_id: int | None,
     cash_account_id: int | None,
 ) -> PurchaseOrder:
-    if po.posted_journal_entry_id:
+    existing_gl_link = (
+        db.query(GLPostingLink)
+        .filter(GLPostingLink.source_module == "PURCHASE_ORDER", GLPostingLink.source_id == po.id)
+        .first()
+    )
+    if po.posted_journal_entry_id or existing_gl_link:
         raise ValueError("This purchase order was already posted. You can view the existing entry.")
 
     default_inventory = find_inventory_account(db)
@@ -217,6 +459,16 @@ def post_purchase_order_receipt(
         credit_account_id=cash_account_id,
         amount=total,
     )
+    _post_purchase_order_receipt_to_gl(
+        db,
+        po=po,
+        entry_date=entry_date,
+        memo=memo,
+        inventory_account_id=inventory_account_id,
+        cash_account_id=cash_account_id,
+        amount=total,
+        company_id=company_id,
+    )
 
     po.posted_journal_entry_id = entry.id
     po.status = "RECEIVED"
@@ -225,3 +477,6 @@ def post_purchase_order_receipt(
         po.inventory_landed = True
         po.landed_at = datetime.utcnow()
     return po
+
+
+

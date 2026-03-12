@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.inventory.service import adjust_inventory
-from app.models import Account, Company, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.models import Account, Company, GLJournalHeader, GLPostingLink, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.purchasing.service import create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
@@ -385,6 +385,18 @@ def test_post_purchase_order_receipt_creates_balanced_journal_entry():
     assert sum((Decimal(line.debit or 0) for line in entry.lines), Decimal("0")) == Decimal("30.00")
     assert sum((Decimal(line.credit or 0) for line in entry.lines), Decimal("0")) == Decimal("30.00")
 
+    gl_header = db.query(GLJournalHeader).filter(GLJournalHeader.reference == po.po_number).first()
+    assert gl_header is not None
+    assert gl_header.status == "POSTED"
+    assert gl_header.source_module == "PURCHASING"
+    assert len(gl_header.lines) == 2
+    assert sum((Decimal(line.debit_amount or 0) for line in gl_header.lines), Decimal("0")) == Decimal("30.00")
+    assert sum((Decimal(line.credit_amount or 0) for line in gl_header.lines), Decimal("0")) == Decimal("30.00")
+
+    gl_link = db.query(GLPostingLink).filter(GLPostingLink.source_module == "PURCHASE_ORDER", GLPostingLink.source_id == po.id).first()
+    assert gl_link is not None
+    assert gl_link.gl_journal_header_id == gl_header.id
+
 
 def test_post_purchase_order_receipt_blocks_duplicates():
     db = create_session()
@@ -409,3 +421,5 @@ def test_post_purchase_order_receipt_blocks_duplicates():
         assert False, "Expected duplicate posting to fail"
     except ValueError as exc:
         assert "already posted" in str(exc)
+
+

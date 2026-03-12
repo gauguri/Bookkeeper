@@ -11,6 +11,7 @@ from .routers import (
     banking,
     chart_of_accounts,
     control,
+    customers_import,
     dashboard,
     gl,
     health,
@@ -44,6 +45,7 @@ app.include_router(ar.router)
 app.include_router(auth.router)
 app.include_router(backlog.router)
 app.include_router(banking.router)
+app.include_router(customers_import.router)
 app.include_router(items_import.router)
 app.include_router(sales.router)
 app.include_router(sales_management.router)
@@ -96,4 +98,3 @@ def _backfill_unposted_invoices() -> None:
 @app.get("/")
 def root():
     return {"status": "ok"}
-

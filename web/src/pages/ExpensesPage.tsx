@@ -123,11 +123,9 @@ export default function ExpensesPage() {
 
     return entries.filter((entry) => {
       if (!matchesDateRange(entry.date)) return false;
-      const isExpenseEntry = entry.debit_account_type === "EXPENSE" || entry.credit_account_type === "EXPENSE";
       if (view === "manual" && entry.source_type !== "MANUAL") return false;
       if (view === "purchase" && entry.source_type !== "PURCHASE_ORDER") return false;
       if (view === "unreviewed" && entry.memo) return false;
-      if (view === "all" && !isExpenseEntry) return false;
 
       if (!search.trim()) return true;
       const needle = search.toLowerCase();
@@ -246,3 +244,4 @@ export default function ExpensesPage() {
     </section>
   );
 }
+

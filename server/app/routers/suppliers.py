@@ -1,5 +1,6 @@
 import csv
 import re
+from decimal import Decimal
 from io import StringIO
 from typing import Any, List, Optional
 
@@ -19,6 +20,18 @@ from app.suppliers.service import get_supplier_link, set_preferred_supplier
 router = APIRouter(prefix="/api", tags=["suppliers"], dependencies=[Depends(require_module(ModuleKey.SUPPLIERS.value))])
 
 
+def _as_decimal(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value if value is not None else 0))
+
+
+def _as_optional_decimal(value: Any) -> Optional[Decimal]:
+    if value is None:
+        return None
+    return _as_decimal(value)
+
+
 def _serialize_supplier_item(link: SupplierItem) -> schemas.SupplierItemBySupplierResponse:
     default_unit_cost = link.default_unit_cost if link.default_unit_cost is not None else link.supplier_cost
     return schemas.SupplierItemBySupplierResponse(
@@ -28,16 +41,16 @@ def _serialize_supplier_item(link: SupplierItem) -> schemas.SupplierItemBySuppli
         item_name=link.item.name,
         sku=link.item.sku,
         item_sku=link.item.sku,
-        default_unit_cost=default_unit_cost,
-        item_unit_price=link.item.unit_price,
-        supplier_cost=link.supplier_cost,
-        freight_cost=link.freight_cost,
-        tariff_cost=link.tariff_cost,
-        landed_cost=link.landed_cost,
+        default_unit_cost=_as_decimal(default_unit_cost),
+        item_unit_price=_as_decimal(link.item.unit_price),
+        supplier_cost=_as_decimal(link.supplier_cost),
+        freight_cost=_as_decimal(link.freight_cost),
+        tariff_cost=_as_decimal(link.tariff_cost),
+        landed_cost=_as_decimal(link.landed_cost),
         is_preferred=link.is_preferred,
         supplier_sku=link.supplier_sku,
         lead_time_days=link.lead_time_days,
-        min_order_qty=link.min_order_qty,
+        min_order_qty=_as_optional_decimal(link.min_order_qty),
         notes=link.notes,
         is_active=link.is_active,
         created_at=link.created_at,
@@ -735,7 +748,7 @@ def list_item_suppliers(item_id: int, db: Session = Depends(get_db)):
             is_preferred=link.is_preferred,
             supplier_sku=link.supplier_sku,
             lead_time_days=link.lead_time_days,
-            min_order_qty=link.min_order_qty,
+            min_order_qty=_as_optional_decimal(link.min_order_qty),
             notes=link.notes,
             is_active=link.is_active,
         )
@@ -762,6 +775,13 @@ def create_item_supplier(item_id: int, payload: schemas.SupplierItemCreate, db: 
         link.default_unit_cost = item.unit_price
     elif link.default_unit_cost is None:
         link.default_unit_cost = link.supplier_cost
+    link.supplier_cost = _as_decimal(link.supplier_cost)
+    link.freight_cost = _as_decimal(link.freight_cost)
+    link.tariff_cost = _as_decimal(link.tariff_cost)
+    if link.default_unit_cost is not None:
+        link.default_unit_cost = _as_decimal(link.default_unit_cost)
+    if link.min_order_qty is not None:
+        link.min_order_qty = _as_decimal(link.min_order_qty)
     db.add(link)
     db.flush()
     if payload.is_preferred:
@@ -776,15 +796,15 @@ def create_item_supplier(item_id: int, payload: schemas.SupplierItemCreate, db: 
         supplier_id=link.supplier_id,
         item_id=link.item_id,
         supplier_name=link.supplier.name,
-        supplier_cost=link.supplier_cost,
-        freight_cost=link.freight_cost,
-        tariff_cost=link.tariff_cost,
-        default_unit_cost=link.default_unit_cost if link.default_unit_cost is not None else link.supplier_cost,
-        landed_cost=link.landed_cost,
+        supplier_cost=_as_decimal(link.supplier_cost),
+        freight_cost=_as_decimal(link.freight_cost),
+        tariff_cost=_as_decimal(link.tariff_cost),
+        default_unit_cost=_as_decimal(link.default_unit_cost if link.default_unit_cost is not None else link.supplier_cost),
+        landed_cost=_as_decimal(link.landed_cost),
         is_preferred=link.is_preferred,
         supplier_sku=link.supplier_sku,
         lead_time_days=link.lead_time_days,
-        min_order_qty=link.min_order_qty,
+        min_order_qty=_as_optional_decimal(link.min_order_qty),
         notes=link.notes,
         is_active=link.is_active,
     )
@@ -812,15 +832,15 @@ def update_item_supplier(item_id: int, supplier_id: int, payload: schemas.Suppli
         supplier_id=link.supplier_id,
         item_id=link.item_id,
         supplier_name=link.supplier.name,
-        supplier_cost=link.supplier_cost,
-        freight_cost=link.freight_cost,
-        tariff_cost=link.tariff_cost,
-        default_unit_cost=link.default_unit_cost if link.default_unit_cost is not None else link.supplier_cost,
-        landed_cost=link.landed_cost,
+        supplier_cost=_as_decimal(link.supplier_cost),
+        freight_cost=_as_decimal(link.freight_cost),
+        tariff_cost=_as_decimal(link.tariff_cost),
+        default_unit_cost=_as_decimal(link.default_unit_cost if link.default_unit_cost is not None else link.supplier_cost),
+        landed_cost=_as_decimal(link.landed_cost),
         is_preferred=link.is_preferred,
         supplier_sku=link.supplier_sku,
         lead_time_days=link.lead_time_days,
-        min_order_qty=link.min_order_qty,
+        min_order_qty=_as_optional_decimal(link.min_order_qty),
         notes=link.notes,
         is_active=link.is_active,
     )
@@ -860,6 +880,13 @@ def create_supplier_items(
             link.default_unit_cost = item.unit_price
         elif link.default_unit_cost is None:
             link.default_unit_cost = link.supplier_cost
+        link.supplier_cost = _as_decimal(link.supplier_cost)
+        link.freight_cost = _as_decimal(link.freight_cost)
+        link.tariff_cost = _as_decimal(link.tariff_cost)
+        if link.default_unit_cost is not None:
+            link.default_unit_cost = _as_decimal(link.default_unit_cost)
+        if link.min_order_qty is not None:
+            link.min_order_qty = _as_decimal(link.min_order_qty)
         db.add(link)
         db.flush()
         if entry.is_preferred:
@@ -903,4 +930,3 @@ def delete_supplier_item(supplier_id: int, supplier_item_id: int, db: Session = 
     db.delete(link)
     db.commit()
     return {"status": "ok"}
-

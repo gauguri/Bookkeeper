@@ -14,7 +14,7 @@ export default function GLReportsHubPage() {
   const title = useMemo(() => (location.pathname.endsWith("/trial-balance") ? "Trial Balance" : "Reports"), [location.pathname]);
 
   useEffect(() => {
-    apiFetch<{ ledger_id: number }>("/gl/bootstrap").then((res) => setLedgerId(res.ledger_id));
+    apiFetch<{ ledger_id: number }>("/gl/bootstrap", { method: "POST" }).then((res) => setLedgerId(res.ledger_id));
   }, []);
 
   useEffect(() => {

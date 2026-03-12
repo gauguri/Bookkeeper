@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Building2, Download, FileUp, Plus, Search, Settings2, X } from "lucide-react";
 import { apiFetch } from "../api";
+import SupplierItemLinkModal, { SupplierItemLinkForm } from "../components/SupplierItemLinkModal";
 import { formatCurrency } from "../utils/formatters";
 
 type Supplier = {
@@ -80,6 +81,19 @@ const emptyForm = {
   notes: "",
 };
 
+
+const emptyCatalogLinkForm: SupplierItemLinkForm = {
+  related_id: "",
+  supplier_cost: "",
+  freight_cost: "",
+  tariff_cost: "",
+  supplier_sku: "",
+  lead_time_days: "",
+  min_order_qty: "",
+  notes: "",
+  is_preferred: false,
+};
+
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierUniverse, setSupplierUniverse] = useState<Supplier[]>([]);
@@ -100,7 +114,7 @@ export default function SuppliersPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
-  const [catalogItemIds, setCatalogItemIds] = useState<number[]>([]);
+  const [catalogLinkForm, setCatalogLinkForm] = useState<SupplierItemLinkForm>(emptyCatalogLinkForm);
   const [formErrors, setFormErrors] = useState<{ name?: string; email?: string; website?: string }>({});
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [toast, setToast] = useState("");
@@ -176,6 +190,11 @@ export default function SuppliersPage() {
   const onTimeData = [{ name: "On-time", value: summary?.on_time_delivery_percent ?? 0 }, { name: "Late", value: 100 - (summary?.on_time_delivery_percent ?? 0) }];
   const linkedItemIds = useMemo(() => new Set(catalog.map((row) => row.item_id)), [catalog]);
   const catalogCandidates = useMemo(() => items.filter((item) => !linkedItemIds.has(item.id)), [items, linkedItemIds]);
+  const selectedCatalogItem = useMemo(
+    () => catalogCandidates.find((item) => item.id === Number(catalogLinkForm.related_id)) ?? null,
+    [catalogCandidates, catalogLinkForm.related_id],
+  );
+
 
   const saveSupplier = async (addCatalog = false) => {
     const nextErrors: { name?: string; email?: string; website?: string } = {};
@@ -208,7 +227,7 @@ export default function SuppliersPage() {
       if (addCatalog) {
         openSupplier(saved);
         setSelectedTab("catalog");
-        setCatalogPickerOpen(true);
+        openCatalogPicker();
       }
     } catch (err) {
       setError((err as Error).message);
@@ -222,31 +241,43 @@ export default function SuppliersPage() {
   };
 
   const openCatalogPicker = () => {
-    setCatalogItemIds([]);
+    setCatalogLinkForm(emptyCatalogLinkForm);
     setCatalogPickerOpen(true);
   };
 
   const addCatalogItems = async () => {
-    if (!selected || !catalogItemIds.length) return;
+    if (!selected || !catalogLinkForm.related_id) return;
 
-    const payload = catalogItemIds
-      .map((id) => items.find((item) => item.id === id))
-      .filter((item): item is Item => Boolean(item))
-      .map((item) => ({
-        item_id: item.id,
-        supplier_cost: Number(item.unit_price ?? 0),
-        default_unit_cost: Number(item.unit_price ?? 0),
-      }));
+    const payloadEntry: Record<string, unknown> = {
+      item_id: Number(catalogLinkForm.related_id),
+    };
 
-    if (!payload.length) return;
+    if (catalogLinkForm.supplier_sku.trim()) payloadEntry.supplier_sku = catalogLinkForm.supplier_sku.trim();
+    if (catalogLinkForm.lead_time_days) payloadEntry.lead_time_days = Number(catalogLinkForm.lead_time_days);
+    if (catalogLinkForm.min_order_qty) payloadEntry.min_order_qty = Number(catalogLinkForm.min_order_qty);
+    if (catalogLinkForm.notes.trim()) payloadEntry.notes = catalogLinkForm.notes.trim();
+    if (catalogLinkForm.is_preferred) payloadEntry.is_preferred = true;
 
     await apiFetch(`/suppliers/${selected.id}/items`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payloadEntry),
     });
     setCatalogPickerOpen(false);
-    setCatalogItemIds([]);
+    setCatalogLinkForm(emptyCatalogLinkForm);
     await loadCatalog(selected.id);
+  };
+
+  const updateCatalogLinkForm = (next: SupplierItemLinkForm) => {
+    if (next.related_id !== catalogLinkForm.related_id) {
+      const nextItem = catalogCandidates.find((item) => item.id === Number(next.related_id));
+      setCatalogLinkForm({
+        ...next,
+        supplier_cost: nextItem ? Number(nextItem.unit_price ?? 0).toFixed(2) : "",
+      });
+      return;
+    }
+
+    setCatalogLinkForm(next);
   };
 
   const openCreateModal = () => {
@@ -450,7 +481,7 @@ export default function SuppliersPage() {
 
       {selected ? (
         <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/30" onClick={() => setSelected(null)}><aside className="h-full w-full max-w-2xl overflow-auto bg-background p-6" onClick={(e) => e.stopPropagation()}><div className="mb-3 flex items-center justify-between"><div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="text-sm text-muted">Supplier detail drawer</p></div><div className="flex gap-2"><button className="app-button-secondary" onClick={() => openEditModal(selected)}>Edit Supplier</button><button className="app-button-ghost" onClick={() => setSelected(null)}><X className="h-4 w-4" /></button></div></div><div className="mb-4 flex gap-2">{(["overview", "catalog", "performance", "notes"] as const).map((tab) => <button key={tab} className={`app-button-secondary ${selectedTab === tab ? "ring-2 ring-primary/30" : ""}`} onClick={() => setSelectedTab(tab)}>{tab}</button>)}</div>
-          {selectedTab === "overview" ? <div className="space-y-3 text-sm"><p><span className="text-muted">Legal name:</span> {selected.legal_name ?? "-"}</p><p><span className="text-muted">Website:</span> {selected.website ?? "-"}</p><p><span className="text-muted">Tax ID:</span> {selected.tax_id ?? "-"}</p><p><span className="text-muted">Contact:</span> {selected.contact_name ?? "-"} â€¢ {selected.email ?? "-"} â€¢ {selected.phone ?? "-"}</p><p><span className="text-muted">Remit-to:</span> {selected.remit_to_address ?? "-"}</p><p><span className="text-muted">Ship-from:</span> {selected.ship_from_address ?? "-"}</p><p><span className="text-muted">Defaults:</span> {selected.currency ?? "USD"} â€¢ {selected.payment_terms ?? "-"} â€¢ LT {selected.default_lead_time_days ?? "-"}d</p></div> : null}
+          {selectedTab === "overview" ? <div className="space-y-3 text-sm"><p><span className="text-muted">Legal name:</span> {selected.legal_name ?? "-"}</p><p><span className="text-muted">Website:</span> {selected.website ?? "-"}</p><p><span className="text-muted">Tax ID:</span> {selected.tax_id ?? "-"}</p><p><span className="text-muted">Contact:</span> {selected.contact_name ?? "-"} • {selected.email ?? "-"} • {selected.phone ?? "-"}</p><p><span className="text-muted">Remit-to:</span> {selected.remit_to_address ?? "-"}</p><p><span className="text-muted">Ship-from:</span> {selected.ship_from_address ?? "-"}</p><p><span className="text-muted">Defaults:</span> {selected.currency ?? "USD"} • {selected.payment_terms ?? "-"} • LT {selected.default_lead_time_days ?? "-"}d</p></div> : null}
           {selectedTab === "catalog" ? <div className="space-y-3"><div className="flex justify-end"><button className="app-button" onClick={openCatalogPicker}><Plus className="h-4 w-4" /> Link Items</button></div>{catalog.length === 0 ? <div className="rounded-xl border border-dashed p-8 text-center"><p className="font-semibold">No catalog items yet</p><button className="app-button mt-3" onClick={openCatalogPicker}>Link items</button></div> : <table className="w-full text-sm"><thead className="text-left text-xs uppercase text-muted"><tr><th>Item</th><th>Unit Price</th><th>Supplier SKU</th><th>Default Unit Cost</th><th>Lead Time</th><th>MOQ</th><th>Active</th></tr></thead><tbody>{catalog.map((row) => <tr key={row.id} className="border-t"><td>{row.item_name}</td><td>{formatCurrency(row.item_unit_price ?? 0)}</td><td>{row.supplier_sku ?? "-"}</td><td>{formatCurrency(row.default_unit_cost ?? 0)}</td><td>{row.lead_time_days ?? "-"}</td><td>{row.min_order_qty ?? "-"}</td><td>{row.is_active ? "Yes" : "No"}</td></tr>)}</tbody></table>}</div> : null}
           {selectedTab === "performance" ? <div className="rounded-lg border border-dashed p-6 text-sm text-muted">Performance metrics coming soon.</div> : null}
           {selectedTab === "notes" ? <div className="rounded-lg border p-4 text-sm">{selected.notes || "No notes or documents uploaded yet."}</div> : null}
@@ -458,56 +489,27 @@ export default function SuppliersPage() {
       ) : null}
 
       {catalogPickerOpen && selected ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => setCatalogPickerOpen(false)}>
-          <div className="app-card w-full max-w-4xl p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">Link Items to Supplier</h3>
-                <p className="text-sm text-muted">Select items to link. Default supplier cost is seeded from each item unit price.</p>
-              </div>
-              <span className="app-badge">{catalogItemIds.length} selected</span>
-            </div>
-            <div className="max-h-80 overflow-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-surface text-left text-xs uppercase tracking-wider text-muted">
-                  <tr>
-                    <th className="w-12 px-3 py-2" />
-                    <th className="px-3 py-2">Item</th>
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2 text-right">Unit Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {catalogCandidates.map((item) => (
-                    <tr key={item.id} className="border-t">
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={catalogItemIds.includes(item.id)}
-                          onChange={() =>
-                            setCatalogItemIds((prev) =>
-                              prev.includes(item.id) ? prev.filter((i) => i !== item.id) : [...prev, item.id]
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="px-3 py-2">{item.name}</td>
-                      <td className="px-3 py-2">{item.sku ?? "-"}</td>
-                      <td className="px-3 py-2 text-right">{formatCurrency(item.unit_price)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {catalogCandidates.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">All catalog-eligible items are already linked.</p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="app-button-ghost" onClick={() => setCatalogPickerOpen(false)}>Cancel</button>
-              <button className="app-button" onClick={() => void addCatalogItems()} disabled={catalogItemIds.length === 0}>Link Selected Items</button>
-            </div>
-          </div>
-        </div>
+        <SupplierItemLinkModal
+          isOpen={catalogPickerOpen}
+          title={`Link Item to ${selected.name}`}
+          subtitle="Supplier catalog link"
+          entityLabel="Item"
+          options={catalogCandidates.map((item) => ({
+            value: item.id.toString(),
+            label: item.name,
+            description: item.sku ?? undefined,
+          }))}
+          form={catalogLinkForm}
+          itemSku={selectedCatalogItem?.sku ?? "-"}
+          unitPrice={selectedCatalogItem ? formatCurrency(selectedCatalogItem.unit_price) : "$0.00"}
+          primaryActionLabel="Link Item"
+          onClose={() => {
+            setCatalogPickerOpen(false);
+            setCatalogLinkForm(emptyCatalogLinkForm);
+          }}
+          onSubmit={() => void addCatalogItems()}
+          onChange={updateCatalogLinkForm}
+        />
       ) : null}
     </section>
   );

@@ -12,25 +12,25 @@ import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import case, func, inspect
+from sqlalchemy import case, exists, func, inspect
 from sqlalchemy.orm import Session
 
 from app.models import (
     Account,
     Customer,
+    GLEntry,
+    GLAccount,
+    GLJournalHeader,
+    GLJournalLine,
     Inventory,
     Invoice,
     InvoiceLine,
     Item,
-    GLEntry,
-    JournalEntry,
-    JournalLine,
     Payment,
     PurchaseOrder,
     PurchaseOrderLine,
     Supplier,
 )
-
 LOGGER = logging.getLogger(__name__)
 
 from .engine import (
@@ -38,14 +38,14 @@ from .engine import (
     REVENUE_STATUSES,
     get_account_balances_by_type,
     get_cogs_for_period,
-    get_payments_for_period,
+    get_gl_activity_totals,
+    get_operational_revenue_for_period,
     get_revenue_for_period,
     get_revenue_trend,
     linear_trend,
     month_expression,
     period_comparison,
 )
-
 D = Decimal
 ZERO = D("0")
 HUNDRED = D("100")
@@ -54,7 +54,7 @@ HUNDRED = D("100")
 # GL engine's auto-create fallback uses "REVENUE".  Accept both so the P&L
 # correctly aggregates revenue regardless of which label a given account carries.
 REVENUE_ACCOUNT_TYPES = ("REVENUE", "INCOME")
-
+EXPENSE_WORKBENCH_SOURCE_TYPES = ("EXPENSES", "PURCHASING")
 
 def _safe_div(num: Decimal, denom: Decimal) -> Decimal:
     if denom == 0:
@@ -77,9 +77,58 @@ def _add_months(d: date, months: int) -> date:
     return date(y, m, 1)
 
 
+def _normalized_account_type(account_number: str | None, gl_account_type: str | None, coa_type_lookup: dict[str, str]) -> str:
+    code = (account_number or "").strip()
+    coa_type = coa_type_lookup.get(code)
+    if coa_type:
+        normalized = coa_type.upper()
+        return "REVENUE" if normalized == "INCOME" else normalized
+    return (gl_account_type or "").upper()
+
+
+def _expense_debit_rows(
+    db: Session,
+    start: date,
+    end: date,
+) -> list[tuple[str, Decimal]]:
+    coa_type_lookup = {
+        (row.code or "").strip(): (row.type or "").upper()
+        for row in db.query(Account).filter(Account.code.isnot(None)).all()
+        if (row.code or "").strip()
+    }
+    rows = (
+        db.query(
+            GLAccount.name,
+            GLJournalLine.debit_amount,
+            GLAccount.account_number,
+            GLAccount.account_type,
+        )
+        .join(GLJournalHeader, GLJournalHeader.id == GLJournalLine.header_id)
+        .join(GLAccount, GLAccount.id == GLJournalLine.gl_account_id)
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLJournalHeader.source_module.in_(EXPENSE_WORKBENCH_SOURCE_TYPES))
+        .filter(GLJournalHeader.posting_date >= start, GLJournalHeader.posting_date <= end)
+        .filter(GLJournalLine.debit_amount > 0)
+        .all()
+    )
+    expense_rows: list[tuple[str, Decimal]] = []
+    for name, debit_amount, account_number, gl_account_type in rows:
+        account_type = _normalized_account_type(account_number, gl_account_type, coa_type_lookup)
+        if account_type not in {"EXPENSE", "COGS"}:
+            continue
+        expense_rows.append((name, Decimal(str(debit_amount or 0))))
+    return expense_rows
+
+
+def _journal_spend_for_period(
+    db: Session,
+    start: date,
+    end: date,
+) -> Decimal:
+    return sum((amount for _, amount in _expense_debit_rows(db, start, end)), ZERO)
+
 # ---------------------------------------------------------------------------
-# KPI Registry
-# ---------------------------------------------------------------------------
+# KPI Registry# ---------------------------------------------------------------------------
 
 KPI_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     # Financial Health
@@ -218,7 +267,7 @@ def calc_gross_profit_margin(db: Session, start: date, end: date) -> Dict[str, A
 def calc_net_profit_margin(db: Session, start: date, end: date) -> Dict[str, Any]:
     revenue = float(get_revenue_for_period(db, start, end))
     cogs = float(get_cogs_for_period(db, start, end))
-    expenses = float(abs(get_account_balances_by_type(db, "EXPENSE", end)))
+    expenses = float(_journal_spend_for_period(db, start, end))
     net_income = revenue - cogs - expenses
     value = (net_income / revenue * 100) if revenue else 0.0
     return _build_kpi_result("net_profit_margin", value,
@@ -230,10 +279,25 @@ def calc_net_profit_margin(db: Session, start: date, end: date) -> Dict[str, Any
 # ---------------------------------------------------------------------------
 
 
+
+def _apply_posted_invoice_filter(db: Session, query):
+    invoice_columns = {
+        column["name"] for column in inspect(db.get_bind()).get_columns("invoices")
+    }
+    legacy_posted_exists = exists().where(GLEntry.invoice_id == Invoice.id)
+    if "posted_to_gl" in invoice_columns:
+        return query.filter((Invoice.posted_to_gl.is_(True)) | legacy_posted_exists)
+    if "gl_journal_entry_id" in invoice_columns:
+        return query.filter((Invoice.gl_journal_entry_id.is_not(None)) | legacy_posted_exists)
+    return query.filter(legacy_posted_exists)
+
 def calc_dso(db: Session, as_of: date) -> Dict[str, Any]:
     year_start = date(as_of.year, 1, 1)
     paid_invoices = (
-        db.query(Invoice.issue_date, func.min(Payment.payment_date).label("paid_date"))
+        _apply_posted_invoice_filter(
+            db,
+            db.query(Invoice.issue_date, func.min(Payment.payment_date).label("paid_date")),
+        )
         .join(Payment, Payment.invoice_id == Invoice.id)
         .filter(Invoice.status == "PAID")
         .filter(Invoice.issue_date >= year_start, Invoice.issue_date <= as_of)
@@ -246,13 +310,15 @@ def calc_dso(db: Session, as_of: date) -> Dict[str, Any]:
     else:
         value = 0.0
 
-    # Sparkline: monthly DSO for last 6 months
     sparkline = []
     for i in range(5, -1, -1):
         m_start = _add_months(as_of, -i)
         m_end = _add_months(m_start, 1) - timedelta(days=1)
         m_paid = (
-            db.query(Invoice.issue_date, func.min(Payment.payment_date).label("paid_date"))
+            _apply_posted_invoice_filter(
+                db,
+                db.query(Invoice.issue_date, func.min(Payment.payment_date).label("paid_date")),
+            )
             .join(Payment, Payment.invoice_id == Invoice.id)
             .filter(Invoice.status == "PAID")
             .filter(Invoice.issue_date >= m_start, Invoice.issue_date <= m_end)
@@ -272,7 +338,7 @@ def calc_dso(db: Session, as_of: date) -> Dict[str, Any]:
 def calc_ar_aging(db: Session, as_of: date) -> Dict[str, Any]:
     buckets = {"current": 0.0, "1_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0}
     open_invoices = (
-        db.query(Invoice.due_date, Invoice.amount_due)
+        _apply_posted_invoice_filter(db, db.query(Invoice.due_date, Invoice.amount_due))
         .filter(Invoice.status.in_(OPEN_STATUSES))
         .filter(Invoice.amount_due > 0)
         .all()
@@ -305,7 +371,7 @@ def calc_ar_aging(db: Session, as_of: date) -> Dict[str, Any]:
 
 def calc_ar_total(db: Session, as_of: date) -> Dict[str, Any]:
     total = float(
-        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        _apply_posted_invoice_filter(db, db.query(func.coalesce(func.sum(Invoice.amount_due), 0)))
         .filter(Invoice.status.in_(OPEN_STATUSES))
         .filter(Invoice.amount_due > 0)
         .scalar() or 0
@@ -316,7 +382,7 @@ def calc_ar_total(db: Session, as_of: date) -> Dict[str, Any]:
 
 def calc_overdue_receivables(db: Session, as_of: date) -> Dict[str, Any]:
     total = float(
-        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        _apply_posted_invoice_filter(db, db.query(func.coalesce(func.sum(Invoice.amount_due), 0)))
         .filter(Invoice.status.in_(OPEN_STATUSES))
         .filter(Invoice.amount_due > 0)
         .filter(Invoice.due_date < as_of)
@@ -328,19 +394,18 @@ def calc_overdue_receivables(db: Session, as_of: date) -> Dict[str, Any]:
 
 def calc_collection_effectiveness(db: Session, start: date, end: date) -> Dict[str, Any]:
     beginning_ar = float(
-        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        _apply_posted_invoice_filter(db, db.query(func.coalesce(func.sum(Invoice.amount_due), 0)))
         .filter(Invoice.status.in_(OPEN_STATUSES))
         .filter(Invoice.issue_date < start)
         .scalar() or 0
     )
     credit_sales = float(get_revenue_for_period(db, start, end))
     ending_ar = float(
-        db.query(func.coalesce(func.sum(Invoice.amount_due), 0))
+        _apply_posted_invoice_filter(db, db.query(func.coalesce(func.sum(Invoice.amount_due), 0)))
         .filter(Invoice.status.in_(OPEN_STATUSES))
         .filter(Invoice.issue_date <= end)
         .scalar() or 0
     )
-    # CEI = (Beginning AR + Credit Sales - Ending AR) / (Beginning AR + Credit Sales) * 100
     denom = beginning_ar + credit_sales
     if denom > 0:
         value = ((beginning_ar + credit_sales - ending_ar) / denom) * 100
@@ -352,7 +417,7 @@ def calc_collection_effectiveness(db: Session, start: date, end: date) -> Dict[s
 
 def calc_average_invoice_value(db: Session, start: date, end: date) -> Dict[str, Any]:
     result = (
-        db.query(func.avg(Invoice.total))
+        _apply_posted_invoice_filter(db, db.query(func.avg(Invoice.total)))
         .filter(Invoice.status.in_(REVENUE_STATUSES))
         .filter(Invoice.issue_date >= start, Invoice.issue_date <= end)
         .scalar()
@@ -364,10 +429,13 @@ def calc_average_invoice_value(db: Session, start: date, end: date) -> Dict[str,
 
 def calc_top_customers_by_outstanding(db: Session, limit: int = 10) -> List[Dict[str, Any]]:
     rows = (
-        db.query(
-            Customer.id,
-            Customer.name,
-            func.coalesce(func.sum(Invoice.amount_due), 0).label("outstanding"),
+        _apply_posted_invoice_filter(
+            db,
+            db.query(
+                Customer.id,
+                Customer.name,
+                func.coalesce(func.sum(Invoice.amount_due), 0).label("outstanding"),
+            ),
         )
         .join(Invoice, Invoice.customer_id == Customer.id)
         .filter(Invoice.status.in_(OPEN_STATUSES))
@@ -381,8 +449,7 @@ def calc_top_customers_by_outstanding(db: Session, limit: int = 10) -> List[Dict
 
 
 # ---------------------------------------------------------------------------
-# Accounts Payable KPIs
-# ---------------------------------------------------------------------------
+# Accounts Payable KPIs# ---------------------------------------------------------------------------
 
 
 def calc_ap_aging(db: Session, as_of: date) -> Dict[str, Any]:
@@ -514,39 +581,20 @@ def calc_expense_kpis(db: Session, as_of: date) -> Dict[str, Any]:
     prev_month_start = _add_months(month_start, -1)
     prev_month_end = month_start - timedelta(days=1)
 
-    # Total operating expenses from journal lines
-    total_opex = float(
-        db.query(func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0))
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
-        .filter(Account.type == "EXPENSE")
-        .filter(JournalEntry.txn_date >= year_start, JournalEntry.txn_date <= as_of)
-        .scalar() or 0
-    )
-
+    # Keep expense analytics aligned with the Expenses workbench, which is driven by posted journal entries.
+    total_opex = float(_journal_spend_for_period(db, year_start, as_of))
     # COGS
     cogs_total = float(get_cogs_for_period(db, year_start, as_of))
 
     # By category
-    by_category = (
-        db.query(
-            Account.name.label("category"),
-            func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0).label("total"),
-        )
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
-        .filter(Account.type.in_(("EXPENSE", "COGS")))
-        .filter(JournalEntry.txn_date >= year_start, JournalEntry.txn_date <= as_of)
-        .group_by(Account.name)
-        .order_by(func.sum(JournalLine.debit - JournalLine.credit).desc())
-        .limit(10)
-        .all()
-    )
-
+    category_totals: dict[str, Decimal] = {}
+    for category_name, amount in _expense_debit_rows(db, year_start, as_of):
+        category_totals[category_name] = category_totals.get(category_name, ZERO) + amount
+    by_category = sorted(category_totals.items(), key=lambda item: item[1], reverse=True)[:10]
     return {
         "total_operating_expenses": _build_kpi_result("total_operating_expenses", total_opex),
         "cogs_total": _build_kpi_result("cogs_total", cogs_total),
-        "expense_by_category": [{"category": r.category, "value": float(r.total)} for r in by_category],
+        "expense_by_category": [{"category": category, "value": float(total)} for category, total in by_category],
     }
 
 
@@ -557,30 +605,10 @@ def calc_expense_kpis(db: Session, as_of: date) -> Dict[str, Any]:
 
 def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
     gl_date_field = "posting_date"
-    revenue_gl = float(
-        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
-        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
-        .scalar()
-        or 0
-    )
-    cogs = float(
-        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "COGS")
-        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
-        .scalar()
-        or 0
-    )
-    operating_expenses = float(
-        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "EXPENSE")
-        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
-        .scalar()
-        or 0
-    )
+    gl_totals = get_gl_activity_totals(db, start_date=start, end_date=end)
+    revenue_gl = float(gl_totals.get("REVENUE", Decimal("0.00")))
+    cogs = float(gl_totals.get("COGS", Decimal("0.00")))
+    operating_expenses = float(_journal_spend_for_period(db, start, end))
 
     invoice_query = (
         db.query(Invoice.id)
@@ -606,15 +634,17 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
         )
         invoices_posted_to_gl = 0
     gl_entries_count_for_revenue = int(
-        db.query(func.count(GLEntry.id))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
-        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
+        db.query(func.count(GLJournalLine.id))
+        .join(GLJournalHeader, GLJournalHeader.id == GLJournalLine.header_id)
+        .join(GLAccount, GLAccount.id == GLJournalLine.gl_account_id)
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLAccount.account_type == "REVENUE")
+        .filter(GLJournalHeader.posting_date >= start, GLJournalHeader.posting_date <= end)
         .scalar()
         or 0
     )
 
-    revenue_operational = float(get_revenue_for_period(db, start, end))
+    revenue_operational = float(get_operational_revenue_for_period(db, start, end))
     revenue = revenue_gl
     gross_profit = revenue - cogs
     operating_income = gross_profit - operating_expenses
@@ -665,15 +695,9 @@ def calc_pnl(db: Session, start: date, end: date) -> Dict[str, Any]:
     }
 
 def calc_revenue_reconciliation(db: Session, start: date, end: date) -> Dict[str, Any]:
-    gl_revenue = float(
-        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type.in_(REVENUE_ACCOUNT_TYPES))
-        .filter(GLEntry.posting_date >= start, GLEntry.posting_date <= end)
-        .scalar()
-        or 0
-    )
-    operational_revenue = float(get_revenue_for_period(db, start, end))
+    gl_totals = get_gl_activity_totals(db, start_date=start, end_date=end)
+    gl_revenue = float(gl_totals.get("REVENUE", Decimal("0.00")))
+    operational_revenue = float(get_operational_revenue_for_period(db, start, end))
     difference = round(gl_revenue - operational_revenue, 2)
     return {
         "gl_revenue": round(gl_revenue, 2),
@@ -688,35 +712,108 @@ def calc_revenue_reconciliation(db: Session, start: date, end: date) -> Dict[str
 # ---------------------------------------------------------------------------
 
 
+def _balance_sheet_account_sums(db: Session, as_of: date) -> dict[str, tuple[Decimal, Decimal]]:
+    rows = (
+        db.query(
+            GLAccount.account_number,
+            func.coalesce(func.sum(GLJournalLine.debit_amount), 0),
+            func.coalesce(func.sum(GLJournalLine.credit_amount), 0),
+        )
+        .join(GLJournalHeader, GLJournalHeader.id == GLJournalLine.header_id)
+        .join(GLAccount, GLAccount.id == GLJournalLine.gl_account_id)
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLJournalHeader.posting_date <= as_of)
+        .group_by(GLAccount.account_number)
+        .all()
+    )
+    return {
+        (account_number or "").strip(): (Decimal(str(total_debits or 0)), Decimal(str(total_credits or 0)))
+        for account_number, total_debits, total_credits in rows
+        if (account_number or "").strip()
+    }
+
+
+def _balance_sheet_section_breakdown(
+    db: Session,
+    *,
+    as_of: date,
+    account_type: str,
+    account_sums: dict[str, tuple[Decimal, Decimal]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    accounts = (
+        db.query(Account)
+        .filter(Account.code.isnot(None))
+        .filter(func.upper(Account.type) == account_type)
+        .order_by(Account.code.asc(), Account.name.asc())
+        .all()
+    )
+    items: list[dict[str, Any]] = []
+    current_asset_components: list[dict[str, Any]] = []
+    debit_normal = account_type in {"ASSET", "EXPENSE", "COGS"}
+
+    for account in accounts:
+        code = (account.code or "").strip()
+        total_debits, total_credits = account_sums.get(code, (ZERO, ZERO))
+        net = (total_debits - total_credits) if debit_normal else (total_credits - total_debits)
+        if abs(net) < Decimal("0.005"):
+            continue
+
+        label = f"{code} - {account.name}" if code else account.name
+        normal_balance = (account.normal_balance or ("DEBIT" if debit_normal else "CREDIT")).upper()
+        item = {
+            "label": label,
+            "value": round(float(net), 2),
+            "account_id": account.id,
+            "account_code": code,
+            "normal_balance": normal_balance,
+            "total_debits": round(float(total_debits), 2),
+            "total_credits": round(float(total_credits), 2),
+        }
+        items.append(item)
+
+        if account_type == "ASSET":
+            current_asset_components.append(
+                {
+                    "component_name": label,
+                    "account_ids": [account.id],
+                    "total_debits": round(float(total_debits), 2),
+                    "total_credits": round(float(total_credits), 2),
+                    "net": round(float(net), 2),
+                    "normal_balance": normal_balance,
+                }
+            )
+
+    return items, current_asset_components
 def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
-    assets = float(
-        db.query(func.coalesce(func.sum(GLEntry.debit_amount - GLEntry.credit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "ASSET")
-        .filter(GLEntry.posting_date <= as_of)
-        .scalar()
-        or 0
+    account_sums = _balance_sheet_account_sums(db, as_of)
+    asset_items, current_assets_components = _balance_sheet_section_breakdown(
+        db,
+        as_of=as_of,
+        account_type="ASSET",
+        account_sums=account_sums,
     )
-    liabilities = float(
-        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "LIABILITY")
-        .filter(GLEntry.posting_date <= as_of)
-        .scalar()
-        or 0
+    liability_items, _ = _balance_sheet_section_breakdown(
+        db,
+        as_of=as_of,
+        account_type="LIABILITY",
+        account_sums=account_sums,
     )
-    retained_earnings = float(
-        db.query(func.coalesce(func.sum(GLEntry.credit_amount - GLEntry.debit_amount), 0))
-        .join(Account, Account.id == GLEntry.account_id)
-        .filter(Account.type == "EQUITY")
-        .filter(GLEntry.posting_date <= as_of)
-        .scalar()
-        or 0
+    equity_items, _ = _balance_sheet_section_breakdown(
+        db,
+        as_of=as_of,
+        account_type="EQUITY",
+        account_sums=account_sums,
     )
 
+    assets = round(sum(item["value"] for item in asset_items), 2)
+    liabilities = round(sum(item["value"] for item in liability_items), 2)
+    retained_earnings = round(sum(item["value"] for item in equity_items), 2)
+
     income_statement = calc_pnl(db, date(as_of.year, 1, 1), as_of)
-    net_income = float(income_statement["net_income"])
-    total_equity = retained_earnings + net_income
+    net_income = round(float(income_statement["net_income"]), 2)
+    if abs(net_income) > 0.004:
+        equity_items.append({"label": "Current Period Net Income", "value": net_income})
+    total_equity = round(retained_earnings + net_income, 2)
 
     diff = round(assets - (liabilities + total_equity), 2)
     if abs(diff) > 0.01:
@@ -724,32 +821,23 @@ def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:
 
     return {
         "as_of": as_of,
-        "total_assets": round(assets, 2),
-        "total_liabilities": round(liabilities, 2),
-        "total_equity": round(total_equity, 2),
+        "total_assets": assets,
+        "total_liabilities": liabilities,
+        "total_equity": total_equity,
         "inventory_value": 0.0,
-        "retained_earnings": round(retained_earnings, 2),
-        "current_period_net_income": round(net_income, 2),
+        "retained_earnings": retained_earnings,
+        "current_period_net_income": net_income,
         "reconciliation_difference": diff,
         "net_assets": round(assets - liabilities, 2),
         "sections": {
-            "assets": {"label": "Assets", "total": round(assets, 2), "items": []},
-            "liabilities": {"label": "Liabilities", "total": round(liabilities, 2), "items": []},
-            "equity": {
-                "label": "Equity",
-                "total": round(total_equity, 2),
-                "items": [
-                    {"label": "Retained Earnings", "value": round(retained_earnings, 2)},
-                    {"label": "Current Period Net Income", "value": round(net_income, 2)},
-                ],
-            },
+            "assets": {"label": "Assets", "total": assets, "items": asset_items},
+            "liabilities": {"label": "Liabilities", "total": liabilities, "items": liability_items},
+            "equity": {"label": "Equity", "total": total_equity, "items": equity_items},
         },
         "income_statement": income_statement,
-        "current_assets_total": round(assets, 2),
-        "current_assets_components": [],
+        "current_assets_total": assets,
+        "current_assets_components": current_assets_components,
     }
-
-
 # ---------------------------------------------------------------------------
 # Financial Health Scorecard
 # ---------------------------------------------------------------------------
@@ -811,3 +899,26 @@ def calc_all_kpis(db: Session, as_of: date) -> List[Dict[str, Any]]:
     kpis.append(exp["cogs_total"])
 
     return kpis
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

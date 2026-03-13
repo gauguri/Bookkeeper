@@ -7,6 +7,7 @@ variance analysis, and anomaly detection primitives.
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
@@ -14,7 +15,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models import Invoice, InvoiceLine, JournalEntry, JournalLine, Payment
+from app.models import Account, GLAccount, GLJournalHeader, GLJournalLine, Invoice, Payment
 
 # ---------------------------------------------------------------------------
 # Date helpers
@@ -271,27 +272,101 @@ def detect_anomalies(
 # Account balance helpers
 # ---------------------------------------------------------------------------
 
+def _classify_account_type(account_number: str | None, gl_account_type: str | None, coa_type_lookup: dict[str, str]) -> str:
+    code = (account_number or "").strip()
+    coa_type = coa_type_lookup.get(code)
+    if coa_type:
+        normalized = coa_type.upper()
+        return "REVENUE" if normalized == "INCOME" else normalized
+    return (gl_account_type or "").upper()
+
+
+def _posted_gl_line_rows(
+    db: Session,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    as_of: Optional[date] = None,
+):
+    query = (
+        db.query(
+            GLJournalHeader.posting_date,
+            GLJournalLine.debit_amount,
+            GLJournalLine.credit_amount,
+            GLAccount.account_number,
+            GLAccount.account_type,
+        )
+        .join(GLJournalLine, GLJournalLine.header_id == GLJournalHeader.id)
+        .join(GLAccount, GLAccount.id == GLJournalLine.gl_account_id)
+        .filter(GLJournalHeader.status == "POSTED")
+    )
+    if start_date:
+        query = query.filter(GLJournalHeader.posting_date >= start_date)
+    if end_date:
+        query = query.filter(GLJournalHeader.posting_date <= end_date)
+    if as_of:
+        query = query.filter(GLJournalHeader.posting_date <= as_of)
+    return query.all()
+
+
+def get_gl_activity_totals(
+    db: Session,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    as_of: Optional[date] = None,
+) -> dict[str, Decimal]:
+    coa_type_lookup = {
+        (row.code or "").strip(): (row.type or "").upper()
+        for row in db.query(Account).filter(Account.code.isnot(None)).all()
+        if (row.code or "").strip()
+    }
+    totals: dict[str, Decimal] = {}
+    for _, debit_amount, credit_amount, account_number, gl_account_type in _posted_gl_line_rows(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        as_of=as_of,
+    ):
+        account_type = _classify_account_type(account_number, gl_account_type, coa_type_lookup)
+        debit = Decimal(str(debit_amount or 0))
+        credit = Decimal(str(credit_amount or 0))
+        amount = debit - credit if account_type in DEBIT_NORMAL_TYPES else credit - debit
+        totals[account_type] = totals.get(account_type, Decimal("0.00")) + amount
+    return totals
+
 OPEN_STATUSES = ("SENT", "SHIPPED", "PARTIALLY_PAID")
 REVENUE_STATUSES = ("SENT", "SHIPPED", "PARTIALLY_PAID", "PAID")
-
+DEBIT_NORMAL_TYPES = {"ASSET", "EXPENSE", "COGS"}
+EXPENSE_WORKBENCH_SOURCE_TYPES = ("EXPENSES", "PURCHASING")
 
 def get_account_balance(
     db: Session,
     account_id: int,
     as_of: Optional[date] = None,
 ) -> Decimal:
-    q = (
+    account = db.get(Account, account_id)
+    if not account or not (account.code or "").strip():
+        return Decimal("0.00")
+
+    query = (
         db.query(
-            func.coalesce(func.sum(JournalLine.debit), 0),
-            func.coalesce(func.sum(JournalLine.credit), 0),
+            func.coalesce(func.sum(GLJournalLine.debit_amount), 0),
+            func.coalesce(func.sum(GLJournalLine.credit_amount), 0),
         )
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .filter(JournalLine.account_id == account_id)
+        .join(GLJournalHeader, GLJournalHeader.id == GLJournalLine.header_id)
+        .join(GLAccount, GLAccount.id == GLJournalLine.gl_account_id)
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLAccount.account_number == account.code)
     )
     if as_of:
-        q = q.filter(JournalEntry.txn_date <= as_of)
-    row = q.one()
-    return Decimal(str(row[0])) - Decimal(str(row[1]))
+        query = query.filter(GLJournalHeader.posting_date <= as_of)
+    row = query.one()
+    debit = Decimal(str(row[0] or 0))
+    credit = Decimal(str(row[1] or 0))
+    if (account.type or "").upper() in DEBIT_NORMAL_TYPES:
+        return debit - credit
+    return credit - debit
 
 
 def get_account_balances_by_type(
@@ -299,29 +374,21 @@ def get_account_balances_by_type(
     account_type: str,
     as_of: Optional[date] = None,
 ) -> Decimal:
-    from app.models import Account
-
-    q = (
-        db.query(
-            func.coalesce(func.sum(JournalLine.debit), 0),
-            func.coalesce(func.sum(JournalLine.credit), 0),
-        )
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
-        .filter(Account.type == account_type)
-    )
-    if as_of:
-        q = q.filter(JournalEntry.txn_date <= as_of)
-    row = q.one()
-    total_debit = Decimal(str(row[0]))
-    total_credit = Decimal(str(row[1]))
-
-    if account_type in ("ASSET", "EXPENSE", "COGS"):
-        return total_debit - total_credit
-    return total_credit - total_debit
+    totals = get_gl_activity_totals(db, as_of=as_of)
+    normalized = "REVENUE" if (account_type or "").upper() == "INCOME" else (account_type or "").upper()
+    return totals.get(normalized, Decimal("0.00"))
 
 
 def get_revenue_for_period(
+    db: Session,
+    start_date: date,
+    end_date: date,
+) -> Decimal:
+    totals = get_gl_activity_totals(db, start_date=start_date, end_date=end_date)
+    return totals.get("REVENUE", Decimal("0.00"))
+
+
+def get_operational_revenue_for_period(
     db: Session,
     start_date: date,
     end_date: date,
@@ -340,16 +407,8 @@ def get_cogs_for_period(
     start_date: date,
     end_date: date,
 ) -> Decimal:
-    result = (
-        db.query(
-            func.coalesce(func.sum(InvoiceLine.quantity * InvoiceLine.landed_unit_cost), 0)
-        )
-        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
-        .filter(Invoice.status.in_(REVENUE_STATUSES))
-        .filter(Invoice.issue_date >= start_date, Invoice.issue_date <= end_date)
-        .scalar()
-    )
-    return Decimal(str(result or 0))
+    totals = get_gl_activity_totals(db, start_date=start_date, end_date=end_date)
+    return totals.get("COGS", Decimal("0.00"))
 
 
 def get_payments_for_period(
@@ -371,18 +430,27 @@ def get_revenue_trend(
     end_date: date,
     granularity: Granularity = "monthly",
 ) -> List[Dict[str, Any]]:
-    me = month_expression(db, Invoice.issue_date)
-    rows = (
-        db.query(me.label("period"), func.coalesce(func.sum(Invoice.total), 0))
-        .filter(Invoice.status.in_(REVENUE_STATUSES))
-        .filter(Invoice.issue_date >= start_date, Invoice.issue_date <= end_date)
-        .group_by("period")
-        .order_by("period")
-        .all()
-    )
+    coa_type_lookup = {
+        (row.code or "").strip(): (row.type or "").upper()
+        for row in db.query(Account).filter(Account.code.isnot(None)).all()
+        if (row.code or "").strip()
+    }
+    lookup: dict[str, float] = defaultdict(float)
+    for posting_date, debit_amount, credit_amount, account_number, gl_account_type in _posted_gl_line_rows(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+    ):
+        account_type = _classify_account_type(account_number, gl_account_type, coa_type_lookup)
+        if account_type != "REVENUE":
+            continue
+        period_key = period_label(period_start(posting_date, granularity), granularity)
+        debit = Decimal(str(debit_amount or 0))
+        credit = Decimal(str(credit_amount or 0))
+        lookup[period_key] += float(credit - debit)
+
     periods = generate_period_range(start_date, end_date, granularity)
     labels = [period_label(p, granularity) for p in periods]
-    lookup = {str(row[0]): float(row[1]) for row in rows}
     return [{"period": lbl, "value": lookup.get(lbl, 0.0)} for lbl in labels]
 
 
@@ -391,15 +459,14 @@ def get_expense_trend(
     start_date: date,
     end_date: date,
 ) -> List[Dict[str, Any]]:
-    from app.models import Account
-
-    me = month_expression(db, JournalEntry.txn_date)
+    me = month_expression(db, GLJournalHeader.posting_date)
     rows = (
-        db.query(me.label("period"), func.coalesce(func.sum(JournalLine.debit - JournalLine.credit), 0))
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_entry_id)
-        .join(Account, Account.id == JournalLine.account_id)
-        .filter(Account.type == "EXPENSE")
-        .filter(JournalEntry.txn_date >= start_date, JournalEntry.txn_date <= end_date)
+        db.query(me.label("period"), func.coalesce(func.sum(GLJournalLine.debit_amount), 0))
+        .join(GLJournalLine, GLJournalLine.header_id == GLJournalHeader.id)
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLJournalHeader.source_module.in_(EXPENSE_WORKBENCH_SOURCE_TYPES))
+        .filter(GLJournalHeader.posting_date >= start_date, GLJournalHeader.posting_date <= end_date)
+        .filter(GLJournalLine.debit_amount > 0)
         .group_by("period")
         .order_by("period")
         .all()
@@ -408,3 +475,7 @@ def get_expense_trend(
     labels = [period_label(p, "monthly") for p in periods]
     lookup = {str(row[0]): float(row[1]) for row in rows}
     return [{"period": lbl, "value": lookup.get(lbl, 0.0)} for lbl in labels]
+
+
+
+

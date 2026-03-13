@@ -421,6 +421,44 @@ def _post_purchase_order_receipt_to_gl(
     )
     db.flush()
 
+
+def backfill_purchase_order_receipt_to_gl(db: Session, po: PurchaseOrder) -> bool:
+    existing_link = (
+        db.query(GLPostingLink)
+        .filter(GLPostingLink.source_module == "PURCHASE_ORDER", GLPostingLink.source_id == po.id)
+        .first()
+    )
+    if existing_link:
+        return False
+
+    entry = po.posted_journal_entry
+    if not entry:
+        raise ValueError(f"Purchase order {po.po_number} has no legacy journal entry to backfill.")
+
+    debit_lines = [line for line in entry.lines if Decimal(line.debit or 0) > 0]
+    credit_lines = [line for line in entry.lines if Decimal(line.credit or 0) > 0]
+    if len(debit_lines) != 1 or len(credit_lines) != 1:
+        raise ValueError(f"Purchase order {po.po_number} legacy journal entry is not a simple balanced two-line posting.")
+
+    debit_line = debit_lines[0]
+    credit_line = credit_lines[0]
+    debit_amount = Decimal(debit_line.debit or 0)
+    credit_amount = Decimal(credit_line.credit or 0)
+    if debit_amount <= 0 or credit_amount <= 0 or debit_amount != credit_amount:
+        raise ValueError(f"Purchase order {po.po_number} legacy journal entry is not balanced.")
+
+    _post_purchase_order_receipt_to_gl(
+        db,
+        po=po,
+        entry_date=entry.txn_date,
+        memo=entry.description,
+        inventory_account_id=debit_line.account_id,
+        cash_account_id=credit_line.account_id,
+        amount=debit_amount,
+        company_id=entry.company_id,
+    )
+    return True
+
 def post_purchase_order_receipt(
     db: Session,
     *,
@@ -458,6 +496,7 @@ def post_purchase_order_receipt(
         debit_account_id=inventory_account_id,
         credit_account_id=cash_account_id,
         amount=total,
+        mirror_to_gl=False,
     )
     _post_purchase_order_receipt_to_gl(
         db,
@@ -477,6 +516,10 @@ def post_purchase_order_receipt(
         po.inventory_landed = True
         po.landed_at = datetime.utcnow()
     return po
+
+
+
+
 
 
 

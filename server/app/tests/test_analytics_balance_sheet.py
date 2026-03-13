@@ -4,9 +4,10 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.accounting.service import create_journal_entry
 from app.analytics.kpis import calc_balance_sheet
 from app.db import Base
-from app.models import Account, GLEntry
+from app.models import Account, Company
 
 
 def create_session():
@@ -18,16 +19,25 @@ def create_session():
 def test_balance_sheet_reconciliation_difference_is_reported():
     db = create_session()
 
-    cash = Account(company_id=1, code="10100", name="Cash", type="ASSET", normal_balance="debit", is_active=True)
-    equity = Account(company_id=1, code="31000", name="Owner Equity", type="EQUITY", normal_balance="credit", is_active=True)
+    company = Company(name="Balance Sheet Co", base_currency="USD", fiscal_year_start_month=1)
+    db.add(company)
+    db.flush()
+
+    cash = Account(company_id=company.id, code="10100", name="Cash", type="ASSET", normal_balance="debit", is_active=True)
+    equity = Account(company_id=company.id, code="31000", name="Owner Equity", type="EQUITY", normal_balance="credit", is_active=True)
     db.add_all([cash, equity])
     db.flush()
 
-    db.add_all(
-        [
-            GLEntry(journal_batch_id=1, account_id=cash.id, debit_amount=Decimal("500.00"), credit_amount=Decimal("0.00"), reference_type="seed", reference_id=1, event_type="SEED", event_id="1", posting_date=date(2025, 1, 1)),
-            GLEntry(journal_batch_id=1, account_id=equity.id, debit_amount=Decimal("0.00"), credit_amount=Decimal("500.00"), reference_type="seed", reference_id=1, event_type="SEED", event_id="1", posting_date=date(2025, 1, 1)),
-        ]
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 1),
+        memo="Owner contribution",
+        source_type="MANUAL",
+        source_id=None,
+        debit_account_id=cash.id,
+        credit_account_id=equity.id,
+        amount=Decimal("500.00"),
     )
     db.commit()
 
@@ -37,3 +47,4 @@ def test_balance_sheet_reconciliation_difference_is_reported():
     assert result["total_equity"] == 500.0
     assert result["inventory_value"] == 0.0
     assert result["reconciliation_difference"] == 0.0
+

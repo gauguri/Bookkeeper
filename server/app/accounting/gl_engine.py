@@ -454,6 +454,10 @@ def postJournalEntries(eventType: str, context: dict[str, Any], db: Session) -> 
         LOGGER.info("gl_posting_prepared", extra={"event_type": event_type, "event_id": event_id, "invoice_id": invoice_id, "company_id": company_id, "lines": [{"account_id": int(line["account_id"]), "debit": str(_money(line["debit_amount"])), "credit": str(_money(line["credit_amount"]))} for line in lines]})
         _assert_balanced(batch_entries)
         batch_id = postJournalEntry(db, event_type=event_type, context=context, entries=batch_entries)
+        db.flush()
+        from app.services.unified_ledger import mirror_legacy_batch_to_gl
+
+        mirror_legacy_batch_to_gl(db, batch_id)
         LOGGER.info(
             "invoice_gl_posting_after_journal_header_insert",
             extra={
@@ -552,3 +556,6 @@ def run_gl_diagnostics(db: Session) -> dict[str, Any]:
         "payments_without_ar_credit": [row[0] for row in payments_without_ar],
         "revenue_without_gl_entries": missing_revenue,
     }
+
+
+

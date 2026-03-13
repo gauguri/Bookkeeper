@@ -4,10 +4,11 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.accounting.service import create_journal_entry
 from app.db import Base
 from app.inventory.service import adjust_inventory
 from app.models import Account, Company, GLJournalHeader, GLPostingLink, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
-from app.purchasing.service import create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
+from app.purchasing.service import backfill_purchase_order_receipt_to_gl, create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
 def create_session():
@@ -181,8 +182,6 @@ def test_send_purchase_order_allows_resend_and_adds_new_log():
     assert send_log_count == 2
 
 
-
-
 def test_send_purchase_order_lands_inventory_with_po_level_costs():
     db = create_session()
     supplier = create_supplier(db)
@@ -254,6 +253,7 @@ def test_send_purchase_order_resend_does_not_double_land_inventory():
 
     inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
     assert inventory.quantity_on_hand == Decimal("5")
+
 
 def test_update_purchase_order_allowed_when_sent():
     db = create_session()
@@ -409,7 +409,7 @@ def test_post_purchase_order_receipt_blocks_duplicates():
 
     po = create_purchase_order(
         db,
-        {"supplier_id": supplier.id, "order_date": date.today(), "lines": [{"item_id": item.id, "quantity": Decimal("1"), "unit_cost": Decimal("1.00")}]},
+        {"supplier_id": supplier.id, "order_date": date.today(), "lines": [{"item_id": item.id, "quantity": Decimal("1"), "unit_cost": Decimal("1.00")}],},
     )
     db.commit()
 
@@ -421,5 +421,55 @@ def test_post_purchase_order_receipt_blocks_duplicates():
         assert False, "Expected duplicate posting to fail"
     except ValueError as exc:
         assert "already posted" in str(exc)
+
+
+def test_backfill_purchase_order_receipt_to_gl_from_legacy_journal():
+    db = create_session()
+    company, cash, inventory = _create_company_and_accounts(db)
+    supplier = create_supplier(db)
+    item = create_item(db)
+    db.add(SupplierItem(supplier_id=supplier.id, item_id=item.id, supplier_cost=Decimal("10.00"), is_preferred=True))
+    db.flush()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "freight_cost": Decimal("2.00"),
+            "tariff_cost": Decimal("3.00"),
+            "lines": [{"item_id": item.id, "quantity": Decimal("2"), "unit_cost": Decimal("10.00")}],
+        },
+    )
+    db.flush()
+
+    legacy_entry = create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date.today(),
+        memo=f"PO {po.po_number} landed cost",
+        source_type="PURCHASE_ORDER",
+        source_id=po.id,
+        debit_account_id=inventory.id,
+        credit_account_id=cash.id,
+        amount=Decimal("25.00"),
+        mirror_to_gl=False,
+    )
+    po.posted_journal_entry_id = legacy_entry.id
+    db.commit()
+
+    backfilled = backfill_purchase_order_receipt_to_gl(db, po)
+    db.commit()
+
+    assert backfilled is True
+    gl_header = db.query(GLJournalHeader).filter(GLJournalHeader.reference == po.po_number).first()
+    assert gl_header is not None
+    assert gl_header.status == "POSTED"
+    assert sum((Decimal(line.debit_amount or 0) for line in gl_header.lines), Decimal("0")) == Decimal("25.00")
+    assert sum((Decimal(line.credit_amount or 0) for line in gl_header.lines), Decimal("0")) == Decimal("25.00")
+
+    gl_link = db.query(GLPostingLink).filter(GLPostingLink.source_module == "PURCHASE_ORDER", GLPostingLink.source_id == po.id).first()
+    assert gl_link is not None
+    assert gl_link.gl_journal_header_id == gl_header.id
 
 

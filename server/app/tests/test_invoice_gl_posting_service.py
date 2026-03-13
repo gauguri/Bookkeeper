@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.analytics.kpis import calc_pnl
 from app.db import Base
-from app.models import Customer, GLEntry, Invoice, InvoiceLine, Item
+from app.models import Customer, GLEntry, GLJournalHeader, Invoice, InvoiceLine, Item
 from app.services.gl_posting_service import post_invoice_to_gl
 
 
@@ -51,7 +51,7 @@ def seed_draft_invoice(db):
     return invoice.id
 
 
-def test_invoice_posting_creates_gl_entry():
+def test_invoice_posting_creates_legacy_and_modern_gl_entries():
     db = create_session()
     invoice_id = seed_draft_invoice(db)
 
@@ -60,15 +60,21 @@ def test_invoice_posting_creates_gl_entry():
 
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     entries = db.query(GLEntry).filter(GLEntry.journal_batch_id == batch_id).all()
+    gl_header = db.query(GLJournalHeader).filter(GLJournalHeader.reference == invoice.invoice_number).first()
 
     assert invoice.posted_to_gl is True
     assert invoice.gl_journal_entry_id == batch_id
     assert invoice.gl_posted_at is not None
     assert len(entries) == 2
+    assert gl_header is not None
+    assert gl_header.status == "POSTED"
+    assert len(gl_header.lines) == 2
 
     debit_total = sum(Decimal(entry.debit_amount or 0) for entry in entries)
     credit_total = sum(Decimal(entry.credit_amount or 0) for entry in entries)
     assert debit_total == credit_total == Decimal("100.00")
+    assert sum(Decimal(line.debit_amount or 0) for line in gl_header.lines) == Decimal("100.00")
+    assert sum(Decimal(line.credit_amount or 0) for line in gl_header.lines) == Decimal("100.00")
 
 
 def test_invoice_posting_is_idempotent():

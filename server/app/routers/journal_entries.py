@@ -10,9 +10,10 @@ from app.module_keys import ModuleKey
 from app.accounting import schemas
 from app.accounting.service import create_journal_entry
 from app.db import get_db
-from app.models import Account, Company, JournalEntry, JournalLine
+from app.models import Account, Company, GLAccount, GLJournalHeader, JournalEntry, JournalLine
 
 router = APIRouter(prefix="/api/journal-entries", tags=["journal-entries"], dependencies=[Depends(require_module(ModuleKey.EXPENSES.value))])
+EXPENSE_SOURCE_MODULES = {"EXPENSES", "PURCHASING"}
 
 
 def _get_default_company_id(db: Session) -> int:
@@ -42,6 +43,16 @@ def _to_response(entry: JournalEntry) -> schemas.JournalEntryResponse:
         created_at=entry.posted_at,
         lines=lines,
     )
+
+
+def _coa_lookup_by_code(db: Session) -> dict[str, Account]:
+    rows = db.query(Account).filter(Account.code.isnot(None)).all()
+    return {(row.code or "").strip(): row for row in rows if (row.code or "").strip()}
+
+
+def _gl_lookup(db: Session) -> dict[int, GLAccount]:
+    rows = db.query(GLAccount).all()
+    return {row.id: row for row in rows}
 
 
 @router.post("", response_model=schemas.JournalEntryResponse, status_code=status.HTTP_201_CREATED)
@@ -76,53 +87,68 @@ def list_journal_entries(
     type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    query = db.query(JournalEntry).options(selectinload(JournalEntry.lines)).order_by(JournalEntry.txn_date.desc(), JournalEntry.id.desc())
+    query = (
+        db.query(GLJournalHeader)
+        .options(selectinload(GLJournalHeader.lines))
+        .filter(GLJournalHeader.status == "POSTED")
+        .filter(GLJournalHeader.source_module.in_(EXPENSE_SOURCE_MODULES))
+        .order_by(GLJournalHeader.posting_date.desc(), GLJournalHeader.id.desc())
+    )
     if search:
         like = f"%{search}%"
-        query = query.filter(JournalEntry.description.ilike(like))
-
+        query = query.filter((GLJournalHeader.header_text.ilike(like)) | (GLJournalHeader.reference.ilike(like)))
     if end_date:
-        query = query.filter(JournalEntry.txn_date <= end_date)
+        query = query.filter(GLJournalHeader.posting_date <= end_date)
 
     parsed_account_ids: set[int] = set()
     if account_ids:
         parsed_account_ids = {int(value.strip()) for value in account_ids.split(",") if value.strip().isdigit()}
 
-    entries = query.limit(limit * 3).all()
-    account_records = db.query(Account).all()
-    account_lookup = {account.id: account.name for account in account_records}
-    account_code_lookup = {account.id: account.code for account in account_records}
-    account_type_lookup = {account.id: account.type for account in account_records}
+    gl_lookup = _gl_lookup(db)
+    coa_lookup = _coa_lookup_by_code(db)
     rows: list[schemas.JournalEntryListRow] = []
 
-    for entry in entries:
-        debit_line = next((line for line in entry.lines if Decimal(line.debit or 0) > 0), None)
-        credit_line = next((line for line in entry.lines if Decimal(line.credit or 0) > 0), None)
+    for header in query.limit(limit * 4).all():
+        debit_line = next((line for line in header.lines if Decimal(line.debit_amount or 0) > 0), None)
+        credit_line = next((line for line in header.lines if Decimal(line.credit_amount or 0) > 0), None)
         if not debit_line or not credit_line:
             continue
-        line_account_ids = {debit_line.account_id, credit_line.account_id}
+
+        debit_gl = gl_lookup.get(debit_line.gl_account_id)
+        credit_gl = gl_lookup.get(credit_line.gl_account_id)
+        if not debit_gl or not credit_gl:
+            continue
+
+        debit_coa = coa_lookup.get((debit_gl.account_number or "").strip())
+        credit_coa = coa_lookup.get((credit_gl.account_number or "").strip())
+        debit_account_id = debit_coa.id if debit_coa else 0
+        credit_account_id = credit_coa.id if credit_coa else 0
+        line_account_ids = {debit_account_id, credit_account_id}
         if account_id and account_id not in line_account_ids:
             continue
         if parsed_account_ids and not (line_account_ids & parsed_account_ids):
             continue
-        if type and type not in {account_type_lookup.get(debit_line.account_id), account_type_lookup.get(credit_line.account_id)}:
+
+        debit_type = (debit_coa.type if debit_coa else debit_gl.account_type) if debit_gl else None
+        credit_type = (credit_coa.type if credit_coa else credit_gl.account_type) if credit_gl else None
+        if type and type not in {debit_type, credit_type}:
             continue
 
         rows.append(
             schemas.JournalEntryListRow(
-                id=entry.id,
-                date=entry.txn_date,
-                memo=entry.description,
-                amount=Decimal(debit_line.debit or 0),
-                source_type=entry.source_type,
-                debit_account_id=debit_line.account_id,
-                credit_account_id=credit_line.account_id,
-                debit_account=account_lookup.get(debit_line.account_id, f"Account #{debit_line.account_id}"),
-                credit_account=account_lookup.get(credit_line.account_id, f"Account #{credit_line.account_id}"),
-                debit_account_code=account_code_lookup.get(debit_line.account_id),
-                credit_account_code=account_code_lookup.get(credit_line.account_id),
-                debit_account_type=account_type_lookup.get(debit_line.account_id),
-                credit_account_type=account_type_lookup.get(credit_line.account_id),
+                id=header.id,
+                date=header.posting_date,
+                memo=header.header_text,
+                amount=Decimal(debit_line.debit_amount or 0),
+                source_type="PURCHASE_ORDER" if header.source_module == "PURCHASING" else "MANUAL",
+                debit_account_id=debit_account_id,
+                credit_account_id=credit_account_id,
+                debit_account=debit_coa.name if debit_coa else debit_gl.name,
+                credit_account=credit_coa.name if credit_coa else credit_gl.name,
+                debit_account_code=debit_gl.account_number,
+                credit_account_code=credit_gl.account_number,
+                debit_account_type=debit_type,
+                credit_account_type=credit_type,
             )
         )
         if len(rows) >= limit:

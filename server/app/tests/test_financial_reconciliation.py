@@ -5,9 +5,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.accounting.gl_engine import postJournalEntries
-from app.analytics.kpis import calc_balance_sheet, calc_pnl, calc_revenue_reconciliation
+from app.accounting.service import create_journal_entry
+from app.analytics.kpis import calc_ar_total, calc_balance_sheet, calc_pnl, calc_revenue_reconciliation
 from app.db import Base
-from app.models import Customer, Invoice, InvoiceLine, Item
+from app.models import Account, Company, Customer, Invoice, InvoiceLine, Item
 
 
 def create_session():
@@ -149,3 +150,63 @@ def test_pnl_no_invoices_returns_zeroed_debug_metrics():
     assert pnl["reconciliation"]["show_banner"] is False
     assert pnl["debug"]["invoices_finalized"] == 0
     assert pnl["debug"]["invoices_posted_to_gl"] == 0
+
+
+
+def test_posted_ar_matches_balance_sheet_assets():
+    db = create_session()
+    invoice = seed_invoice(db, Decimal("2250.00"), Decimal("0.00"))
+
+    postJournalEntries("INVOICE_POSTED", {"event_id": "inv-ar-1", "company_id": 1, "invoice_id": invoice.id, "reference_id": invoice.id, "posting_date": date(2025, 1, 2)}, db)
+    db.commit()
+
+    ar_total = calc_ar_total(db, date(2025, 1, 31))
+    bs = calc_balance_sheet(db, date(2025, 1, 31))
+
+    assert ar_total["current_value"] == 2250.0
+    assert bs["total_assets"] == 2250.0
+    assert bs["net_assets"] == 2250.0
+def test_pnl_includes_spend_entries_from_expenses_workbench_sources():
+    db = create_session()
+    company = Company(name="Recon Spend Co", base_currency="USD", fiscal_year_start_month=1)
+    db.add(company)
+    db.flush()
+
+    cash = Account(company_id=company.id, code="1000", name="Cash", type="ASSET", normal_balance="DEBIT", is_active=True)
+    office_supplies = Account(company_id=company.id, code="6100", name="Office Supplies", type="EXPENSE", normal_balance="DEBIT", is_active=True)
+    inventory_adjustments = Account(company_id=company.id, code="1312", name="Inventory Adjustments", type="ASSET", normal_balance="DEBIT", is_active=True)
+    db.add_all([cash, office_supplies, inventory_adjustments])
+    db.flush()
+
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 10),
+        memo="Office supplies",
+        source_type="MANUAL",
+        source_id=None,
+        debit_account_id=office_supplies.id,
+        credit_account_id=cash.id,
+        amount=Decimal("125.00"),
+    )
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 12),
+        memo="PO landed cost",
+        source_type="PURCHASE_ORDER",
+        source_id=1,
+        debit_account_id=inventory_adjustments.id,
+        credit_account_id=cash.id,
+        amount=Decimal("4200.00"),
+    )
+    db.commit()
+
+    pnl = calc_pnl(db, date(2025, 1, 1), date(2025, 1, 31))
+
+    assert pnl["operating_expenses"] == 125.0
+    assert pnl["operating_income"] == -125.0
+    assert pnl["net_income"] == -125.0
+
+
+

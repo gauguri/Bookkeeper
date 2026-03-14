@@ -19,7 +19,7 @@ import { NEUTRALS } from "../../theme/chartPalette";
 type WaterfallItem = {
   label: string;
   value: number;
-  type: string; // total | increase | decrease | subtotal
+  type: string;
 };
 
 type Props = {
@@ -47,8 +47,8 @@ function normalizeType(type: string): NormalizedType {
   return "neutral";
 }
 
-function getSemanticColor(type: NormalizedType, delta: number): string {
-  if (type === "total") return PL_PALETTE.positive;
+function getSemanticColor(type: NormalizedType, delta: number, rawValue: number): string {
+  if (type === "total") return rawValue >= 0 ? PL_PALETTE.positive : PL_PALETTE.negative;
   if (delta === 0) return NEUTRALS.muted;
   return delta > 0 ? PL_PALETTE.positive : PL_PALETTE.negative;
 }
@@ -60,31 +60,33 @@ const LEGEND_ITEMS = [
 ] as const;
 
 export default function WaterfallChart({ data, title, height = 300 }: Props) {
-  // Build a true waterfall with offset + visible delta segment.
   let running = 0;
   const chartData: WaterfallDatum[] = data.map((item) => {
     const semanticType = normalizeType(item.type);
     const numeric = toNumberSafe(item.value);
 
     if (semanticType === "total") {
-      const totalValue = Math.abs(numeric);
       const result: WaterfallDatum = {
         name: item.label,
-        value: totalValue,
-        hidden: 0,
-        rawValue: totalValue,
-        delta: totalValue - running,
-        runningTotal: totalValue,
+        value: Math.abs(numeric),
+        hidden: numeric >= 0 ? 0 : numeric,
+        rawValue: numeric,
+        delta: numeric - running,
+        runningTotal: numeric,
         semanticType,
       };
-      running = totalValue;
+      running = numeric;
       return result;
     }
 
-    const delta = semanticType === "decrease" ? -Math.abs(numeric) : semanticType === "increase" ? Math.abs(numeric) : numeric;
+    const delta = semanticType === "decrease"
+      ? -Math.abs(numeric)
+      : semanticType === "increase"
+        ? Math.abs(numeric)
+        : numeric;
     const start = running;
     running += delta;
-    const result: WaterfallDatum = {
+    return {
       name: item.label,
       value: Math.abs(delta),
       hidden: delta >= 0 ? start : start + delta,
@@ -93,7 +95,6 @@ export default function WaterfallChart({ data, title, height = 300 }: Props) {
       runningTotal: running,
       semanticType,
     };
-    return result;
   });
 
   return (
@@ -143,7 +144,7 @@ export default function WaterfallChart({ data, title, height = 300 }: Props) {
           <Bar dataKey="hidden" stackId="stack" fill="transparent" />
           <Bar dataKey="value" stackId="stack" radius={[4, 4, 0, 0]}>
             {chartData.map((entry, index) => (
-              <Cell key={index} fill={getSemanticColor(entry.semanticType, entry.delta)} />
+              <Cell key={index} fill={getSemanticColor(entry.semanticType, entry.delta, entry.rawValue)} />
             ))}
           </Bar>
         </BarChart>

@@ -1,15 +1,47 @@
-import { RISK_DATA, RISK_COLORS } from "../../data/poMockData";
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import type { ProcurementRiskItem } from "./types";
 
-export default function RiskHeatMap() {
-  const data = RISK_DATA.map((r) => ({
-    x: r.probability * 100,
-    y: r.impact * 100,
-    z: r.exposure / 1000,
-    label: r.label,
-    category: r.category,
-    level: r.level,
-    exposure: r.exposure,
+type RiskHeatMapProps = {
+  risks: ProcurementRiskItem[];
+  loading?: boolean;
+};
+
+const RISK_COLORS: Record<string, string> = {
+  low: "#22c55e",
+  medium: "#f59e0b",
+  high: "#ef4444",
+  critical: "#dc2626",
+};
+
+export default function RiskHeatMap({ risks, loading = false }: RiskHeatMapProps) {
+  if (loading) {
+    return (
+      <div className="app-card p-5">
+        <h3 className="mb-4 text-sm font-semibold">Risk Heat Map</h3>
+        <div className="h-80 animate-pulse rounded-xl bg-secondary" />
+      </div>
+    );
+  }
+
+  if (risks.length === 0) {
+    return (
+      <div className="app-card p-5">
+        <h3 className="mb-4 text-sm font-semibold">Risk Heat Map</h3>
+        <div className="flex h-80 items-center justify-center rounded-xl border border-dashed text-sm text-muted">
+          No live procurement risks were detected from the current supplier and PO records.
+        </div>
+      </div>
+    );
+  }
+
+  const data = risks.map((risk) => ({
+    x: risk.probability,
+    y: risk.impact,
+    z: Math.max(risk.exposure / 1000, 1),
+    label: risk.label,
+    category: risk.category,
+    level: risk.level,
+    exposure: risk.exposure,
   }));
 
   return (
@@ -24,15 +56,15 @@ export default function RiskHeatMap() {
           <Tooltip
             formatter={(value: number, name: string) => {
               if (name === "Exposure ($k)") return [`$${value.toFixed(0)}k`, "Exposure"];
-              if (name === "Probability") return [`${value}%`, name];
-              if (name === "Impact") return [`${value}%`, name];
+              if (name === "Probability") return [`${value.toFixed(1)}%`, name];
+              if (name === "Impact") return [`${value.toFixed(1)}%`, name];
               return [value, name];
             }}
             labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ""}
           />
           <Scatter data={data}>
-            {data.map((entry, i) => (
-              <Cell key={i} fill={RISK_COLORS[entry.level]} fillOpacity={0.7} stroke={RISK_COLORS[entry.level]} strokeWidth={1} />
+            {data.map((entry, index) => (
+              <Cell key={index} fill={RISK_COLORS[entry.level] ?? RISK_COLORS.medium} fillOpacity={0.7} stroke={RISK_COLORS[entry.level] ?? RISK_COLORS.medium} strokeWidth={1} />
             ))}
           </Scatter>
         </ScatterChart>

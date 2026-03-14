@@ -8,6 +8,7 @@ from app.accounting.service import create_journal_entry
 from app.db import Base
 from app.inventory.service import adjust_inventory
 from app.models import Account, Company, GLJournalHeader, GLPostingLink, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.purchasing.analytics import get_procurement_hub_analytics
 from app.purchasing.service import backfill_purchase_order_receipt_to_gl, create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
 
 
@@ -473,3 +474,68 @@ def test_backfill_purchase_order_receipt_to_gl_from_legacy_journal():
     assert gl_link.gl_journal_header_id == gl_header.id
 
 
+
+def test_procurement_hub_analytics_uses_live_purchase_order_data():
+    db = create_session()
+    supplier_a = create_supplier(db, "Alpha Stone")
+    supplier_a.email = "buyer@alpha.test"
+    supplier_a.default_lead_time_days = 45
+    supplier_b = create_supplier(db, "Beta Memorials")
+    supplier_b.email = "buyer@beta.test"
+    supplier_b.default_lead_time_days = 75
+
+    item_a = create_item(db, name="Marker A", unit_price=Decimal("100.00"))
+    item_b = create_item(db, name="Marker B", unit_price=Decimal("200.00"))
+    db.add_all(
+        [
+            SupplierItem(supplier_id=supplier_a.id, item_id=item_a.id, supplier_cost=Decimal("100.00"), is_preferred=True),
+            SupplierItem(supplier_id=supplier_b.id, item_id=item_b.id, supplier_cost=Decimal("200.00"), is_preferred=True),
+        ]
+    )
+    db.flush()
+
+    po_open = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier_a.id,
+            "order_date": date(2026, 3, 1),
+            "expected_date": date(2026, 3, 20),
+            "lines": [{"item_id": item_a.id, "quantity": Decimal("2"), "unit_cost": Decimal("100.00")}],
+        },
+    )
+    db.commit()
+    send_purchase_order(db, po_open)
+    db.commit()
+
+    po_received = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier_b.id,
+            "order_date": date(2026, 2, 10),
+            "expected_date": date(2026, 3, 5),
+            "lines": [{"item_id": item_b.id, "quantity": Decimal("3"), "unit_cost": Decimal("200.00")}],
+        },
+    )
+    db.commit()
+    send_purchase_order(db, po_received)
+    po_received.status = "RECEIVED"
+    po_received.landed_at = po_received.created_at
+    po_received.posted_journal_entry_id = 1
+    db.commit()
+
+    payload = get_procurement_hub_analytics(db, date(2026, 3, 13))
+
+    cards = {card["key"]: card for card in payload["cards"]}
+    assert cards["total_spend_ytd"]["value"] == 800.0
+    assert cards["open_purchase_orders"]["value"] == 1
+    assert cards["received_purchase_orders"]["value"] == 1
+    assert cards["active_suppliers"]["value"] == 2
+    assert cards["average_lead_time_days"]["value"] == 60.0
+    assert cards["catalog_coverage_percent"]["value"] == 100.0
+
+    assert any(point["month"] == "Feb" and point["actual_spend"] == Decimal("600.00") for point in payload["spend_trend"])
+    assert any(point["month"] == "Mar" and point["actual_spend"] == Decimal("200.00") for point in payload["spend_trend"])
+    assert payload["vendor_spend"][0]["supplier_name"] == "Beta Memorials"
+    assert any(rule["id"] == "received-posted" and rule["failed"] == 0 for rule in payload["compliance_rules"])
+    assert any(risk["category"] in {"Delivery", "Backlog", "Master Data"} for risk in payload["risk_items"])
+    assert payload["insights"]

@@ -1,8 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, ShoppingCart, Users, BarChart3, Shield, AlertTriangle, Sparkles,
-  Plus, X, Loader2, Mail, Phone, MapPin,
+  LayoutDashboard,
+  ShoppingCart,
+  Users,
+  BarChart3,
+  Shield,
+  AlertTriangle,
+  Sparkles,
+  Plus,
+  X,
+  Loader2,
+  Mail,
+  Phone,
+  MapPin,
 } from "lucide-react";
 import POKpiCards from "../../components/purchasing/POKpiCards";
 import SpendAnalysisChart from "../../components/purchasing/SpendAnalysisChart";
@@ -11,23 +22,37 @@ import P2PCycleTime from "../../components/purchasing/P2PCycleTime";
 import ComplianceAudit from "../../components/purchasing/ComplianceAudit";
 import RiskHeatMap from "../../components/purchasing/RiskHeatMap";
 import AIInsightsPanel from "../../components/purchasing/AIInsightsPanel";
+import type { ProcurementHubAnalytics } from "../../components/purchasing/types";
 import POTable from "../../components/purchasing/POTable";
 import { apiFetch, getPurchaseOrder } from "../../api";
 
-/* ── Types ── */
 type Section = "dashboard" | "orders" | "vendors" | "analytics" | "compliance" | "risk" | "ai";
 
-type Supplier = { id: number; name: string; email?: string | null; phone?: string | null; address?: string | null; created_at?: string };
+type Supplier = {
+  id: number;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  created_at?: string;
+};
 
 type PODetailLine = { id: number; item_id: number; item_name: string; quantity: number; unit_cost: number };
 type PODetail = {
-  id: number; po_number: string; supplier_id: number; supplier_name?: string;
-  order_date: string; expected_date?: string | null; notes?: string | null;
-  freight_cost: number; tariff_cost: number; status: string; total?: number;
+  id: number;
+  po_number: string;
+  supplier_id: number;
+  supplier_name?: string;
+  order_date: string;
+  expected_date?: string | null;
+  notes?: string | null;
+  freight_cost: number;
+  tariff_cost: number;
+  status: string;
+  total?: number;
   lines: PODetailLine[];
 };
 
-/* ── Nav config ── */
 const NAV_ITEMS: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "orders", label: "Orders", icon: ShoppingCart },
@@ -45,18 +70,29 @@ const ANALYTICS_TABS = [
   { id: "compliance", label: "Compliance" },
   { id: "risk", label: "Risk Heat Map" },
   { id: "ai", label: "AI Insights" },
-];
+] as const;
+
+const EMPTY_ANALYTICS: ProcurementHubAnalytics = {
+  cards: [],
+  spend_trend: [],
+  vendor_spend: [],
+  cycle_metrics: [],
+  compliance_rules: [],
+  risk_items: [],
+  insights: [],
+};
 
 export default function POHubPage() {
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("dashboard");
-  const [analyticsTab, setAnalyticsTab] = useState("spend");
+  const [analyticsTab, setAnalyticsTab] = useState<(typeof ANALYTICS_TABS)[number]["id"]>("spend");
+  const [hubAnalytics, setHubAnalytics] = useState<ProcurementHubAnalytics>(EMPTY_ANALYTICS);
+  const [hubLoading, setHubLoading] = useState(true);
+  const [hubError, setHubError] = useState("");
 
-  // Detail slide-out
   const [detailPO, setDetailPO] = useState<PODetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Vendor management
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
@@ -66,47 +102,94 @@ export default function POHubPage() {
 
   const goCreatePO = () => navigate("/purchasing/purchase-orders/new");
 
-  /* ── PO Detail ── */
+  const loadHubAnalytics = async () => {
+    setHubLoading(true);
+    setHubError("");
+    try {
+      setHubAnalytics(await apiFetch<ProcurementHubAnalytics>("/purchase-orders/hub-analytics"));
+    } catch (error) {
+      setHubAnalytics(EMPTY_ANALYTICS);
+      setHubError((error as Error).message || "Failed to load procurement analytics.");
+    } finally {
+      setHubLoading(false);
+    }
+  };
+
   const handleViewPO = async (po: { id: number; po_number: string; supplier_name: string; order_date: string; expected_date?: string | null; status: string; total: number }) => {
     setDetailLoading(true);
     setDetailPO({ id: po.id, po_number: po.po_number, supplier_id: 0, supplier_name: po.supplier_name, order_date: po.order_date, expected_date: po.expected_date || null, status: po.status, total: po.total, freight_cost: 0, tariff_cost: 0, lines: [] });
     try {
       const detail = await getPurchaseOrder<PODetail>(po.id);
       setDetailPO({ ...detail, supplier_name: detail.supplier_name || po.supplier_name });
-    } catch { /* keep basic info */ } finally { setDetailLoading(false); }
+    } catch {
+      // Keep basic info if detail fetch fails.
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
-  /* ── Supplier CRUD ── */
   const loadSuppliers = async () => {
     setSuppliersLoading(true);
-    try { setSuppliers(await apiFetch<Supplier[]>("/suppliers")); }
-    catch { setSuppliers([]); }
-    finally { setSuppliersLoading(false); }
+    try {
+      setSuppliers(await apiFetch<Supplier[]>("/suppliers"));
+    } catch {
+      setSuppliers([]);
+    } finally {
+      setSuppliersLoading(false);
+    }
   };
 
-  useEffect(() => { if (section === "vendors" && suppliers.length === 0) loadSuppliers(); }, [section]);
+  useEffect(() => {
+    void loadHubAnalytics();
+  }, []);
+
+  useEffect(() => {
+    if (section === "vendors" && suppliers.length === 0) {
+      void loadSuppliers();
+    }
+  }, [section, suppliers.length]);
 
   const createSupplier = async () => {
-    if (!addForm.name.trim()) { setAddError("Supplier name is required."); return; }
-    setAddSaving(true); setAddError("");
+    if (!addForm.name.trim()) {
+      setAddError("Supplier name is required.");
+      return;
+    }
+    setAddSaving(true);
+    setAddError("");
     try {
       const created = await apiFetch<Supplier>("/suppliers", {
         method: "POST",
-        body: JSON.stringify({ name: addForm.name.trim(), email: addForm.email.trim() || null, phone: addForm.phone.trim() || null, address: addForm.address.trim() || null }),
+        body: JSON.stringify({
+          name: addForm.name.trim(),
+          email: addForm.email.trim() || null,
+          phone: addForm.phone.trim() || null,
+          address: addForm.address.trim() || null,
+        }),
       });
       setSuppliers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setAddSupplierOpen(false);
       setAddForm({ name: "", email: "", phone: "", address: "" });
-    } catch (err) { setAddError((err as Error).message || "Failed to create supplier."); }
-    finally { setAddSaving(false); }
+      void loadHubAnalytics();
+    } catch (error) {
+      setAddError((error as Error).message || "Failed to create supplier.");
+    } finally {
+      setAddSaving(false);
+    }
   };
 
   const deleteSupplier = async (id: number) => {
-    if (!window.confirm("Delete this supplier?")) return;
-    try { await apiFetch(`/suppliers/${id}`, { method: "DELETE" }); setSuppliers((prev) => prev.filter((s) => s.id !== id)); } catch { /* ignore */ }
+    if (!window.confirm("Delete this supplier?")) {
+      return;
+    }
+    try {
+      await apiFetch(`/suppliers/${id}`, { method: "DELETE" });
+      setSuppliers((prev) => prev.filter((supplier) => supplier.id !== id));
+      void loadHubAnalytics();
+    } catch {
+      // Ignore delete failures from this view.
+    }
   };
 
-  /* ── Section Nav ── */
   const handleNavClick = (id: Section) => {
     setSection(id);
     if (id === "dashboard") setAnalyticsTab("spend");
@@ -117,23 +200,28 @@ export default function POHubPage() {
     else if (id === "analytics") setAnalyticsTab("spend");
   };
 
-  /* ── Analytics tabs ── */
   const renderAnalyticsContent = () => {
     switch (analyticsTab) {
-      case "spend": return <SpendAnalysisChart />;
-      case "vendors": return <VendorPerformanceRadar />;
-      case "p2p": return <P2PCycleTime />;
-      case "compliance": return <ComplianceAudit />;
-      case "risk": return <RiskHeatMap />;
-      case "ai": return <AIInsightsPanel />;
-      default: return <SpendAnalysisChart />;
+      case "spend":
+        return <SpendAnalysisChart data={hubAnalytics.spend_trend} loading={hubLoading} />;
+      case "vendors":
+        return <VendorPerformanceRadar vendors={hubAnalytics.vendor_spend} loading={hubLoading} />;
+      case "p2p":
+        return <P2PCycleTime metrics={hubAnalytics.cycle_metrics} loading={hubLoading} />;
+      case "compliance":
+        return <ComplianceAudit rules={hubAnalytics.compliance_rules} loading={hubLoading} />;
+      case "risk":
+        return <RiskHeatMap risks={hubAnalytics.risk_items} loading={hubLoading} />;
+      case "ai":
+        return <AIInsightsPanel insights={hubAnalytics.insights} loading={hubLoading} />;
+      default:
+        return <SpendAnalysisChart data={hubAnalytics.spend_trend} loading={hubLoading} />;
     }
   };
 
-  /* ── Vendors section ── */
   const renderVendors = () => (
     <div className="space-y-6">
-      <VendorPerformanceRadar />
+      <VendorPerformanceRadar vendors={hubAnalytics.vendor_spend} loading={hubLoading} />
 
       <div className="app-card overflow-hidden">
         <div className="flex items-center justify-between border-b p-4">
@@ -165,14 +253,14 @@ export default function POHubPage() {
                 </tr>
               </thead>
               <tbody>
-                {suppliers.map((s) => (
-                  <tr key={s.id} className="app-table-row border-t">
-                    <td className="px-4 py-3 font-medium">{s.name}</td>
-                    <td className="px-4 py-3 text-muted">{s.email || "—"}</td>
-                    <td className="px-4 py-3 text-muted">{s.phone || "—"}</td>
-                    <td className="px-4 py-3 text-muted">{s.address || "—"}</td>
+                {suppliers.map((supplier) => (
+                  <tr key={supplier.id} className="app-table-row border-t">
+                    <td className="px-4 py-3 font-medium">{supplier.name}</td>
+                    <td className="px-4 py-3 text-muted">{supplier.email || "-"}</td>
+                    <td className="px-4 py-3 text-muted">{supplier.phone || "-"}</td>
+                    <td className="px-4 py-3 text-muted">{supplier.address || "-"}</td>
                     <td className="px-4 py-3 text-right">
-                      <button className="app-button-ghost text-danger" onClick={() => deleteSupplier(s.id)}>Delete</button>
+                      <button className="app-button-ghost text-danger" onClick={() => void deleteSupplier(supplier.id)}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -184,13 +272,17 @@ export default function POHubPage() {
     </div>
   );
 
-  /* ── Section content ── */
   const renderSection = () => {
     switch (section) {
       case "dashboard":
         return (
           <div className="space-y-6">
-            <POKpiCards />
+            {hubError ? (
+              <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+                {hubError}
+              </div>
+            ) : null}
+            <POKpiCards cards={hubAnalytics.cards} loading={hubLoading} />
             <div className="flex flex-wrap gap-2">
               {ANALYTICS_TABS.map((tab) => (
                 <button key={tab.id} className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${analyticsTab === tab.id ? "border-primary/30 bg-primary/10 text-primary" : "hover:bg-secondary"}`} onClick={() => setAnalyticsTab(tab.id)}>
@@ -209,6 +301,11 @@ export default function POHubPage() {
       case "analytics":
         return (
           <div className="space-y-6">
+            {hubError ? (
+              <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+                {hubError}
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {ANALYTICS_TABS.map((tab) => (
                 <button key={tab.id} className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${analyticsTab === tab.id ? "border-primary/30 bg-primary/10 text-primary" : "hover:bg-secondary"}`} onClick={() => setAnalyticsTab(tab.id)}>{tab.label}</button>
@@ -217,18 +314,21 @@ export default function POHubPage() {
             {renderAnalyticsContent()}
           </div>
         );
-      case "compliance": return <ComplianceAudit />;
-      case "risk": return <RiskHeatMap />;
-      case "ai": return <AIInsightsPanel />;
-      default: return null;
+      case "compliance":
+        return <ComplianceAudit rules={hubAnalytics.compliance_rules} loading={hubLoading} />;
+      case "risk":
+        return <RiskHeatMap risks={hubAnalytics.risk_items} loading={hubLoading} />;
+      case "ai":
+        return <AIInsightsPanel insights={hubAnalytics.insights} loading={hubLoading} />;
+      default:
+        return null;
     }
   };
 
-  const poTotal = detailPO ? (detailPO.total ?? detailPO.lines.reduce((s, l) => s + l.quantity * l.unit_cost, 0) + detailPO.freight_cost + detailPO.tariff_cost) : 0;
+  const poTotal = detailPO ? (detailPO.total ?? detailPO.lines.reduce((sum, line) => sum + line.quantity * line.unit_cost, 0) + detailPO.freight_cost + detailPO.tariff_cost) : 0;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Procurement Hub</h1>
@@ -239,7 +339,6 @@ export default function POHubPage() {
         </button>
       </div>
 
-      {/* Section Nav — horizontal chip navigation */}
       <div className="flex flex-wrap gap-2">
         {NAV_ITEMS.map((item) => (
           <button
@@ -257,13 +356,11 @@ export default function POHubPage() {
         ))}
       </div>
 
-      {/* Section content */}
       {renderSection()}
 
-      {/* Detail Slide-out */}
       {detailPO && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={() => setDetailPO(null)}>
-          <div className="h-full w-full max-w-lg overflow-y-auto bg-white p-0 shadow-xl dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+          <div className="h-full w-full max-w-lg overflow-y-auto bg-white p-0 shadow-xl dark:bg-slate-900" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b px-6 py-5">
               <div>
                 <h2 className="text-lg font-semibold">{detailPO.po_number}</h2>
@@ -292,11 +389,11 @@ export default function POHubPage() {
                     </div>
                     <div className="rounded-xl border p-3">
                       <span className="text-xs text-muted">Expected Date</span>
-                      <p className="mt-1 font-semibold">{detailPO.expected_date || "\u2014"}</p>
+                      <p className="mt-1 font-semibold">{detailPO.expected_date || "-"}</p>
                     </div>
                   </div>
 
-                  {detailPO.lines.length > 0 && (
+                  {detailPO.lines.length > 0 ? (
                     <div>
                       <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Line Items</h3>
                       <div className="overflow-hidden rounded-xl border">
@@ -317,23 +414,21 @@ export default function POHubPage() {
                         </table>
                       </div>
                       <div className="mt-4 space-y-1 text-right text-sm">
-                        {detailPO.freight_cost > 0 && <p className="text-muted">Freight: ${detailPO.freight_cost.toFixed(2)}</p>}
-                        {detailPO.tariff_cost > 0 && <p className="text-muted">Tariff: ${detailPO.tariff_cost.toFixed(2)}</p>}
+                        {detailPO.freight_cost > 0 ? <p className="text-muted">Freight: ${detailPO.freight_cost.toFixed(2)}</p> : null}
+                        {detailPO.tariff_cost > 0 ? <p className="text-muted">Tariff: ${detailPO.tariff_cost.toFixed(2)}</p> : null}
                         <p className="text-lg font-bold">Total: ${Number(poTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                       </div>
                     </div>
-                  )}
-
-                  {detailPO.lines.length === 0 && (
+                  ) : (
                     <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted">No line items.</p>
                   )}
 
-                  {detailPO.notes && (
+                  {detailPO.notes ? (
                     <div>
                       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Notes</h3>
                       <p className="whitespace-pre-wrap rounded-xl border p-3 text-sm text-muted">{detailPO.notes}</p>
                     </div>
-                  )}
+                  ) : null}
                 </>
               )}
             </div>
@@ -341,10 +436,9 @@ export default function POHubPage() {
         </div>
       )}
 
-      {/* Add Supplier Modal */}
       {addSupplierOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4" onClick={() => setAddSupplierOpen(false)}>
-          <div className="app-card w-full max-w-md space-y-5 p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="app-card w-full max-w-md space-y-5 p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Procurement</p>
@@ -352,24 +446,24 @@ export default function POHubPage() {
               </div>
               <button className="app-button-ghost" onClick={() => setAddSupplierOpen(false)}><X className="h-5 w-5" /></button>
             </div>
-            {addError && <p className="text-sm text-danger">{addError}</p>}
+            {addError ? <p className="text-sm text-danger">{addError}</p> : null}
             <div className="space-y-3">
               <label className="block space-y-1 text-sm font-medium">
                 Name <span className="text-danger">*</span>
-                <input className="app-input w-full" value={addForm.name} onChange={(e) => setAddForm((p) => ({ ...p, name: e.target.value }))} placeholder="Supplier name" autoFocus />
+                <input className="app-input w-full" value={addForm.name} onChange={(event) => setAddForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Supplier name" autoFocus />
               </label>
               <label className="block space-y-1 text-sm font-medium">
                 <span className="inline-flex items-center gap-1"><Mail className="h-3.5 w-3.5 text-muted" /> Email</span>
-                <input className="app-input w-full" type="email" value={addForm.email} onChange={(e) => setAddForm((p) => ({ ...p, email: e.target.value }))} placeholder="name@supplier.com" />
+                <input className="app-input w-full" type="email" value={addForm.email} onChange={(event) => setAddForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="name@supplier.com" />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-1 text-sm font-medium">
                   <span className="inline-flex items-center gap-1"><Phone className="h-3.5 w-3.5 text-muted" /> Phone</span>
-                  <input className="app-input w-full" value={addForm.phone} onChange={(e) => setAddForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone number" />
+                  <input className="app-input w-full" value={addForm.phone} onChange={(event) => setAddForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
                 </label>
                 <label className="block space-y-1 text-sm font-medium">
                   <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-muted" /> Address</span>
-                  <input className="app-input w-full" value={addForm.address} onChange={(e) => setAddForm((p) => ({ ...p, address: e.target.value }))} placeholder="Business address" />
+                  <input className="app-input w-full" value={addForm.address} onChange={(event) => setAddForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="Business address" />
                 </label>
               </div>
             </div>

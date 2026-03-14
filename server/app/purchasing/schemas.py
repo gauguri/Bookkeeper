@@ -129,3 +129,67 @@ class PurchaseOrderPostReceiptPayload(BaseModel):
     memo: Optional[str] = None
     inventory_account_id: Optional[int] = None
     cash_account_id: Optional[int] = None
+
+
+class ProcurementKpiCard(BaseModel):
+    key: str
+    label: str
+    value: float
+    display_value: str
+    helper: str
+    unit: str
+
+
+class ProcurementSpendTrendPoint(BaseModel):
+    month: str
+    actual_spend: DecimalValue
+
+
+class ProcurementVendorSpendPoint(BaseModel):
+    supplier_id: int
+    supplier_name: str
+    total_spend: DecimalValue
+
+
+class ProcurementCycleMetric(BaseModel):
+    key: str
+    stage: str
+    avg_days: float
+    sample_size: int
+
+
+class ProcurementComplianceRule(BaseModel):
+    id: str
+    rule: str
+    passed: int
+    failed: int
+    total: int
+    rate_percent: float
+
+
+class ProcurementRiskItem(BaseModel):
+    id: str
+    label: str
+    probability: float
+    impact: float
+    exposure: DecimalValue
+    category: str
+    level: str
+
+
+class ProcurementInsight(BaseModel):
+    id: str
+    title: str
+    description: str
+    recommendation: str
+    category: str
+
+
+class ProcurementHubAnalyticsResponse(BaseModel):
+    cards: List[ProcurementKpiCard]
+    spend_trend: List[ProcurementSpendTrendPoint]
+    vendor_spend: List[ProcurementVendorSpendPoint]
+    cycle_metrics: List[ProcurementCycleMetric]
+    compliance_rules: List[ProcurementComplianceRule]
+    risk_items: List[ProcurementRiskItem]
+    insights: List[ProcurementInsight]

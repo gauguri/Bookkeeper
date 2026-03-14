@@ -11,6 +11,7 @@ from app.module_keys import ModuleKey
 from app.db import get_db
 from app.models import Account, PurchaseOrder, PurchaseOrderLine
 from app.purchasing import schemas
+from app.purchasing.analytics import get_procurement_hub_analytics
 from app.purchasing.service import (
     create_purchase_order,
     po_extra_costs_total,
@@ -72,6 +73,11 @@ def _to_detail_response(po: PurchaseOrder) -> schemas.PurchaseOrderResponse:
             for line in po.lines
         ],
     )
+
+
+@router.get("/hub-analytics", response_model=schemas.ProcurementHubAnalyticsResponse)
+def procurement_hub_analytics(db: Session = Depends(get_db)):
+    return schemas.ProcurementHubAnalyticsResponse(**get_procurement_hub_analytics(db, date.today()))
 
 
 @router.get("", response_model=List[schemas.PurchaseOrderListResponse])
@@ -289,3 +295,6 @@ def post_purchase_order_receipt_endpoint(
     db.commit()
     db.refresh(po)
     return _to_detail_response(po)
+
+
+

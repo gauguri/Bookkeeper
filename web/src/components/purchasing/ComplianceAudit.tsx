@@ -1,12 +1,36 @@
-import { COMPLIANCE_RULES } from "../../data/poMockData";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { CheckCircle2, XCircle } from "lucide-react";
+import type { ProcurementComplianceRule } from "./types";
 
-export default function ComplianceAudit() {
-  const totalPassed = COMPLIANCE_RULES.reduce((s, r) => s + r.passed, 0);
-  const totalFailed = COMPLIANCE_RULES.reduce((s, r) => s + r.failed, 0);
-  const overallRate = ((totalPassed / (totalPassed + totalFailed)) * 100).toFixed(1);
+type ComplianceAuditProps = {
+  rules: ProcurementComplianceRule[];
+  loading?: boolean;
+};
 
+export default function ComplianceAudit({ rules, loading = false }: ComplianceAuditProps) {
+  if (loading) {
+    return (
+      <div className="app-card p-5">
+        <h3 className="mb-4 text-sm font-semibold">Compliance and Audit</h3>
+        <div className="h-72 animate-pulse rounded-xl bg-secondary" />
+      </div>
+    );
+  }
+
+  if (rules.length === 0) {
+    return (
+      <div className="app-card p-5">
+        <h3 className="mb-4 text-sm font-semibold">Compliance and Audit</h3>
+        <div className="flex h-72 items-center justify-center rounded-xl border border-dashed text-sm text-muted">
+          No live procurement control checks are available yet.
+        </div>
+      </div>
+    );
+  }
+
+  const totalPassed = rules.reduce((sum, rule) => sum + rule.passed, 0);
+  const totalFailed = rules.reduce((sum, rule) => sum + rule.failed, 0);
+  const overallRate = totalPassed + totalFailed > 0 ? ((totalPassed / (totalPassed + totalFailed)) * 100).toFixed(1) : "0.0";
   const donutData = [
     { name: "Passed", value: totalPassed },
     { name: "Failed", value: totalFailed },
@@ -14,10 +38,8 @@ export default function ComplianceAudit() {
 
   return (
     <div className="app-card p-5">
-      <h3 className="mb-4 text-sm font-semibold">Compliance & Audit</h3>
-
+      <h3 className="mb-4 text-sm font-semibold">Compliance and Audit</h3>
       <div className="grid gap-6 lg:grid-cols-[200px_1fr]">
-        {/* Donut */}
         <div className="flex flex-col items-center">
           <div className="relative">
             <ResponsiveContainer width={160} height={160}>
@@ -31,7 +53,7 @@ export default function ComplianceAudit() {
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-xl font-bold">{overallRate}%</span>
-              <span className="text-[10px] uppercase text-muted">Compliant</span>
+              <span className="text-[10px] uppercase text-muted">Passing</span>
             </div>
           </div>
           <div className="mt-2 flex gap-4 text-xs text-muted">
@@ -40,32 +62,28 @@ export default function ComplianceAudit() {
           </div>
         </div>
 
-        {/* Rules table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-muted">
               <tr>
                 <th className="py-2">Rule</th>
-                <th className="py-2">Category</th>
                 <th className="py-2 text-center">Passed</th>
                 <th className="py-2 text-center">Failed</th>
                 <th className="py-2 text-center">Rate</th>
               </tr>
             </thead>
             <tbody>
-              {COMPLIANCE_RULES.map((rule) => {
-                const rate = ((rule.passed / rule.total) * 100).toFixed(0);
-                const isGood = Number(rate) >= 95;
+              {rules.map((rule) => {
+                const isGood = rule.rate_percent >= 95;
                 return (
                   <tr key={rule.id} className="border-t">
                     <td className="py-2 font-medium">{rule.rule}</td>
-                    <td className="py-2"><span className="app-badge border-primary/30 bg-primary/10 text-primary">{rule.category}</span></td>
                     <td className="py-2 text-center text-green-600">{rule.passed}</td>
                     <td className="py-2 text-center text-red-500">{rule.failed}</td>
                     <td className="py-2 text-center">
                       <span className={`inline-flex items-center gap-1 ${isGood ? "text-green-600" : "text-amber-500"}`}>
                         {isGood ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                        {rate}%
+                        {rule.rate_percent.toFixed(1)}%
                       </span>
                     </td>
                   </tr>

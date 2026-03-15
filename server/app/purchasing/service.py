@@ -1,9 +1,10 @@
 from datetime import date, datetime
 from decimal import Decimal
 import json
+import re
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.accounting.service import create_journal_entry
 from app.gl import schemas as gl_schemas
@@ -38,8 +39,16 @@ COA_TO_GL_TYPE = {
 
 
 def _next_po_number(db: Session) -> str:
-    count = db.query(func.count(PurchaseOrder.id)).scalar() or 0
-    return f"PO-{count + 1:05d}"
+    max_sequence = 0
+    existing_numbers = db.query(PurchaseOrder.po_number).all()
+    for (po_number,) in existing_numbers:
+        if not po_number:
+            continue
+        match = re.search(r"(\d+)$", po_number)
+        if not match:
+            continue
+        max_sequence = max(max_sequence, int(match.group(1)))
+    return f"PO-{max_sequence + 1:05d}"
 
 
 def po_items_subtotal(po: PurchaseOrder) -> Decimal:
@@ -516,6 +525,9 @@ def post_purchase_order_receipt(
         po.inventory_landed = True
         po.landed_at = datetime.utcnow()
     return po
+
+
+
 
 
 

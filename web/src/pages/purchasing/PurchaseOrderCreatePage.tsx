@@ -16,7 +16,13 @@ type SupplierItem = {
 };
 type CreateLine = { item_id: string; quantity: string; unit_cost: string };
 type InventoryPrefillLine = { item_id: number; quantity?: number; qty?: number };
-type LocationState = { prefillLines?: InventoryPrefillLine[]; supplierId?: number | null };
+type ReplenishmentPrefillLine = { supplier_id: number; item_id: number; quantity: number };
+type LocationState = {
+  prefillLines?: InventoryPrefillLine[];
+  supplierId?: number | null;
+  replenishmentLines?: ReplenishmentPrefillLine[];
+  allowedSupplierIds?: number[];
+};
 
 const cardClass = "app-card space-y-4 p-5";
 const emptyLine = (): CreateLine => ({ item_id: "", quantity: "1", unit_cost: "0" });
@@ -27,16 +33,29 @@ const resolveSupplierUnitCost = (item?: SupplierItem | null, fallbackItem?: Item
   const supplierCost = Number(item?.supplier_cost ?? 0);
   if (supplierCost > 0) return String(supplierCost);
 
+  const landedCost = Number(fallbackItem?.preferred_landed_cost ?? 0);
+  if (landedCost > 0) return String(landedCost);
+
   const listPrice = Number(fallbackItem?.unit_price ?? 0);
   if (listPrice > 0) return String(listPrice);
 
   return "0";
 };
 
+const buildExpectedDate = (orderDate: string, leadTimeDays: number | null | undefined) => {
+  if (!leadTimeDays || leadTimeDays <= 0) return "";
+  const baseDate = orderDate ? new Date(`${orderDate}T00:00:00`) : new Date();
+  if (Number.isNaN(baseDate.getTime())) return "";
+  baseDate.setDate(baseDate.getDate() + leadTimeDays);
+  return baseDate.toISOString().slice(0, 10);
+};
+
 export default function PurchaseOrderCreatePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state ?? {}) as LocationState;
+  const replenishmentLines = state.replenishmentLines ?? [];
+  const allowedSupplierIds = state.allowedSupplierIds ?? [];
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -84,63 +103,110 @@ export default function PurchaseOrderCreatePage() {
   };
 
   useEffect(() => {
-    void loadCreateDependencies();
-  }, []);
+  void loadCreateDependencies();
+}, []);
 
-  const createQuickSupplier = async () => {
-    if (!quickAddForm.name.trim()) {
-      setQuickAddError("Supplier name is required.");
-      return;
-    }
-    setQuickAddSaving(true);
-    setQuickAddError("");
-    try {
-      const created = await apiFetch<Supplier>("/suppliers", {
-        method: "POST",
-        body: JSON.stringify({
-          name: quickAddForm.name.trim(),
-          email: quickAddForm.email.trim() || null,
-          phone: quickAddForm.phone.trim() || null,
-          address: quickAddForm.address.trim() || null,
-        }),
-      });
-      setSuppliers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setForm((prev) => ({ ...prev, supplier_id: String(created.id) }));
-      setQuickAddOpen(false);
-      setQuickAddForm({ name: "", email: "", phone: "", address: "" });
-    } catch (err) {
-      setQuickAddError((err as Error).message || "Failed to create supplier.");
-    } finally {
-      setQuickAddSaving(false);
-    }
-  };
+const restrictedSupplierMode = allowedSupplierIds.length > 0;
+const visibleSuppliers = useMemo(() => {
+  if (!restrictedSupplierMode) return suppliers;
+  const allowed = new Set(allowedSupplierIds);
+  return suppliers.filter((supplier) => allowed.has(supplier.id));
+}, [allowedSupplierIds, restrictedSupplierMode, suppliers]);
 
-  useEffect(() => {
-    if (!items.length) return;
-
-    const prefill = state.prefillLines ?? [];
-    if (!prefill.length) {
-      if (state.supplierId) {
-        setForm((prev) => ({ ...prev, supplier_id: String(state.supplierId) }));
-      }
-      return;
-    }
-
-    const mapped = prefill.map((line) => {
-      const item = items.find((entry) => entry.id === line.item_id);
-      const qty = line.qty ?? line.quantity ?? 1;
-      return { item_id: String(line.item_id), quantity: String(Math.max(1, qty)), unit_cost: String(item?.preferred_landed_cost ?? 0) };
+const createQuickSupplier = async () => {
+  if (!quickAddForm.name.trim()) {
+    setQuickAddError("Supplier name is required.");
+    return;
+  }
+  setQuickAddSaving(true);
+  setQuickAddError("");
+  try {
+    const created = await apiFetch<Supplier>("/suppliers", {
+      method: "POST",
+      body: JSON.stringify({
+        name: quickAddForm.name.trim(),
+        email: quickAddForm.email.trim() || null,
+        phone: quickAddForm.phone.trim() || null,
+        address: quickAddForm.address.trim() || null,
+      }),
     });
+    setSuppliers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+    setForm((prev) => ({ ...prev, supplier_id: String(created.id) }));
+    setQuickAddOpen(false);
+    setQuickAddForm({ name: "", email: "", phone: "", address: "" });
+  } catch (err) {
+    setQuickAddError((err as Error).message || "Failed to create supplier.");
+  } finally {
+    setQuickAddSaving(false);
+  }
+};
 
-    const preferredSupplier = state.supplierId
-      ? String(state.supplierId)
-      : (() => {
-          const supplierIds = new Set(prefill.map((line) => items.find((entry) => entry.id === line.item_id)?.preferred_supplier_id).filter((value): value is number => typeof value === "number"));
-          return supplierIds.size === 1 ? String(Array.from(supplierIds)[0]) : "";
-        })();
+useEffect(() => {
+  if (replenishmentLines.length) {
+    const defaultSupplierId = state.supplierId ?? replenishmentLines[0]?.supplier_id ?? null;
+    if (!defaultSupplierId) return;
+    const supplier = suppliers.find((entry) => entry.id === defaultSupplierId);
+    const leadTimeDays = supplier?.lead_time_days ?? supplier?.default_lead_time_days ?? null;
+    setForm((prev) => ({
+      ...prev,
+      supplier_id: prev.supplier_id || String(defaultSupplierId),
+      expected_lead_time: prev.expected_lead_time || (leadTimeDays != null ? String(leadTimeDays) : ""),
+      expected_date: prev.expected_date || buildExpectedDate(prev.order_date, leadTimeDays),
+    }));
+    return;
+  }
 
-    setForm((prev) => ({ ...prev, supplier_id: prev.supplier_id || preferredSupplier, lines: mapped.length ? mapped : prev.lines }));
-  }, [items, state.prefillLines, state.supplierId]);
+  if (!items.length) return;
+
+  const prefill = state.prefillLines ?? [];
+  if (!prefill.length) {
+    if (state.supplierId) {
+      setForm((prev) => ({ ...prev, supplier_id: String(state.supplierId) }));
+    }
+    return;
+  }
+
+  const mapped = prefill.map((line) => {
+    const item = items.find((entry) => entry.id === line.item_id);
+    const qty = line.qty ?? line.quantity ?? 1;
+    return { item_id: String(line.item_id), quantity: String(Math.max(1, qty)), unit_cost: String(item?.preferred_landed_cost ?? 0) };
+  });
+
+  const preferredSupplier = state.supplierId
+    ? String(state.supplierId)
+    : (() => {
+        const supplierIds = new Set(
+          prefill
+            .map((line) => items.find((entry) => entry.id === line.item_id)?.preferred_supplier_id)
+            .filter((value): value is number => typeof value === "number")
+        );
+        return supplierIds.size === 1 ? String(Array.from(supplierIds)[0]) : "";
+      })();
+
+  setForm((prev) => ({ ...prev, supplier_id: prev.supplier_id || preferredSupplier, lines: mapped.length ? mapped : prev.lines }));
+}, [items, replenishmentLines, state.prefillLines, state.supplierId, suppliers]);
+
+useEffect(() => {
+  if (!replenishmentLines.length || !items.length || !form.supplier_id) return;
+
+  const selectedSupplierId = Number(form.supplier_id);
+  const relevantLines = replenishmentLines.filter((line) => line.supplier_id === selectedSupplierId);
+  if (!relevantLines.length) {
+    setForm((prev) => ({ ...prev, lines: [emptyLine()] }));
+    return;
+  }
+
+  const mappedLines = relevantLines.map((line) => {
+    const item = items.find((entry) => entry.id === line.item_id);
+    return {
+      item_id: String(line.item_id),
+      quantity: String(Math.max(1, line.quantity)),
+      unit_cost: String(item?.preferred_landed_cost ?? item?.unit_price ?? 0),
+    };
+  });
+
+  setForm((prev) => ({ ...prev, lines: mappedLines }));
+}, [form.supplier_id, items, replenishmentLines]);
 
   useEffect(() => {
     if (!supplierChangeWarning) return;
@@ -161,7 +227,8 @@ export default function PurchaseOrderCreatePage() {
         ...prev,
         supplier_contact: supplier.phone ?? "",
         supplier_email: supplier.email ?? "",
-        expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : supplier.default_lead_time_days != null ? String(supplier.default_lead_time_days) : prev.expected_lead_time
+        expected_lead_time: supplier.lead_time_days != null ? String(supplier.lead_time_days) : supplier.default_lead_time_days != null ? String(supplier.default_lead_time_days) : prev.expected_lead_time,
+        expected_date: prev.expected_date || buildExpectedDate(prev.order_date, supplier.lead_time_days ?? supplier.default_lead_time_days ?? null)
       }));
     }
 
@@ -266,7 +333,7 @@ export default function PurchaseOrderCreatePage() {
     }
   };
 
-  const noSuppliers = !loading && !loadError && suppliers.length === 0;
+  const noSuppliers = !loading && !loadError && visibleSuppliers.length === 0;
   const noItems = !loading && !loadError && items.length === 0;
   const supplierSelected = Boolean(form.supplier_id);
   const hasMappedItems = supplierItems.length > 0;
@@ -383,15 +450,22 @@ export default function PurchaseOrderCreatePage() {
           <section className={cardClass}>
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Supplier</h2>
-              <button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-primary transition hover:underline" onClick={() => { setQuickAddOpen(true); setQuickAddError(""); setQuickAddForm({ name: "", email: "", phone: "", address: "" }); }}>
-                <Plus className="h-3.5 w-3.5" /> Quick Add Supplier
-              </button>
+              {!restrictedSupplierMode ? (
+                <button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-primary transition hover:underline" onClick={() => { setQuickAddOpen(true); setQuickAddError(""); setQuickAddForm({ name: "", email: "", phone: "", address: "" }); }}>
+                  <Plus className="h-3.5 w-3.5" /> Quick Add Supplier
+                </button>
+              ) : null}
             </div>
+            {restrictedSupplierMode ? (
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted">
+                This purchase order was staged from replenishment. Supplier choices are limited to the selected replenishment suppliers, and the item lines will switch to match the supplier you choose.
+              </div>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-1 text-sm font-medium">Supplier *
                 <select className="app-select w-full" value={form.supplier_id} onChange={(event) => setForm((prev) => ({ ...prev, supplier_id: event.target.value }))}>
                   <option value="">Select supplier</option>
-                  {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                  {visibleSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
                 </select>
               </label>
               <label className="space-y-1 text-sm font-medium">Expected lead time (days)
@@ -524,6 +598,22 @@ export default function PurchaseOrderCreatePage() {
     </section>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

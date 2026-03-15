@@ -14,6 +14,7 @@ import CustomersPage from "./pages/CustomersPage";
 import CustomersBulkImportPage from "./pages/CustomersBulkImportPage";
 import ExpensesPage from "./pages/ExpensesPage";
 import InventoryPage from "./pages/InventoryPage";
+import ReplenishmentWorkbenchPage from "./pages/ReplenishmentWorkbenchPage";
 import BacklogPage from "./pages/BacklogPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
@@ -270,6 +271,7 @@ export default function App() {
             <Route path="/purchase-orders" element={<Navigate to="/purchasing/purchase-orders" replace />} />
             <Route path="/purchase-orders/new" element={<Navigate to="/purchasing/purchase-orders/new" replace />} />
             <Route path="/inventory" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><InventoryPage /></ProtectedRoute>} />
+            <Route path="/inventory/replenishment" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><ReplenishmentWorkbenchPage /></ProtectedRoute>} />
             <Route path="/operations/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/backlog" element={<ProtectedRoute moduleKey={MODULES.INVENTORY}><BacklogPage /></ProtectedRoute>} />
             <Route path="/control" element={<ProtectedRoute moduleKey={MODULES.CONTROL}><ControlPage /></ProtectedRoute>} />
@@ -289,6 +291,7 @@ export default function App() {
     </Routes>
   );
 }
+
 
 
 

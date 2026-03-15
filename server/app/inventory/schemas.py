@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -231,3 +231,81 @@ class ReorderRecommendationResponse(BaseModel):
     supplier: Optional[str] = None
     suggested_order_qty: DecimalValue
     days_of_supply: DecimalValue
+
+class ReplenishmentRecommendationItem(BaseModel):
+    item_id: int
+    item: str
+    sku: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier: Optional[str] = None
+    available: DecimalValue
+    inbound_qty: DecimalValue
+    reorder_point: DecimalValue
+    safety_stock: DecimalValue
+    avg_daily_usage: DecimalValue
+    days_of_supply: DecimalValue
+    target_days_supply: DecimalValue
+    suggested_order_qty: DecimalValue
+    recommended_order_qty: DecimalValue
+    lead_time_days: int
+    min_order_qty: DecimalValue = Field(default=Decimal("0"))
+    unit_cost: Optional[DecimalValue] = None
+    landed_unit_cost: Optional[DecimalValue] = None
+    estimated_order_value: DecimalValue = Field(default=Decimal("0"))
+    health_flag: str
+    urgency: str
+    stockout_date: Optional[date] = None
+    alternative_supplier_count: int = 0
+    has_supplier_mapping: bool = False
+    reason: str
+
+
+class ReplenishmentSupplierGroup(BaseModel):
+    supplier_id: Optional[int] = None
+    supplier: str
+    actionable: bool = True
+    lead_time_days: Optional[int] = None
+    recommendation_count: int = 0
+    total_estimated_order_value: DecimalValue = Field(default=Decimal("0"))
+    items: list[ReplenishmentRecommendationItem] = Field(default_factory=list)
+
+
+class ReplenishmentWorkbenchSummary(BaseModel):
+    total_recommendations: int = 0
+    supplier_groups: int = 0
+    unmapped_items: int = 0
+    critical_items: int = 0
+    total_estimated_order_value: DecimalValue = Field(default=Decimal("0"))
+    recommended_units: DecimalValue = Field(default=Decimal("0"))
+
+
+class ReplenishmentWorkbenchResponse(BaseModel):
+    generated_at: datetime
+    usage_days: int
+    summary: ReplenishmentWorkbenchSummary
+    groups: list[ReplenishmentSupplierGroup] = Field(default_factory=list)
+
+
+class ReplenishmentSelection(BaseModel):
+    item_id: int
+    supplier_id: int
+    quantity: DecimalValue = Field(..., gt=0)
+
+
+class ReplenishmentPurchaseOrderCreateRequest(BaseModel):
+    selections: list[ReplenishmentSelection] = Field(min_length=1)
+    notes: Optional[str] = None
+
+
+class ReplenishmentPurchaseOrderCreated(BaseModel):
+    id: int
+    po_number: str
+    supplier_id: int
+    supplier: str
+    line_count: int
+    total: DecimalValue
+
+
+class ReplenishmentPurchaseOrderCreateResponse(BaseModel):
+    created_purchase_orders: list[ReplenishmentPurchaseOrderCreated] = Field(default_factory=list)
+    message: str

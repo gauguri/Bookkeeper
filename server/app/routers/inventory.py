@@ -10,6 +10,7 @@ from app.auth import require_module
 from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory import schemas
+from app.inventory.replenishment import build_replenishment_workbench, create_replenishment_purchase_orders
 from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map, get_reserved_qty_map
 from app.models import (
     Company,
@@ -594,6 +595,39 @@ def get_reorder_recommendations(top_n: int = Query(10, ge=1, le=100), db: Sessio
     ][:top_n]
 
 
+
+@router.get("/replenishment/workbench", response_model=schemas.ReplenishmentWorkbenchResponse)
+def get_replenishment_workbench(
+    usage_days: int = Query(90, ge=7, le=365),
+    db: Session = Depends(get_db),
+):
+    rows = _build_inventory_rows(db, usage_days=usage_days)
+    return build_replenishment_workbench(db, rows, usage_days=usage_days)
+
+
+@router.post(
+    "/replenishment/purchase-orders",
+    response_model=schemas.ReplenishmentPurchaseOrderCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_replenishment_purchase_orders_route(
+    payload: schemas.ReplenishmentPurchaseOrderCreateRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        response = create_replenishment_purchase_orders(
+            db,
+            selections=payload.selections,
+            notes=payload.notes,
+        )
+        db.commit()
+        return response
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Unable to create replenishment purchase order because the generated PO number already exists. Retry the action.") from exc
 @router.get("/available", response_model=schemas.InventoryAvailabilityResponse | schemas.InventoryAvailabilityBulkResponse)
 def get_available_inventory(
     item_id: Optional[int] = None,
@@ -693,3 +727,6 @@ def list_item_reservations(item_id: int, db: Session = Depends(get_db)):
             )
         )
     return results
+
+
+

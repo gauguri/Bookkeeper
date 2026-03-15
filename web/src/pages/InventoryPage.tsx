@@ -397,6 +397,7 @@ export default function InventoryPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button className="app-button" onClick={() => navigate("/purchasing/purchase-orders")}><PackagePlus className="h-4 w-4" /> + Receive Inventory</button>
+          <button className="app-button-secondary" onClick={() => navigate("/inventory/replenishment")}><Boxes className="h-4 w-4" /> Replenishment</button>
           <button className="app-button-secondary" onClick={createPOForSelection}><ShoppingCart className="h-4 w-4" /> + Create Purchase Order</button>
           <button className="app-button-ghost" onClick={() => navigate("/items")}><ArrowDownUp className="h-4 w-4" /> Adjust Stock</button>
           <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
@@ -616,3 +617,4 @@ export default function InventoryPage() {
     </section>
   );
 }
+

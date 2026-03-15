@@ -6,8 +6,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.accounting.service import create_journal_entry
 from app.db import Base
+from app.inventory import schemas as inventory_schemas
+from app.inventory.replenishment import build_replenishment_workbench, create_replenishment_purchase_orders
 from app.inventory.service import adjust_inventory
-from app.models import Account, Company, GLJournalHeader, GLPostingLink, Inventory, Item, JournalEntry, PurchaseOrderSendLog, Supplier, SupplierItem
+from app.models import Account, Company, GLJournalHeader, GLPostingLink, Inventory, Item, JournalEntry, PurchaseOrder, PurchaseOrderSendLog, Supplier, SupplierItem
 from app.purchasing.analytics import get_procurement_hub_analytics
 from app.purchasing.service import backfill_purchase_order_receipt_to_gl, create_purchase_order, post_purchase_order_receipt, receive_purchase_order, send_purchase_order, update_purchase_order
 
@@ -539,3 +541,147 @@ def test_procurement_hub_analytics_uses_live_purchase_order_data():
     assert any(rule["id"] == "received-posted" and rule["failed"] == 0 for rule in payload["compliance_rules"])
     assert any(risk["category"] in {"Delivery", "Backlog", "Master Data"} for risk in payload["risk_items"])
     assert payload["insights"]
+
+def test_replenishment_workbench_groups_supplier_and_unmapped_items():
+    db = create_session()
+    supplier = create_supplier(db, name="Granite Supply")
+    mapped_item = create_item(db, name="Blue Pearl", on_hand=Decimal("2"))
+    unmapped_item = create_item(db, name="Legacy Marker", on_hand=Decimal("0"))
+    db.add(
+        SupplierItem(
+            supplier_id=supplier.id,
+            item_id=mapped_item.id,
+            supplier_cost=Decimal("40.00"),
+            freight_cost=Decimal("5.00"),
+            tariff_cost=Decimal("0.00"),
+            min_order_qty=Decimal("10.00"),
+            is_preferred=True,
+            is_active=True,
+        )
+    )
+    db.commit()
+
+    rows = [
+        inventory_schemas.InventoryItemRow(
+            id=mapped_item.id,
+            sku=None,
+            item=mapped_item.name,
+            on_hand=Decimal("2.00"),
+            reserved=Decimal("0.00"),
+            available=Decimal("2.00"),
+            reorder_point=Decimal("6.00"),
+            safety_stock=Decimal("1.00"),
+            lead_time_days=14,
+            avg_daily_usage=Decimal("1.00"),
+            days_of_supply=Decimal("2.00"),
+            suggested_reorder_qty=Decimal("6.00"),
+            preferred_supplier=supplier.name,
+            preferred_supplier_id=supplier.id,
+            last_receipt=None,
+            last_issue=None,
+            total_value=Decimal("90.00"),
+            inbound_qty=Decimal("0.00"),
+            health_flag="low_stock",
+        ),
+        inventory_schemas.InventoryItemRow(
+            id=unmapped_item.id,
+            sku=None,
+            item=unmapped_item.name,
+            on_hand=Decimal("0.00"),
+            reserved=Decimal("0.00"),
+            available=Decimal("0.00"),
+            reorder_point=Decimal("4.00"),
+            safety_stock=Decimal("1.00"),
+            lead_time_days=7,
+            avg_daily_usage=Decimal("1.00"),
+            days_of_supply=Decimal("0.00"),
+            suggested_reorder_qty=Decimal("4.00"),
+            preferred_supplier=None,
+            preferred_supplier_id=None,
+            last_receipt=None,
+            last_issue=None,
+            total_value=Decimal("0.00"),
+            inbound_qty=Decimal("0.00"),
+            health_flag="stockout",
+        ),
+    ]
+
+    response = build_replenishment_workbench(db, rows, usage_days=90)
+
+    assert response.summary.total_recommendations == 2
+    assert response.summary.supplier_groups == 1
+    assert response.summary.unmapped_items == 1
+    mapped_group = next(group for group in response.groups if group.supplier_id == supplier.id)
+    unmapped_group = next(group for group in response.groups if group.supplier_id is None)
+    assert mapped_group.items[0].recommended_order_qty == Decimal("10.00")
+    assert mapped_group.items[0].estimated_order_value == Decimal("450.00")
+    assert unmapped_group.actionable is False
+    assert unmapped_group.items[0].has_supplier_mapping is False
+
+
+def test_replenishment_purchase_orders_group_lines_by_supplier():
+    db = create_session()
+    supplier = create_supplier(db, name="Quarry One")
+    first_item = create_item(db, name="Angel Upright")
+    second_item = create_item(db, name="Companion Slant")
+    db.add_all([
+        SupplierItem(supplier_id=supplier.id, item_id=first_item.id, supplier_cost=Decimal("10.00"), freight_cost=Decimal("2.00"), tariff_cost=Decimal("1.00"), is_preferred=True, is_active=True),
+        SupplierItem(supplier_id=supplier.id, item_id=second_item.id, supplier_cost=Decimal("20.00"), freight_cost=Decimal("3.00"), tariff_cost=Decimal("2.00"), is_preferred=False, is_active=True),
+    ])
+    db.commit()
+
+    response = create_replenishment_purchase_orders(
+        db,
+        selections=[
+            inventory_schemas.ReplenishmentSelection(item_id=first_item.id, supplier_id=supplier.id, quantity=Decimal("3.00")),
+            inventory_schemas.ReplenishmentSelection(item_id=second_item.id, supplier_id=supplier.id, quantity=Decimal("2.00")),
+        ],
+    )
+    db.commit()
+
+    assert len(response.created_purchase_orders) == 1
+    created = response.created_purchase_orders[0]
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == created.id).first()
+    assert po is not None
+    assert po.supplier_id == supplier.id
+    assert len(po.lines) == 2
+    assert po.lines[0].qty_ordered + po.lines[1].qty_ordered == Decimal("5.00")
+    assert created.total == Decimal("70.00")
+
+
+def test_replenishment_purchase_orders_reject_unmapped_items():
+    db = create_session()
+    supplier = create_supplier(db, name="Missing Mapping Supplier")
+    item = create_item(db, name="Unmapped Stock")
+    db.commit()
+
+    try:
+        create_replenishment_purchase_orders(
+            db,
+            selections=[inventory_schemas.ReplenishmentSelection(item_id=item.id, supplier_id=supplier.id, quantity=Decimal("1.00"))],
+        )
+    except ValueError as exc:
+        assert "not mapped" in str(exc)
+    else:
+        raise AssertionError("Expected unmapped replenishment item to fail")
+
+
+def test_purchase_order_number_advances_from_highest_existing_sequence():
+    db = create_session()
+    supplier = create_supplier(db, name="Sequence Supplier")
+    item = create_item(db, name="Sequence Item")
+    db.add(SupplierItem(supplier_id=supplier.id, item_id=item.id, supplier_cost=Decimal("8.00"), is_preferred=True, is_active=True))
+    db.add(PurchaseOrder(po_number="PO-00005", supplier_id=supplier.id, order_date=date.today(), notes="existing"))
+    db.commit()
+
+    po = create_purchase_order(
+        db,
+        {
+            "supplier_id": supplier.id,
+            "order_date": date.today(),
+            "lines": [{"item_id": item.id, "quantity": Decimal("1.00")}],
+        },
+    )
+    db.commit()
+
+    assert po.po_number == "PO-00006"

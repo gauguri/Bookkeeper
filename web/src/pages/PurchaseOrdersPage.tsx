@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ApiRequestError,
   createPurchaseOrder,
@@ -98,6 +98,7 @@ const disabledDeleteButtonClass = `${actionButtonClass} cursor-not-allowed opaci
 
 export default function PurchaseOrdersPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderListRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -662,3 +663,5 @@ export default function PurchaseOrdersPage() {
     </div>
   );
 }
+
+

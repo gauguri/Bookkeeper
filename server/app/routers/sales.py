@@ -18,6 +18,7 @@ from app.sales.calculations import PaymentApplicationInput, validate_payment_app
 from app.sales_requests.service import (
     update_sales_request_status,
 )
+from app.sales_management.order_execution import mark_sales_order_fulfilled_from_invoice, reopen_sales_order_after_invoice_void
 from app.sales import schemas
 from app.sales.service import (
     create_invoice_payment,
@@ -608,6 +609,7 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
 
     if invoice.sales_request:
         update_sales_request_status(invoice.sales_request, "SHIPPED")
+    mark_sales_order_fulfilled_from_invoice(db, invoice)
 
     db.commit()
     db.refresh(invoice)
@@ -647,6 +649,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
 
     invoice.status = "VOID"
     invoice.amount_due = Decimal("0.00")
+    reopen_sales_order_after_invoice_void(db, invoice)
     db.commit()
     db.refresh(invoice)
     return invoice
@@ -908,4 +911,8 @@ def _invoice_log_payload(invoice: Invoice, *, prior_status: str, new_status: str
         "request_path": request_path,
         "function_name": function_name,
     }
+
+
+
+
 

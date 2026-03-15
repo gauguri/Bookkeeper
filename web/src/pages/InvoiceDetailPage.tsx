@@ -507,11 +507,7 @@ export default function InvoiceDetailPage() {
               >
                 Record payment
               </button>
-            ) : (
-              <button className="app-button" disabled title="Payment can only be recorded for open invoices with a remaining balance.">
-                Record payment
-              </button>
-            )}
+            ) : null}
           </div>
           <p className="text-xs text-muted">Apply payments from the Payments page to update this invoice.</p>
         </div>
@@ -739,3 +735,4 @@ export default function InvoiceDetailPage() {
     </section>
   );
 }
+

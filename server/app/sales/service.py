@@ -512,6 +512,7 @@ def apply_payment(
             db,
         )
 
+    from app.sales_management.order_execution import close_sales_order_if_paid
     from app.sales_requests.service import close_sales_request_if_paid
 
     for invoice in invoices:
@@ -520,6 +521,7 @@ def apply_payment(
         invoice.updated_at = datetime.utcnow()
         if invoice.sales_request_id:
             close_sales_request_if_paid(db, invoice.sales_request_id)
+        close_sales_order_if_paid(db, invoice.id)
 
     return payment
 
@@ -1444,3 +1446,8 @@ def get_customers_summary(db: Session) -> dict:
         "avg_days_to_pay": None,
         "customers_at_risk": overdue_customers,
     }
+
+
+
+
+

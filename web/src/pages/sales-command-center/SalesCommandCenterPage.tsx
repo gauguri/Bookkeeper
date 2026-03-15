@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { apiFetch } from "../../api";
-import { ListResponse, SalesAccount, SalesOpportunity, SalesOrder, SalesQuote } from "../../components/sales/types";
+import { ListResponse, RevenueControlSummary, SalesAccount, SalesOpportunity, SalesOrder, SalesQuote } from "../../components/sales/types";
 import { formatCompact, formatCurrency } from "../../utils/formatters";
 import { formatCurrencySafe, formatNumberSafe, sumBySafe, toNumberSafe } from "../../utils/numberSafe";
 import type { AgingData, KpiData } from "../../hooks/useAnalytics";
@@ -84,6 +84,7 @@ export default function SalesCommandCenterPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [pipelineTrend, setPipelineTrend] = useState<TrendPoint[]>([]);
   const [conversion, setConversion] = useState<ConversionSummary | null>(null);
+  const [revenueControl, setRevenueControl] = useState<RevenueControlSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -106,6 +107,7 @@ export default function SalesCommandCenterPage() {
       apiFetch<Summary>("/sales/reports/summary").then(setSummary),
       apiFetch<TrendPoint[]>("/sales/reports/pipeline_trend?months=12").then(setPipelineTrend),
       apiFetch<ConversionSummary>("/sales/reports/conversion_summary").then(setConversion),
+      apiFetch<RevenueControlSummary>("/sales/reports/revenue_control_tower").then(setRevenueControl),
     ];
     if (section === "accounts" && !isCreate) tasks.push(apiFetch<ListResponse<SalesAccount>>(`/sales/accounts?${query}`).then(setAccounts));
     if (section === "opportunities" && !isCreate) tasks.push(apiFetch<ListResponse<SalesOpportunity>>(`/sales/opportunities?${query}`).then(setOpportunities));
@@ -126,7 +128,7 @@ export default function SalesCommandCenterPage() {
           : orders.items.map((o) => ({ label: o.order_number, status: o.status, total: formatCurrency(o.total), updated: o.updated_at, link: `/sales/orders/${o.id}` }));
   const totalCount = section === "accounts" ? accounts.total_count : section === "opportunities" ? opportunities.total_count : section === "quotes" ? quotes.total_count : orders.total_count;
 
-  const pipelineHasData = (summary?.pipeline_value || 0) > 0 || (summary?.open_opportunities || 0) > 0;
+  const pipelineHasData = (summary?.pipeline_value || 0) > 0 || (summary?.open_opportunities || 0) > 0 || (revenueControl?.quotes_reviewed || 0) > 0 || (revenueControl?.pending_approvals || 0) > 0;
   const kpis = useMemo<KpiData[]>(
     () => {
       const safePipelineTrend = pipelineTrend.slice(-8).map((point) => toNumberSafe(point.value));
@@ -347,6 +349,69 @@ export default function SalesCommandCenterPage() {
             ))}
           </div>
 
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.25fr_0.95fr]">
+            <div className="app-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Revenue Control Tower</h3>
+                  <p className="text-xs text-muted">Approval risk, margin leakage, and recoverable upside across the active quote book.</p>
+                </div>
+                <button className="app-button-secondary" onClick={() => navigate('/sales/command-center/quotes')}>Open quotes</button>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <div className="rounded-2xl border border-[var(--bedrock-border)] bg-[var(--bedrock-surface)] p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted">Quotes Reviewed</p>
+                  <p className="mt-2 text-2xl font-semibold">{toNumberSafe(revenueControl?.quotes_reviewed).toLocaleString()}</p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 dark:text-amber-200">Pending Approval</p>
+                  <p className="mt-2 text-2xl font-semibold text-amber-800 dark:text-amber-100">{toNumberSafe(revenueControl?.pending_approvals).toLocaleString()}</p>
+                </div>
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/40 dark:bg-rose-500/10">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-rose-700 dark:text-rose-200">Low Margin</p>
+                  <p className="mt-2 text-2xl font-semibold text-rose-800 dark:text-rose-100">{toNumberSafe(revenueControl?.low_margin_quotes).toLocaleString()}</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-700 dark:text-emerald-200">Recoverable Uplift</p>
+                  <p className="mt-2 text-2xl font-semibold text-emerald-800 dark:text-emerald-100">{formatCurrencySafe(toNumberSafe(revenueControl?.revenue_uplift))}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="app-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Largest Deal Opportunities</h3>
+                  <p className="text-xs text-muted">Quotes with the biggest pricing recovery upside right now.</p>
+                </div>
+                <button className="app-button-ghost text-xs" onClick={() => navigate('/sales/command-center/quotes')}>Review queue</button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {(revenueControl?.largest_opportunities?.length ?? 0) === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[var(--bedrock-border)] p-6 text-center text-sm text-muted">
+                    No deal-desk opportunities are open right now.
+                  </div>
+                ) : (
+                  revenueControl!.largest_opportunities.map((quote) => (
+                    <button
+                      key={quote.quote_id}
+                      className="flex w-full items-center justify-between rounded-2xl border border-[var(--bedrock-border)] bg-[var(--bedrock-surface)] px-4 py-3 text-left transition hover:border-primary/40 hover:bg-[var(--bedrock-surface-subtle)]"
+                      onClick={() => navigate(`/sales/quotes/${quote.quote_id}`)}
+                    >
+                      <div>
+                        <p className="text-sm font-semibold">{quote.quote_number}</p>
+                        <p className="text-xs text-muted">{quote.account_name || 'Unassigned account'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted">Upside</p>
+                        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200">{formatCurrencySafe(toNumberSafe(quote.uplift))}</p>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TrendChart data={pipelineTrend.map((point) => ({ ...point, value: toNumberSafe(point.value) }))} title="Pipeline Trend (12 Months)" type="line" formatValue={formatCurrency} color={CHART_COLORS[0]} />
             <WaterfallChart data={pipelineWaterfall} title="Pipeline Stage Waterfall" />
@@ -422,3 +487,7 @@ export default function SalesCommandCenterPage() {
     </>}
   </section>;
 }
+
+
+
+

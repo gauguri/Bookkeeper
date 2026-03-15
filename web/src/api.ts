@@ -32,16 +32,39 @@ export type PurchaseOrderPayload = {
   lines: PurchaseOrderLinePayload[];
 };
 
-export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = new Headers(options?.headers ?? {});
-  headers.set("Content-Type", "application/json");
-  if (authToken) {
-    headers.set("Authorization", `Bearer ${authToken}`);
+const getPersistedToken = () => {
+  if (typeof window === "undefined") {
+    return null;
   }
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers,
-    ...options
-  });
+  return window.localStorage.getItem("bookkeeper-token");
+};
+
+const resolveAuthToken = () => authToken ?? getPersistedToken();
+
+export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const request = async (token: string | null) => {
+    const headers = new Headers(options?.headers ?? {});
+    headers.set("Content-Type", "application/json");
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return fetch(`${API_BASE}${path}`, {
+      headers,
+      ...options
+    });
+  };
+
+  const resolvedToken = resolveAuthToken();
+  let response = await request(resolvedToken);
+
+  if (response.status === 401 && !authToken) {
+    const persistedToken = getPersistedToken();
+    if (persistedToken && persistedToken !== resolvedToken) {
+      setAuthToken(persistedToken);
+      response = await request(persistedToken);
+    }
+  }
+
   if (!response.ok) {
     let message = response.statusText;
     try {

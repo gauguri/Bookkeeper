@@ -92,3 +92,70 @@ def test_balance_sheet_uses_gl_accounts_when_chart_account_row_is_missing():
         }
     ]
 
+
+def test_current_assets_components_roll_up_cash_accounts():
+    db = create_session()
+
+    company = Company(name="Current Assets Rollup Co", base_currency="USD", fiscal_year_start_month=1)
+    db.add(company)
+    db.flush()
+
+    cash = Account(company_id=company.id, code="1000", name="Cash", type="ASSET", normal_balance="debit", is_active=True)
+    cash_equiv = Account(
+        company_id=company.id,
+        code="11000",
+        name="Cash and Cash Equivalents",
+        type="ASSET",
+        normal_balance="debit",
+        is_active=True,
+    )
+    inventory = Account(company_id=company.id, code="13000", name="Inventory", type="ASSET", normal_balance="debit", is_active=True)
+    equity = Account(company_id=company.id, code="31000", name="Owner Equity", type="EQUITY", normal_balance="credit", is_active=True)
+    db.add_all([cash, cash_equiv, inventory, equity])
+    db.flush()
+
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 1),
+        memo="Initial cash",
+        source_type="MANUAL",
+        source_id=None,
+        debit_account_id=cash.id,
+        credit_account_id=equity.id,
+        amount=Decimal("100000.00"),
+    )
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 2),
+        memo="Inventory funded from cash equivalents",
+        source_type="MANUAL",
+        source_id=None,
+        debit_account_id=inventory.id,
+        credit_account_id=cash_equiv.id,
+        amount=Decimal("4000.00"),
+    )
+    db.commit()
+
+    result = calc_balance_sheet(db, date(2025, 1, 2))
+
+    assert result["current_assets_components"] == [
+        {
+            "component_name": "Cash and Cash Equivalents",
+            "account_ids": [cash.id, cash_equiv.id],
+            "total_debits": 100000.0,
+            "total_credits": 4000.0,
+            "net": 96000.0,
+            "normal_balance": "DEBIT",
+        },
+        {
+            "component_name": "Inventory",
+            "account_ids": [inventory.id],
+            "total_debits": 4000.0,
+            "total_credits": 0.0,
+            "net": 4000.0,
+            "normal_balance": "DEBIT",
+        },
+    ]
+

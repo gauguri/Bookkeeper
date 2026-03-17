@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
 from app.models import Inventory, InventoryReservation, Item, SalesRequest
-from app.routers.inventory import get_inventory_overview
+from app.routers.inventory import get_inventory_overview, list_inventory_items
 
 
 @compiles(JSONB, "sqlite")
@@ -69,3 +69,35 @@ def test_inventory_overview_uses_inventory_total_value_and_quantities():
     assert row.reserved_qty == Decimal("2.00")
     assert row.available_qty == Decimal("8.00")
     assert row.total_value == Decimal("11414.00")
+
+
+def test_inventory_items_grid_matches_inventory_overview_quantities():
+    db = create_session()
+    item = Item(name="African Impala", sku="AFRI001", unit_price=Decimal("400.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    db.add(item)
+    db.flush()
+
+    db.add(
+        Inventory(
+            item_id=item.id,
+            quantity_on_hand=Decimal("10.00"),
+            landed_unit_cost=Decimal("400.00"),
+            total_value=Decimal("4000.00"),
+        )
+    )
+    db.commit()
+
+    overview = get_inventory_overview(limit=10, db=db)
+    items_grid = list_inventory_items(queue="all", page=1, page_size=25, usage_days=90, db=db)
+
+    overview_row = overview.items[0]
+    grid_row = items_grid.items[0]
+
+    assert overview_row.item_name == "African Impala"
+    assert overview_row.on_hand_qty == Decimal("10.00")
+    assert overview_row.available_qty == Decimal("10.00")
+
+    assert grid_row.item == "African Impala"
+    assert grid_row.on_hand == Decimal("10.00")
+    assert grid_row.available == Decimal("10.00")
+    assert grid_row.total_value == Decimal("4000.00")

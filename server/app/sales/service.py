@@ -1230,6 +1230,7 @@ def get_items_enriched(
 ) -> List[dict]:
     """Return enriched item list with inventory, revenue, margin data."""
     from app.models import Inventory, SupplierItem, Supplier
+    from app.inventory.service import get_inventory_snapshot_map, get_reserved_qty_map
 
     today = date.today()
     ytd_start = date(today.year, 1, 1)
@@ -1248,10 +1249,8 @@ def get_items_enriched(
 
     # Batch-fetch inventory data
     item_ids = [i.id for i in items_all]
-    inv_map: dict = {}
-    if item_ids:
-        inv_rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
-        inv_map = {row.item_id: row for row in inv_rows}
+    inv_map = get_inventory_snapshot_map(db, item_ids)
+    reserved_by_id = get_reserved_qty_map(db, item_ids)
 
     # Batch-fetch YTD revenue + units
     ytd_data: dict = {}
@@ -1307,10 +1306,10 @@ def get_items_enriched(
     result = []
     for item in items_all:
         inv = inv_map.get(item.id)
-        on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
-        reserved = Decimal(item.reserved_qty or 0)
+        on_hand = Decimal(inv["quantity_on_hand"] or 0) if inv else Decimal(item.on_hand_qty or 0)
+        reserved = reserved_by_id.get(item.id, Decimal("0"))
         available = on_hand - reserved
-        inv_value = Decimal(inv.total_value or 0) if inv else Decimal(0)
+        inv_value = Decimal(inv["total_value"] or 0) if inv else Decimal(0)
         reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
         status = _stock_status(on_hand, reserved, reorder)
 
@@ -1363,7 +1362,7 @@ def get_items_enriched(
 
 def get_items_summary(db: Session) -> dict:
     """Aggregate KPIs for the items list header."""
-    from app.models import Inventory
+    from app.inventory.service import get_inventory_snapshot_map, get_reserved_qty_map
 
     today = date.today()
     ytd_start = date(today.year, 1, 1)
@@ -1383,18 +1382,16 @@ def get_items_summary(db: Session) -> dict:
 
     # Count low/out of stock
     all_items = db.query(Item).filter(Item.is_active == True).all()
-    inv_map = {}
     item_ids = [i.id for i in all_items]
-    if item_ids:
-        rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
-        inv_map = {r.item_id: r for r in rows}
+    inv_map = get_inventory_snapshot_map(db, item_ids)
+    reserved_by_id = get_reserved_qty_map(db, item_ids)
 
     low_stock = 0
     out_of_stock = 0
     for item in all_items:
         inv = inv_map.get(item.id)
-        on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
-        reserved = Decimal(item.reserved_qty or 0)
+        on_hand = Decimal(inv["quantity_on_hand"] or 0) if inv else Decimal(item.on_hand_qty or 0)
+        reserved = reserved_by_id.get(item.id, Decimal("0"))
         reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
         status = _stock_status(on_hand, reserved, reorder)
         if status == "low_stock":

@@ -45,6 +45,35 @@ def get_reserved_qty_map(db: Session, item_ids: list[int]) -> dict[int, Decimal]
     return reserved_by_id
 
 
+def get_inventory_snapshot_map(db: Session, item_ids: list[int]) -> dict[int, dict[str, Decimal]]:
+    if not item_ids:
+        return {}
+
+    rows = (
+        db.query(
+            Inventory.item_id,
+            func.coalesce(func.sum(Inventory.quantity_on_hand), 0).label("quantity_on_hand"),
+            func.coalesce(func.sum(Inventory.total_value), 0).label("total_value"),
+        )
+        .filter(Inventory.item_id.in_(item_ids))
+        .group_by(Inventory.item_id)
+        .all()
+    )
+
+    snapshot: dict[int, dict[str, Decimal]] = {}
+    for item_id, quantity_on_hand, total_value in rows:
+        qty = Decimal(quantity_on_hand or 0)
+        value = Decimal(total_value or 0)
+        landed_unit_cost = (value / qty) if qty > 0 else Decimal("0")
+        snapshot[int(item_id)] = {
+            "quantity_on_hand": qty,
+            "total_value": value,
+            "landed_unit_cost": landed_unit_cost,
+        }
+
+    return snapshot
+
+
 def get_source_reserved_qty_map(db: Session, *, source_type: str, source_id: int) -> dict[int, Decimal]:
     rows = (
         db.query(InventoryReservation.item_id, func.coalesce(func.sum(InventoryReservation.qty_reserved), 0))
@@ -63,8 +92,8 @@ def get_available_qty(db: Session, item_id: int, company_id: int | None = None) 
     """Single source of truth for available inventory used by sales requests."""
     scoped_company_id = company_id  # inventory records are currently global in this app.
 
-    inventory = db.query(Inventory).filter(Inventory.item_id == item_id).first()
-    on_hand = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal("0")
+    snapshot = get_inventory_snapshot_map(db, [item_id]).get(item_id, {})
+    on_hand = Decimal(snapshot.get("quantity_on_hand", Decimal("0")))
     reserved = get_reserved_qty(db, item_id)
     available_qty = on_hand - reserved
     logger.debug(
@@ -80,13 +109,12 @@ def get_available_qty(db: Session, item_id: int, company_id: int | None = None) 
 
 def get_available_qty_map(db: Session, item_ids: list[int], company_id: int | None = None) -> dict[int, Decimal]:
     scoped_company_id = company_id  # inventory records are currently global in this app.
-    inventory_rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
-    on_hand_by_id = {row.item_id: Decimal(row.quantity_on_hand or 0) for row in inventory_rows}
+    snapshot_by_id = get_inventory_snapshot_map(db, item_ids)
     reserved_by_id = get_reserved_qty_map(db, item_ids)
 
     available_by_id: dict[int, Decimal] = {}
     for item_id in item_ids:
-        available_by_id[item_id] = on_hand_by_id.get(item_id, Decimal("0")) - reserved_by_id.get(item_id, Decimal("0"))
+        available_by_id[item_id] = Decimal(snapshot_by_id.get(item_id, {}).get("quantity_on_hand", Decimal("0"))) - reserved_by_id.get(item_id, Decimal("0"))
 
     logger.debug(
         "Bulk inventory availability lookup: item_ids=%s company_id=%s available_by_id=%s",

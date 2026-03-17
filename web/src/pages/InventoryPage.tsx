@@ -80,6 +80,47 @@ type PlanningPayload = {
   target_days_supply: number;
 };
 
+const toNumeric = (value: unknown): number => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const normalizeItemRow = (row: ItemRow): ItemRow => ({
+  ...row,
+  on_hand: toNumeric(row.on_hand),
+  reserved: toNumeric(row.reserved),
+  available: toNumeric(row.available),
+  reorder_point: toNumeric(row.reorder_point),
+  safety_stock: toNumeric(row.safety_stock),
+  lead_time_days: toNumeric(row.lead_time_days),
+  avg_daily_usage: toNumeric(row.avg_daily_usage),
+  days_of_supply: toNumeric(row.days_of_supply),
+  suggested_reorder_qty: toNumeric(row.suggested_reorder_qty),
+  total_value: toNumeric(row.total_value),
+  landed_unit_cost: row.landed_unit_cost == null ? null : toNumeric(row.landed_unit_cost),
+  inbound_qty: toNumeric(row.inbound_qty),
+});
+
+const normalizeInventoryItemsResponse = (payload: InventoryItemsResponse): InventoryItemsResponse => ({
+  ...payload,
+  items: (payload.items ?? []).map(normalizeItemRow),
+});
+
+const normalizeDetail = (payload: Detail): Detail => ({
+  ...payload,
+  item: normalizeItemRow(payload.item),
+  projected_available: toNumeric(payload.projected_available),
+  target_stock: toNumeric(payload.target_stock),
+  reservations: (payload.reservations ?? []).map((reservation) => ({
+    ...reservation,
+    qty_reserved: toNumeric(reservation.qty_reserved),
+  })),
+  consumption_trend: (payload.consumption_trend ?? []).map((point) => ({
+    ...point,
+    consumption: toNumeric(point.consumption),
+  })),
+});
+
 const queueFlagMap: Record<string, string> = { low_stock: "low_stock", stockout: "stockouts", at_risk: "at_risk", excess: "excess", reserved_pressure: "reserved_pressure" };
 const formatNumber = (value: number) => (Number.isFinite(value) ? formatCompact(value) : "0");
 const healthPillMap: Record<string, string> = {
@@ -210,7 +251,7 @@ export default function InventoryPage() {
     setError("");
     try {
       const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
-      setItemsData(itemsRes);
+      setItemsData(normalizeInventoryItemsResponse(itemsRes));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -314,12 +355,12 @@ export default function InventoryPage() {
     setDetailError("");
     try {
       const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
-      setDetail(payload);
+      setDetail(normalizeDetail(payload));
       setEditingPlanning(false);
       setPlanningForm({
-        reorder_point_qty: Number(payload.item.reorder_point ?? 0),
-        safety_stock_qty: Number(payload.item.safety_stock ?? 0),
-        lead_time_days: Number(payload.item.lead_time_days ?? 14),
+        reorder_point_qty: toNumeric(payload.item.reorder_point ?? 0),
+        safety_stock_qty: toNumeric(payload.item.safety_stock ?? 0),
+        lead_time_days: toNumeric(payload.item.lead_time_days ?? 14),
         target_days_supply: 30,
       });
     } catch (err) {

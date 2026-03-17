@@ -11,7 +11,7 @@ from app.module_keys import ModuleKey
 from app.db import get_db
 from app.inventory import schemas
 from app.inventory.replenishment import build_replenishment_workbench, create_replenishment_purchase_orders
-from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map, get_reserved_qty_map
+from app.inventory.service import adjust_inventory, get_available_qty, get_available_qty_map, get_inventory_snapshot_map, get_reserved_qty_map
 from app.models import (
     Company,
     Inventory,
@@ -60,7 +60,7 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
     items = db.query(Item).options(selectinload(Item.supplier_items)).order_by(Item.name.asc()).all()
     item_ids = [item.id for item in items]
 
-    inv_by_id = {row.item_id: row for row in db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()}
+    snapshot_by_id = get_inventory_snapshot_map(db, item_ids)
     reserved_by_id = get_reserved_qty_map(db, item_ids)
     avg_usage_by_id = _avg_usage_by_item(db, item_ids, usage_days)
 
@@ -90,10 +90,10 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
     now = datetime.utcnow()
     rows: list[schemas.InventoryItemRow] = []
     for item in items:
-        inv = inv_by_id.get(item.id)
-        on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
-        landed_cost = _q2(inv.landed_unit_cost if inv else item.preferred_landed_cost)
-        inventory_total_value = _q2(inv.total_value) if inv else None
+        snapshot = snapshot_by_id.get(item.id)
+        on_hand = _q2(snapshot["quantity_on_hand"] if snapshot else item.on_hand_qty)
+        landed_cost = _q2(snapshot["landed_unit_cost"] if snapshot else item.preferred_landed_cost)
+        inventory_total_value = _q2(snapshot["total_value"]) if snapshot else None
         reserved = _q2(reserved_by_id.get(item.id, Decimal("0")))
         available = on_hand - reserved
         avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))
@@ -406,12 +406,12 @@ def get_inventory_composition(
     db: Session = Depends(get_db),
 ):
     rows = _build_inventory_rows(db, usage_days=90)
-    inventory_by_item_id = {record.item_id: record for record in db.query(Inventory).filter(Inventory.item_id.in_([row.id for row in rows])).all()}
+    snapshot_by_item_id = get_inventory_snapshot_map(db, [row.id for row in rows])
     composition: list[schemas.InventoryCompositionPoint] = []
     for row in rows:
-        inventory = inventory_by_item_id.get(row.id)
-        landed_unit_cost_raw = _safe_decimal(inventory.landed_unit_cost if inventory else Decimal("0"))
-        landed_unit_cost_missing = inventory is None or inventory.landed_unit_cost is None
+        snapshot = snapshot_by_item_id.get(row.id)
+        landed_unit_cost_raw = _safe_decimal(snapshot["landed_unit_cost"] if snapshot else Decimal("0"))
+        landed_unit_cost_missing = snapshot is None or landed_unit_cost_raw <= 0
         on_hand_qty = _q2(row.on_hand)
         reserved_qty = _q2(row.reserved)
         available_qty = _q2(on_hand_qty - reserved_qty)

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 import logging
 from decimal import Decimal
+import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import case, exists, func, inspect
@@ -50,6 +51,13 @@ D = Decimal
 ZERO = D("0")
 HUNDRED = D("100")
 
+CURRENT_ASSET_GROUP_RULES = (
+    ("cash_and_cash_equivalents", "Cash and Cash Equivalents", ("cash", "checking", "money market", "petty cash", "cash equivalent")),
+    ("accounts_receivable", "Accounts Receivable", ("accounts receivable", "trade receivable", "receivable")),
+    ("inventory", "Inventory", ("inventory",)),
+    ("prepaids_and_supplies", "Prepaids and Supplies", ("prepaid", "supplies")),
+)
+
 # The seed chart-of-accounts uses type "INCOME" for revenue accounts while the
 # GL engine's auto-create fallback uses "REVENUE".  Accept both so the P&L
 # correctly aggregates revenue regardless of which label a given account carries.
@@ -84,6 +92,26 @@ def _normalized_account_type(account_number: str | None, gl_account_type: str | 
         normalized = coa_type.upper()
         return "REVENUE" if normalized == "INCOME" else normalized
     return (gl_account_type or "").upper()
+
+
+def _normalize_account_label(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _current_asset_group_for_account(account: Account | None, gl_account: GLAccount) -> tuple[str, str]:
+    candidates = [
+        _normalize_account_label(account.subtype if account else None),
+        _normalize_account_label(account.name if account else None),
+        _normalize_account_label(gl_account.name),
+    ]
+    searchable = " ".join(part for part in candidates if part)
+    for group_key, label, keywords in CURRENT_ASSET_GROUP_RULES:
+        if any(keyword in searchable for keyword in keywords):
+            return group_key, label
+    code = (gl_account.account_number or "").strip()
+    if code.startswith("1"):
+        return "other_current_assets", "Other Current Assets"
+    return "other_assets", "Other Assets"
 
 
 def _expense_debit_rows(
@@ -760,6 +788,7 @@ def _balance_sheet_section_breakdown(
     )
     items: list[dict[str, Any]] = []
     current_asset_components: list[dict[str, Any]] = []
+    current_asset_rollups: dict[str, dict[str, Any]] = {}
     debit_normal = account_type in {"ASSET", "EXPENSE", "COGS"}
 
     for gl_account in gl_accounts:
@@ -791,16 +820,43 @@ def _balance_sheet_section_breakdown(
         items.append(item)
 
         if account_type == "ASSET":
-            current_asset_components.append(
+            group_key, group_label = _current_asset_group_for_account(account, gl_account)
+            rollup = current_asset_rollups.setdefault(
+                group_key,
                 {
-                    "component_name": label,
-                    "account_ids": [account.id] if account else [],
-                    "total_debits": round(float(total_debits), 2),
-                    "total_credits": round(float(total_credits), 2),
-                    "net": round(float(net), 2),
-                    "normal_balance": normal_balance,
-                }
+                    "component_name": group_label,
+                    "account_ids": [],
+                    "total_debits": ZERO,
+                    "total_credits": ZERO,
+                    "net": ZERO,
+                    "normal_balance": "DEBIT",
+                },
             )
+            if account and account.id not in rollup["account_ids"]:
+                rollup["account_ids"].append(account.id)
+            rollup["total_debits"] += total_debits
+            rollup["total_credits"] += total_credits
+            rollup["net"] += net
+
+    if account_type == "ASSET":
+        current_asset_components = [
+            {
+                "component_name": component["component_name"],
+                "account_ids": component["account_ids"],
+                "total_debits": round(float(component["total_debits"]), 2),
+                "total_credits": round(float(component["total_credits"]), 2),
+                "net": round(float(component["net"]), 2),
+                "normal_balance": component["normal_balance"],
+            }
+            for _, component in sorted(
+                current_asset_rollups.items(),
+                key=lambda item: (
+                    1 if item[0] in {"other_current_assets", "other_assets"} else 0,
+                    item[1]["component_name"],
+                ),
+            )
+            if abs(component["net"]) >= Decimal("0.005")
+        ]
 
     return items, current_asset_components
 def calc_balance_sheet(db: Session, as_of: date) -> Dict[str, Any]:

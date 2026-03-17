@@ -45,11 +45,14 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   const request = async (token: string | null) => {
     const headers = new Headers(options?.headers ?? {});
     headers.set("Content-Type", "application/json");
+    headers.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    headers.set("Pragma", "no-cache");
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
     }
     return fetch(`${API_BASE}${path}`, {
       headers,
+      cache: options?.cache ?? "no-store",
       ...options
     });
   };

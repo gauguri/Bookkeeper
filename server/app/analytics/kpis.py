@@ -740,30 +740,49 @@ def _balance_sheet_section_breakdown(
     account_type: str,
     account_sums: dict[str, tuple[Decimal, Decimal]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    accounts = (
+    coa_accounts = (
         db.query(Account)
         .filter(Account.code.isnot(None))
         .filter(func.upper(Account.type) == account_type)
-        .order_by(Account.code.asc(), Account.name.asc())
+        .all()
+    )
+    coa_lookup = {
+        (account.code or "").strip(): account
+        for account in coa_accounts
+        if (account.code or "").strip()
+    }
+    gl_accounts = (
+        db.query(GLAccount)
+        .filter(GLAccount.account_number.isnot(None))
+        .filter(GLAccount.account_type == account_type)
+        .order_by(GLAccount.account_number.asc(), GLAccount.name.asc())
         .all()
     )
     items: list[dict[str, Any]] = []
     current_asset_components: list[dict[str, Any]] = []
     debit_normal = account_type in {"ASSET", "EXPENSE", "COGS"}
 
-    for account in accounts:
-        code = (account.code or "").strip()
+    for gl_account in gl_accounts:
+        code = (gl_account.account_number or "").strip()
         total_debits, total_credits = account_sums.get(code, (ZERO, ZERO))
         net = (total_debits - total_credits) if debit_normal else (total_credits - total_debits)
         if abs(net) < Decimal("0.005"):
             continue
 
-        label = f"{code} - {account.name}" if code else account.name
-        normal_balance = (account.normal_balance or ("DEBIT" if debit_normal else "CREDIT")).upper()
+        account = coa_lookup.get(code)
+        display_name = (account.name if account and account.name else gl_account.name) or code
+        label = f"{code} - {display_name}" if code else display_name
+        normal_balance = (
+            account.normal_balance
+            if account and account.normal_balance
+            else gl_account.normal_balance
+            if gl_account.normal_balance
+            else ("DEBIT" if debit_normal else "CREDIT")
+        ).upper()
         item = {
             "label": label,
             "value": round(float(net), 2),
-            "account_id": account.id,
+            "account_id": account.id if account else None,
             "account_code": code,
             "normal_balance": normal_balance,
             "total_debits": round(float(total_debits), 2),
@@ -775,7 +794,7 @@ def _balance_sheet_section_breakdown(
             current_asset_components.append(
                 {
                     "component_name": label,
-                    "account_ids": [account.id],
+                    "account_ids": [account.id] if account else [],
                     "total_debits": round(float(total_debits), 2),
                     "total_credits": round(float(total_credits), 2),
                     "net": round(float(net), 2),

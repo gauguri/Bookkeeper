@@ -414,6 +414,9 @@ class ActivityCreate(BaseModel):
     subject: str
     body: str | None = None
     due_date: date | None = None
+    status: str | None = None
+    priority: str | None = None
+    owner_user_id: int | None = None
 
 
 class ActivityResponse(ActivityCreate):
@@ -424,6 +427,68 @@ class ActivityResponse(ActivityCreate):
 
     class Config:
         from_attributes = True
+
+
+class FollowUpCreate(BaseModel):
+    entity_type: str
+    entity_id: int
+    subject: str
+    body: str | None = None
+    due_date: date | None = None
+    priority: str = "MEDIUM"
+    owner_user_id: int | None = None
+
+
+class FollowUpUpdate(BaseModel):
+    subject: str | None = None
+    body: str | None = None
+    due_date: date | None = None
+    priority: str | None = None
+    status: str | None = None
+    owner_user_id: int | None = None
+
+
+class FollowUpResponse(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: int
+    type: str
+    subject: str
+    body: str | None = None
+    due_date: date | None = None
+    status: str
+    priority: str
+    owner_user_id: int | None = None
+    completed_at: datetime | None = None
+    created_by: int | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FollowUpSummaryItem(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: int
+    subject: str
+    due_date: date | None = None
+    priority: str
+    status: str
+    owner_user_id: int | None = None
+    age_days: int = 0
+
+
+class FollowUpSummaryResponse(BaseModel):
+    open_count: int
+    due_today_count: int
+    overdue_count: int
+    stale_opportunities_count: int
+    stale_quotes_count: int
+    due_today: list[FollowUpSummaryItem] = Field(default_factory=list)
+    overdue: list[FollowUpSummaryItem] = Field(default_factory=list)
+    stale_opportunities: list[FollowUpSummaryItem] = Field(default_factory=list)
+    stale_quotes: list[FollowUpSummaryItem] = Field(default_factory=list)
 
 
 class PriceBookResponse(BaseModel):

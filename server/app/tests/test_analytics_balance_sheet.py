@@ -48,3 +48,47 @@ def test_balance_sheet_reconciliation_difference_is_reported():
     assert result["inventory_value"] == 0.0
     assert result["reconciliation_difference"] == 0.0
 
+
+def test_balance_sheet_uses_gl_accounts_when_chart_account_row_is_missing():
+    db = create_session()
+
+    company = Company(name="GL Source Co", base_currency="USD", fiscal_year_start_month=1)
+    db.add(company)
+    db.flush()
+
+    cash = Account(company_id=company.id, code="1000", name="Cash", type="ASSET", normal_balance="debit", is_active=True)
+    equity = Account(company_id=company.id, code="31000", name="Owner Equity", type="EQUITY", normal_balance="credit", is_active=True)
+    db.add_all([cash, equity])
+    db.flush()
+
+    create_journal_entry(
+        db,
+        company_id=company.id,
+        entry_date=date(2025, 1, 1),
+        memo="Owner contribution",
+        source_type="MANUAL",
+        source_id=None,
+        debit_account_id=cash.id,
+        credit_account_id=equity.id,
+        amount=Decimal("100000.00"),
+    )
+    cash.code = "9999"
+    db.commit()
+
+    result = calc_balance_sheet(db, date(2025, 1, 1))
+
+    assert result["total_assets"] == 100000.0
+    assert result["total_equity"] == 100000.0
+    assert result["reconciliation_difference"] == 0.0
+    assert result["sections"]["assets"]["items"] == [
+        {
+            "label": "1000 - Cash",
+            "value": 100000.0,
+            "account_id": None,
+            "account_code": "1000",
+            "normal_balance": "DEBIT",
+            "total_debits": 100000.0,
+            "total_credits": 0.0,
+        }
+    ]
+

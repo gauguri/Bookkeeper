@@ -9,6 +9,12 @@ from app.sales_management.deal_desk import evaluate_quote_record, normalize_disc
 from app.sales_management.order_execution import generate_invoice_from_sales_order, get_allowed_sales_order_status_transitions, sync_sales_order_reservations
 
 ORDER_STATUSES = ["DRAFT", "CONFIRMED", "ALLOCATED", "FULFILLED", "INVOICED", "CLOSED"]
+FOLLOW_UP_TYPE = "follow_up"
+FOLLOW_UP_OPEN_STATUSES = {"OPEN", "SNOOZED"}
+FOLLOW_UP_ALLOWED_STATUSES = FOLLOW_UP_OPEN_STATUSES | {"DONE", "CANCELLED"}
+FOLLOW_UP_ALLOWED_PRIORITIES = {"LOW", "MEDIUM", "HIGH"}
+STALE_OPPORTUNITY_DAYS = 7
+STALE_QUOTE_DAYS = 3
 
 
 def _next_number(db: Session, prefix: str, model) -> str:
@@ -18,6 +24,26 @@ def _next_number(db: Session, prefix: str, model) -> str:
 
 def _paginate(query, page: int, page_size: int):
     return {"items": query.offset(page * page_size).limit(page_size).all(), "total_count": query.count()}
+
+
+def _normalize_follow_up_status(value: str | None) -> str:
+    normalized = (value or "OPEN").strip().upper()
+    if normalized not in FOLLOW_UP_ALLOWED_STATUSES:
+        raise ValueError("Invalid follow-up status.")
+    return normalized
+
+
+def _normalize_follow_up_priority(value: str | None) -> str:
+    normalized = (value or "MEDIUM").strip().upper()
+    if normalized not in FOLLOW_UP_ALLOWED_PRIORITIES:
+        raise ValueError("Invalid follow-up priority.")
+    return normalized
+
+
+def _follow_up_age_days(created_at: datetime | None) -> int:
+    if created_at is None:
+        return 0
+    return max(0, (datetime.utcnow().date() - created_at.date()).days)
 
 
 def list_accounts(db: Session, search: str | None, owner_user_id: int | None, page: int, page_size: int):
@@ -281,6 +307,178 @@ def create_activity(db: Session, payload: dict, user_id: int | None):
     db.commit()
     db.refresh(obj)
     return obj
+
+
+def list_follow_ups(
+    db: Session,
+    *,
+    owner_user_id: int | None,
+    status: str | None,
+    entity_type: str | None,
+    entity_id: int | None,
+    include_completed: bool,
+    page: int,
+    page_size: int,
+):
+    q = db.query(SalesActivity).filter(SalesActivity.type == FOLLOW_UP_TYPE)
+    if owner_user_id is not None:
+        q = q.filter(SalesActivity.owner_user_id == owner_user_id)
+    if status:
+        q = q.filter(SalesActivity.status == _normalize_follow_up_status(status))
+    elif not include_completed:
+        q = q.filter(SalesActivity.status.in_(sorted(FOLLOW_UP_OPEN_STATUSES)))
+    if entity_type:
+        q = q.filter(SalesActivity.entity_type == entity_type)
+    if entity_id is not None:
+        q = q.filter(SalesActivity.entity_id == entity_id)
+    return _paginate(q.order_by(SalesActivity.due_date.asc().nullslast(), SalesActivity.created_at.desc()), page, page_size)
+
+
+def create_follow_up(db: Session, payload: dict, user_id: int | None):
+    obj = SalesActivity(
+        entity_type=payload["entity_type"],
+        entity_id=payload["entity_id"],
+        type=FOLLOW_UP_TYPE,
+        subject=payload["subject"],
+        body=payload.get("body"),
+        due_date=payload.get("due_date"),
+        priority=_normalize_follow_up_priority(payload.get("priority")),
+        status="OPEN",
+        owner_user_id=payload.get("owner_user_id") or user_id,
+        created_by=user_id,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_follow_up(db: Session, activity_id: int, payload: dict):
+    obj = db.query(SalesActivity).filter(SalesActivity.id == activity_id, SalesActivity.type == FOLLOW_UP_TYPE).first()
+    if not obj:
+        raise ValueError("Follow-up not found.")
+    for field in ("subject", "body", "due_date", "owner_user_id"):
+        if field in payload:
+            setattr(obj, field, payload[field])
+    if "priority" in payload:
+        obj.priority = _normalize_follow_up_priority(payload.get("priority"))
+    if "status" in payload:
+        obj.status = _normalize_follow_up_status(payload.get("status"))
+        obj.completed_at = datetime.utcnow() if obj.status == "DONE" else None
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def complete_follow_up(db: Session, activity_id: int):
+    obj = db.query(SalesActivity).filter(SalesActivity.id == activity_id, SalesActivity.type == FOLLOW_UP_TYPE).first()
+    if not obj:
+        raise ValueError("Follow-up not found.")
+    obj.status = "DONE"
+    obj.completed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def follow_up_summary(db: Session, owner_user_id: int | None = None):
+    today = datetime.utcnow().date()
+    follow_up_query = db.query(SalesActivity).filter(SalesActivity.type == FOLLOW_UP_TYPE)
+    if owner_user_id is not None:
+        follow_up_query = follow_up_query.filter(SalesActivity.owner_user_id == owner_user_id)
+
+    open_query = follow_up_query.filter(SalesActivity.status.in_(sorted(FOLLOW_UP_OPEN_STATUSES)))
+    due_today = open_query.filter(SalesActivity.due_date == today).order_by(SalesActivity.created_at.desc()).limit(10).all()
+    overdue = open_query.filter(SalesActivity.due_date.is_not(None), SalesActivity.due_date < today).order_by(SalesActivity.due_date.asc(), SalesActivity.created_at.desc()).limit(10).all()
+
+    recent_activity_subquery = (
+        db.query(
+            SalesActivity.entity_type.label("entity_type"),
+            SalesActivity.entity_id.label("entity_id"),
+            func.max(SalesActivity.created_at).label("last_activity_at"),
+        )
+        .group_by(SalesActivity.entity_type, SalesActivity.entity_id)
+        .subquery()
+    )
+
+    stale_opportunity_cutoff = datetime.utcnow() - timedelta(days=STALE_OPPORTUNITY_DAYS)
+    stale_opportunities = (
+        db.query(Opportunity, recent_activity_subquery.c.last_activity_at)
+        .outerjoin(
+            recent_activity_subquery,
+            (recent_activity_subquery.c.entity_type == "opportunity") & (recent_activity_subquery.c.entity_id == Opportunity.id),
+        )
+        .filter(~Opportunity.stage.in_(["Closed Won", "Closed Lost"]))
+        .filter(
+            (recent_activity_subquery.c.last_activity_at.is_(None) & (Opportunity.updated_at < stale_opportunity_cutoff))
+            | (recent_activity_subquery.c.last_activity_at < stale_opportunity_cutoff)
+            | ((Opportunity.expected_close_date.is_not(None)) & (Opportunity.expected_close_date < today))
+        )
+        .order_by(Opportunity.updated_at.asc())
+        .limit(10)
+        .all()
+    )
+
+    stale_quote_cutoff = datetime.utcnow() - timedelta(days=STALE_QUOTE_DAYS)
+    stale_quotes = (
+        db.query(Quote, recent_activity_subquery.c.last_activity_at)
+        .outerjoin(
+            recent_activity_subquery,
+            (recent_activity_subquery.c.entity_type == "quote") & (recent_activity_subquery.c.entity_id == Quote.id),
+        )
+        .filter(Quote.status != "ACCEPTED")
+        .filter(
+            (recent_activity_subquery.c.last_activity_at.is_(None) & (Quote.updated_at < stale_quote_cutoff))
+            | (recent_activity_subquery.c.last_activity_at < stale_quote_cutoff)
+        )
+        .order_by(Quote.updated_at.asc())
+        .limit(10)
+        .all()
+    )
+
+    def _serialize_follow_up_item(item: SalesActivity) -> dict:
+        return {
+            "id": item.id,
+            "entity_type": item.entity_type,
+            "entity_id": item.entity_id,
+            "subject": item.subject,
+            "due_date": item.due_date,
+            "priority": item.priority or "MEDIUM",
+            "status": item.status or "OPEN",
+            "owner_user_id": item.owner_user_id,
+            "age_days": _follow_up_age_days(item.created_at),
+        }
+
+    def _serialize_stale_item(item, entity_type: str, subject: str, owner_id: int | None = None) -> dict:
+        return {
+            "id": item.id,
+            "entity_type": entity_type,
+            "entity_id": item.id,
+            "subject": subject,
+            "due_date": None,
+            "priority": "HIGH",
+            "status": "OPEN",
+            "owner_user_id": owner_id,
+            "age_days": _follow_up_age_days(item.updated_at),
+        }
+
+    return {
+        "open_count": open_query.count(),
+        "due_today_count": open_query.filter(SalesActivity.due_date == today).count(),
+        "overdue_count": open_query.filter(SalesActivity.due_date.is_not(None), SalesActivity.due_date < today).count(),
+        "stale_opportunities_count": len(stale_opportunities),
+        "stale_quotes_count": len(stale_quotes),
+        "due_today": [_serialize_follow_up_item(item) for item in due_today],
+        "overdue": [_serialize_follow_up_item(item) for item in overdue],
+        "stale_opportunities": [
+            _serialize_stale_item(opportunity, "opportunity", f"Opportunity '{opportunity.name}' needs follow-up.", opportunity.owner_user_id)
+            for opportunity, _last_activity_at in stale_opportunities
+        ],
+        "stale_quotes": [
+            _serialize_stale_item(quote, "quote", f"Quote {quote.quote_number} needs follow-up.")
+            for quote, _last_activity_at in stale_quotes
+        ],
+    }
 
 
 def list_pricebooks(db: Session):

@@ -9,17 +9,21 @@ from app.sales_management import schemas
 from app.sales_management.deal_desk import approve_quote, evaluate_deal, evaluate_quote_record, revenue_control_summary
 from app.sales_management.order_execution import generate_invoice_from_sales_order, get_sales_order_360
 from app.sales_management.service import (
+    complete_follow_up,
     conversion_summary,
     convert_quote_to_order,
     create_account,
     create_activity,
     create_contact,
+    create_follow_up,
     create_opportunity,
     create_order,
     create_quote,
+    follow_up_summary,
     get_quote,
     list_accounts,
     list_activities,
+    list_follow_ups,
     list_opportunities,
     list_orders,
     list_pricebooks,
@@ -27,6 +31,7 @@ from app.sales_management.service import (
     pipeline_trend,
     reports_summary,
     update_account,
+    update_follow_up,
     update_opportunity,
     update_order_status,
 )
@@ -265,6 +270,72 @@ def post_activity(payload: schemas.ActivityCreate, db: Session = Depends(get_db)
     return create_activity(db, payload.model_dump(), user.id if user else None)
 
 
+@router.get("/follow-ups", response_model=schemas.Page[schemas.FollowUpResponse])
+def get_follow_ups(
+    owner_user_id: int | None = None,
+    status: str | None = None,
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+    include_completed: bool = False,
+    page: int = Query(0, ge=0),
+    page_size: int = Query(25, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.SALES_REQUESTS.value)),
+):
+    try:
+        return list_follow_ups(
+            db,
+            owner_user_id=owner_user_id,
+            status=status,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            include_completed=include_completed,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/follow-ups", response_model=schemas.FollowUpResponse, status_code=status.HTTP_201_CREATED)
+def post_follow_up(
+    payload: schemas.FollowUpCreate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    _=Depends(require_module(ModuleKey.SALES_REQUESTS.value)),
+):
+    try:
+        return create_follow_up(db, payload.model_dump(), user.id if user else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.patch("/follow-ups/{activity_id}", response_model=schemas.FollowUpResponse)
+def patch_follow_up(
+    activity_id: int,
+    payload: schemas.FollowUpUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.SALES_REQUESTS.value)),
+):
+    try:
+        return update_follow_up(db, activity_id, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc))
+
+
+@router.post("/follow-ups/{activity_id}/complete", response_model=schemas.FollowUpResponse)
+def post_complete_follow_up(
+    activity_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.SALES_REQUESTS.value)),
+):
+    try:
+        return complete_follow_up(db, activity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/pricebooks", response_model=list[schemas.PriceBookResponse])
 def get_pricebooks(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return list_pricebooks(db)
@@ -293,6 +364,15 @@ def get_conversion_summary(db: Session = Depends(get_db), _=Depends(require_modu
 @router.get("/reports/revenue_control_tower", response_model=schemas.RevenueControlSummaryResponse)
 def get_revenue_control_tower_summary(db: Session = Depends(get_db), _=Depends(require_module(ModuleKey.SALES_REQUESTS.value))):
     return revenue_control_summary(db)
+
+
+@router.get("/reports/follow-up-summary", response_model=schemas.FollowUpSummaryResponse)
+def get_follow_up_summary(
+    owner_user_id: int | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.SALES_REQUESTS.value)),
+):
+    return follow_up_summary(db, owner_user_id=owner_user_id)
 
 
 @router.post("/sales-requests/{sales_request_id}/convert-to-opportunity", response_model=schemas.OpportunityResponse)

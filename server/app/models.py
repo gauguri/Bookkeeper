@@ -1029,14 +1029,18 @@ class SalesActivity(Base):
     type = Column(String(20), nullable=False)
     subject = Column(String(255), nullable=False)
     body = Column(Text, nullable=True)
+    status = Column(String(20), nullable=True)
+    priority = Column(String(20), nullable=True)
     due_date = Column(Date, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         Index("ix_sales_activities_entity", "entity_type", "entity_id"),
         Index("ix_sales_activities_due_date", "due_date"),
+        Index("ix_sales_activities_owner_status", "owner_user_id", "status"),
     )
 
 

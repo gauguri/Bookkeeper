@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus, Search, Package, DollarSign, AlertTriangle, TrendingDown,
   ChevronDown, ChevronUp, ArrowUpDown, SlidersHorizontal, X, Upload,
 } from "lucide-react";
 import {
-  useItemsEnriched, useItemsSummary, useCreateItem,
+  useItemsEnriched, useItemsSummary, useCreateItem, useArchiveItem,
   type ItemFilters, type ItemListEnriched,
 } from "../hooks/useItems";
 import { formatCurrency, formatCompact, formatPercent } from "../utils/formatters";
@@ -41,6 +41,9 @@ export default function ItemsPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkSuccess, setBulkSuccess] = useState("");
 
   const filters: ItemFilters = useMemo(() => ({
     search: search || undefined,
@@ -53,6 +56,15 @@ export default function ItemsPage() {
   const { data: summary } = useItemsSummary();
   const { data: items, isLoading } = useItemsEnriched(filters);
   const createMutation = useCreateItem();
+  const archiveMutation = useArchiveItem();
+
+  const visibleIds = items?.map((item) => item.id) ?? [];
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const someVisibleSelected = visibleIds.some((id) => selectedIds.includes(id));
+
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => visibleIds.includes(id)));
+  }, [items]);
 
   const handleSort = (col: string) => {
     if (sortBy === col) {
@@ -89,6 +101,39 @@ export default function ItemsPage() {
       setShowForm(false);
     } catch (err) {
       setFormError((err as Error).message);
+    }
+  };
+
+  const toggleItemSelection = (itemId: number, checked: boolean) => {
+    setSelectedIds((prev) => (
+      checked
+        ? (prev.includes(itemId) ? prev : [...prev, itemId])
+        : prev.filter((id) => id !== itemId)
+    ));
+  };
+
+  const toggleAllVisible = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      if (!checked) {
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      const next = new Set(prev);
+      visibleIds.forEach((id) => next.add(id));
+      return Array.from(next);
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (!selectedIds.length || archiveMutation.isPending) return;
+    setBulkError("");
+    setBulkSuccess("");
+    try {
+      await Promise.all(selectedIds.map((id) => archiveMutation.mutateAsync(id)));
+      const deletedCount = selectedIds.length;
+      setSelectedIds([]);
+      setBulkSuccess(`${deletedCount} item${deletedCount === 1 ? "" : "s"} deleted.`);
+    } catch (err) {
+      setBulkError((err as Error).message);
     }
   };
 
@@ -205,7 +250,20 @@ export default function ItemsPage() {
               <X className="h-3 w-3" /> Clear
             </button>
           )}
+          {selectedIds.length > 0 && (
+            <button
+              className="app-button-ghost text-sm text-danger"
+              onClick={() => void handleBulkDelete()}
+              disabled={archiveMutation.isPending}
+            >
+              <X className="h-3.5 w-3.5" />
+              {archiveMutation.isPending ? "Deleting..." : `Delete Selected (${selectedIds.length})`}
+            </button>
+          )}
         </div>
+
+        {bulkError && <div className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{bulkError}</div>}
+        {bulkSuccess && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{bulkSuccess}</div>}
 
         {showFilters && (
           <div className="flex flex-wrap gap-4 rounded-xl border p-3">
@@ -256,6 +314,17 @@ export default function ItemsPage() {
             <thead>
               <tr className="border-b bg-gray-50/80 dark:bg-gray-800/50">
                 <th className="px-4 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible items"
+                    checked={allVisibleSelected}
+                    ref={(node) => {
+                      if (node) node.indeterminate = !allVisibleSelected && someVisibleSelected;
+                    }}
+                    onChange={(e) => toggleAllVisible(e.target.checked)}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("name")}>
                     Product <SortIcon col="name" />
                   </button>
@@ -292,7 +361,7 @@ export default function ItemsPage() {
               {isLoading && (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b">
-                    <td colSpan={7} className="px-4 py-4">
+                    <td colSpan={8} className="px-4 py-4">
                       <div className="h-5 w-full animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
                     </td>
                   </tr>
@@ -304,6 +373,14 @@ export default function ItemsPage() {
                   className="border-b last:border-0 cursor-pointer transition hover:bg-gray-50/60 dark:hover:bg-gray-800/40"
                   onClick={() => navigate(`/sales/items/${item.id}`)}
                 >
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${item.name}`}
+                      checked={selectedIds.includes(item.id)}
+                      onChange={(e) => toggleItemSelection(item.id, e.target.checked)}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20">
@@ -365,7 +442,7 @@ export default function ItemsPage() {
               ))}
               {!isLoading && (!items || items.length === 0) && (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center">
+                  <td colSpan={8} className="py-12 text-center">
                     <div className="mx-auto flex max-w-xs flex-col items-center gap-3">
                       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
                         <Package className="h-6 w-6 text-muted" />

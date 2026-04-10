@@ -39,6 +39,19 @@ def _normal_balance_for_type(account_type: str) -> str:
     return "DEBIT" if account_type in {"ASSET", "EXPENSE"} else "CREDIT"
 
 
+def _cash_balance_account_filter():
+    lowered_name = func.lower(GLAccount.name)
+    return or_(
+        GLAccount.account_number.like("10%"),
+        GLAccount.account_number.like("11%"),
+        lowered_name.like("%cash%"),
+        lowered_name.like("%checking%"),
+        lowered_name.like("%money market%"),
+        lowered_name.like("%petty cash%"),
+        lowered_name.like("%cash equivalent%"),
+    )
+
+
 def _resolve_company_code_id(db: Session, requested_company_code_id: int | None) -> int | None:
     if requested_company_code_id is not None:
         exists = db.query(CompanyCode.id).filter(CompanyCode.id == requested_company_code_id).first()
@@ -514,7 +527,8 @@ def command_center_summary(date_range: str = Query("MTD", alias="range", pattern
             GLBalance.ledger_id == ledger.id,
             GLBalance.fiscal_year == current_year,
             GLBalance.period_number == current_period,
-            GLAccount.account_number.like("10%"),
+            GLAccount.account_type == "ASSET",
+            _cash_balance_account_filter(),
         )
         .scalar()
         or 0

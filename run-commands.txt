@@ -1,0 +1,5 @@
+docker compose down
+docker compose up -d --build
+docker compose run --rm server alembic upgrade head
+docker compose logs --tail 100 -f server
+

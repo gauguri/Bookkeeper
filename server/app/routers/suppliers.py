@@ -62,13 +62,17 @@ IMPORT_HEADER_ALIASES = {
     "name": "name",
     "supplier name": "name",
     "supplier_name": "name",
+    "vendor name": "name",
     "legal name": "legal_name",
     "legal_name": "legal_name",
     "website": "website",
     "contact name": "contact_name",
     "contact_name": "contact_name",
+    "primary contact": "contact_name",
     "email": "email",
+    "email address": "email",
     "phone": "phone",
+    "telephone": "phone",
     "tax id": "tax_id",
     "tax_id": "tax_id",
     "remit-to address": "remit_to_address",
@@ -85,6 +89,16 @@ IMPORT_HEADER_ALIASES = {
     "shipping_terms": "shipping_terms",
     "notes": "notes",
     "address": "address",
+    "vendor number": "vendor_number",
+    "vendorpeachtreeid": "vendor_peachtree_id",
+    "vendor peachtree id": "vendor_peachtree_id",
+    "senttopeachtree": "sent_to_peachtree",
+    "sent to peachtree": "sent_to_peachtree",
+    "fax number": "fax_number",
+    "city": "city",
+    "state/province": "state_province",
+    "postal code": "postal_code",
+    "country": "country",
 }
 
 IMPORT_FIELD_SPECS = [
@@ -133,6 +147,16 @@ def _normalize_supplier_name(value: Any) -> str:
 
 def _canonicalize_header(value: str) -> str:
     return IMPORT_HEADER_ALIASES.get(value.strip().lower(), "")
+
+
+def _append_note(existing: Optional[str], note: Optional[str]) -> Optional[str]:
+    if not note:
+        return existing
+    if not existing:
+        return note
+    if note in existing:
+        return existing
+    return f"{existing}\n{note}"
 
 
 def _parse_supplier_status(value: Optional[str]) -> Optional[str]:
@@ -200,42 +224,61 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
         raise HTTPException(status_code=400, detail="CSV data is empty.")
 
     if payload.has_header:
-        reader = csv.DictReader(StringIO(content))
-        if not reader.fieldnames:
+        raw_rows = list(csv.reader(StringIO(content)))
+        if not raw_rows:
             raise HTTPException(status_code=400, detail="CSV header row is required.")
 
-        header_map: dict[str, str] = {}
-        for field_name in reader.fieldnames:
-            if field_name is None:
-                continue
-            canonical = _canonicalize_header(field_name)
-            if canonical:
-                header_map[canonical] = field_name
-
-        if "name" not in header_map:
+        header_row = raw_rows[0]
+        canonical_headers = [_canonicalize_header(field_name) for field_name in header_row]
+        if "name" not in canonical_headers:
             raise HTTPException(status_code=400, detail="Missing required CSV header: name")
 
+        def values_for(field: str, row: list[str]) -> list[str]:
+            return [row[index] for index, canonical in enumerate(canonical_headers) if canonical == field and index < len(row)]
+
         rows: list[dict[str, Any]] = []
-        for row_number, raw_row in enumerate(reader, start=2):
+        for row_number, raw_row in enumerate(raw_rows[1:], start=2):
+            address_parts = (
+                values_for("address", raw_row)
+                + values_for("city", raw_row)
+                + values_for("state_province", raw_row)
+                + values_for("postal_code", raw_row)
+                + values_for("country", raw_row)
+            )
+            combined_address = ", ".join(part.strip() for part in address_parts if part and part.strip())
+            vendor_note_parts = []
+            vendor_number = next((value for value in values_for("vendor_number", raw_row) if value.strip()), "")
+            vendor_peachtree_id = next((value for value in values_for("vendor_peachtree_id", raw_row) if value.strip()), "")
+            sent_to_peachtree = next((value for value in values_for("sent_to_peachtree", raw_row) if value.strip()), "")
+            fax_number = next((value for value in values_for("fax_number", raw_row) if value.strip()), "")
+            if vendor_number:
+                vendor_note_parts.append(f"Vendor Number: {vendor_number.strip()}")
+            if vendor_peachtree_id:
+                vendor_note_parts.append(f"VendorPeachtreeID: {vendor_peachtree_id.strip()}")
+            if sent_to_peachtree:
+                vendor_note_parts.append(f"SentToPeachtree: {sent_to_peachtree.strip()}")
+            if fax_number:
+                vendor_note_parts.append(f"Fax Number: {fax_number.strip()}")
+            vendor_notes = " | ".join(vendor_note_parts)
             rows.append(
                 {
                     "row_number": row_number,
-                    "name": raw_row.get(header_map.get("name", ""), ""),
-                    "legal_name": raw_row.get(header_map.get("legal_name", ""), ""),
-                    "website": raw_row.get(header_map.get("website", ""), ""),
-                    "contact_name": raw_row.get(header_map.get("contact_name", ""), ""),
-                    "email": raw_row.get(header_map.get("email", ""), ""),
-                    "phone": raw_row.get(header_map.get("phone", ""), ""),
-                    "tax_id": raw_row.get(header_map.get("tax_id", ""), ""),
-                    "remit_to_address": raw_row.get(header_map.get("remit_to_address", ""), ""),
-                    "ship_from_address": raw_row.get(header_map.get("ship_from_address", ""), ""),
-                    "default_lead_time_days": raw_row.get(header_map.get("default_lead_time_days", ""), ""),
-                    "payment_terms": raw_row.get(header_map.get("payment_terms", ""), ""),
-                    "currency": raw_row.get(header_map.get("currency", ""), ""),
-                    "status": raw_row.get(header_map.get("status", ""), ""),
-                    "shipping_terms": raw_row.get(header_map.get("shipping_terms", ""), ""),
-                    "notes": raw_row.get(header_map.get("notes", ""), ""),
-                    "address": raw_row.get(header_map.get("address", ""), ""),
+                    "name": next((value for value in values_for("name", raw_row) if value.strip()), ""),
+                    "legal_name": next((value for value in values_for("legal_name", raw_row) if value.strip()), ""),
+                    "website": next((value for value in values_for("website", raw_row) if value.strip()), ""),
+                    "contact_name": next((value for value in values_for("contact_name", raw_row) if value.strip()), ""),
+                    "email": next((value for value in values_for("email", raw_row) if value.strip()), ""),
+                    "phone": next((value for value in values_for("phone", raw_row) if value.strip()), ""),
+                    "tax_id": next((value for value in values_for("tax_id", raw_row) if value.strip()), ""),
+                    "remit_to_address": next((value for value in values_for("remit_to_address", raw_row) if value.strip()), "") or combined_address,
+                    "ship_from_address": next((value for value in values_for("ship_from_address", raw_row) if value.strip()), "") or combined_address,
+                    "default_lead_time_days": next((value for value in values_for("default_lead_time_days", raw_row) if value.strip()), ""),
+                    "payment_terms": next((value for value in values_for("payment_terms", raw_row) if value.strip()), ""),
+                    "currency": next((value for value in values_for("currency", raw_row) if value.strip()), ""),
+                    "status": next((value for value in values_for("status", raw_row) if value.strip()), ""),
+                    "shipping_terms": next((value for value in values_for("shipping_terms", raw_row) if value.strip()), ""),
+                    "notes": _append_note(next((value for value in values_for("notes", raw_row) if value.strip()), ""), vendor_notes) or "",
+                    "address": combined_address,
                 }
             )
         return rows

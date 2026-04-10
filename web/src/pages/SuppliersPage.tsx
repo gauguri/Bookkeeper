@@ -100,12 +100,13 @@ export default function SuppliersPage() {
   const [supplierCatalogMetrics, setSupplierCatalogMetrics] = useState<Record<number, SupplierCatalogMetrics>>({});
   const [summary, setSummary] = useState<SupplierSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [queue, setQueue] = useState<Queue>("all");
   const [range, setRange] = useState("YTD");
   const [selected, setSelected] = useState<Supplier | null>(null);
-  const [selectedTab, setSelectedTab] = useState<"overview" | "catalog" | "performance" | "notes">("overview");
   const [catalog, setCatalog] = useState<SupplierItem[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [columnsCompact, setColumnsCompact] = useState(false);
@@ -124,10 +125,15 @@ export default function SuppliersPage() {
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   const loadSuppliers = async () => {
-    setLoading(true);
+    const showInitialLoading = suppliers.length === 0 && supplierUniverse.length === 0 && summary === null;
+    if (showInitialLoading) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
     setError("");
     try {
-      const supplierSearch = encodeURIComponent(search);
+      const supplierSearch = encodeURIComponent(debouncedSearch);
       const [supplierData, supplierUniverseData, summaryData, itemData] = await Promise.all([
         apiFetch<Supplier[]>(`/suppliers?search=${supplierSearch}&queue=${queue === "all" ? "" : queue}`),
         apiFetch<Supplier[]>(`/suppliers?search=${supplierSearch}&queue=`),
@@ -159,10 +165,16 @@ export default function SuppliersPage() {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  useEffect(() => { void loadSuppliers(); }, [search, queue, range]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => { void loadSuppliers(); }, [debouncedSearch, queue, range]);
 
   const loadCatalog = async (supplierId: number) => {
     try {
@@ -171,12 +183,6 @@ export default function SuppliersPage() {
     } catch {
       setCatalog([]);
     }
-  };
-
-  const openSupplier = (supplier: Supplier) => {
-    setSelected(supplier);
-    setSelectedTab("overview");
-    void loadCatalog(supplier.id);
   };
 
   const queueCounts = useMemo(() => ({
@@ -256,8 +262,8 @@ export default function SuppliersPage() {
         setSelected(saved);
       }
       if (addCatalog) {
-        openSupplier(saved);
-        setSelectedTab("catalog");
+        setSelected(saved);
+        await loadCatalog(saved.id);
         openCatalogPicker();
       }
     } catch (err) {
@@ -497,6 +503,7 @@ export default function SuppliersPage() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2"><Search className="h-4 w-4 text-muted" /><input className="app-input w-72" placeholder="Search suppliers" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
               <div className="flex gap-2">
+                {refreshing ? <div className="self-center text-xs text-muted">Refreshing...</div> : null}
                 <button className="app-button-secondary" onClick={() => setColumnsCompact((p) => !p)}><Settings2 className="h-4 w-4" /> Density</button>
                 {selectedRows.length > 0 ? <><button className="app-button-secondary" onClick={() => void toggleBulkStatus("active")}>Activate</button><button className="app-button-secondary" onClick={() => void toggleBulkStatus("inactive")}>Deactivate</button><button className="app-button-secondary" onClick={() => void deleteSelectedSuppliers()}>Delete</button></> : null}
               </div>
@@ -504,7 +511,7 @@ export default function SuppliersPage() {
             {loading ? <div className="h-52 animate-pulse rounded-xl bg-secondary" /> : suppliers.length === 0 ? (
               <div className="rounded-xl border border-dashed p-10 text-center"><Building2 className="mx-auto mb-2 h-8 w-8 text-muted" /><p className="text-lg font-semibold">No suppliers yet</p><p className="text-sm text-muted">Add your first supplier or import your vendor master.</p><div className="mt-4 flex justify-center gap-2"><button className="app-button" onClick={openCreateModal}>Add your first supplier</button><a className="app-button-secondary inline-flex items-center gap-2" href="/procurement/suppliers/import">Import suppliers</a></div></div>
             ) : (
-              <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="text-left text-xs uppercase tracking-wider text-muted"><tr><th><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label="Select all visible suppliers" /></th><th>Supplier Name</th><th>Status</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Lead Time</th><th>Catalog Items</th><th>Preferred Items</th><th>Spend (YTD)</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{suppliers.map((s) => { const count = supplierCatalogMetrics[s.id]?.count ?? 0; return <tr key={s.id} className={`border-t ${columnsCompact ? "" : "h-14"}`}><td><input type="checkbox" checked={selectedRows.includes(s.id)} onChange={() => toggleSupplierSelection(s.id)} aria-label={`Select supplier ${s.name}`} /></td><td><button className="font-medium hover:underline" onClick={() => openSupplier(s)}>{s.name}</button></td><td><span className={`app-badge ${s.status === "active" ? "border-success/30 bg-success/10 text-success" : ""}`}>{s.status}</span></td><td>{s.contact_name ?? "-"}</td><td>{s.email ?? "-"}</td><td>{s.phone ?? "-"}</td><td>{s.default_lead_time_days ?? "-"}</td><td>{count}</td><td>{supplierCatalogMetrics[s.id]?.preferred ?? 0}</td><td>{formatCurrency(0)}</td><td>{new Date(s.updated_at).toLocaleDateString()}</td><td><div className="flex gap-2"><button className="app-button-ghost" onClick={() => openSupplier(s)}>View</button><button className="app-button-ghost" onClick={() => openEditModal(s)}>Edit</button><button className="app-button-ghost" onClick={() => { openSupplier(s); setSelectedTab("catalog"); }}>Map Items</button></div></td></tr>; })}</tbody></table></div>
+              <div className="overflow-auto"><table className="min-w-full text-sm"><thead className="text-left text-xs uppercase tracking-wider text-muted"><tr><th><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label="Select all visible suppliers" /></th><th>Supplier Name</th><th>Status</th><th>Primary Contact</th><th>Email</th><th>Phone</th><th>Lead Time</th><th>Catalog Items</th><th>Preferred Items</th><th>Spend (YTD)</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{suppliers.map((s) => { const count = supplierCatalogMetrics[s.id]?.count ?? 0; return <tr key={s.id} className={`border-t ${columnsCompact ? "" : "h-14"}`}><td><input type="checkbox" checked={selectedRows.includes(s.id)} onChange={() => toggleSupplierSelection(s.id)} aria-label={`Select supplier ${s.name}`} /></td><td><button className="font-medium hover:underline" onClick={() => openEditModal(s)}>{s.name}</button></td><td><span className={`app-badge ${s.status === "active" ? "border-success/30 bg-success/10 text-success" : ""}`}>{s.status}</span></td><td>{s.contact_name ?? "-"}</td><td>{s.email ?? "-"}</td><td>{s.phone ?? "-"}</td><td>{s.default_lead_time_days ?? "-"}</td><td>{count}</td><td>{supplierCatalogMetrics[s.id]?.preferred ?? 0}</td><td>{formatCurrency(0)}</td><td>{new Date(s.updated_at).toLocaleDateString()}</td><td><div className="flex gap-2"><button className="app-button-ghost" onClick={() => openEditModal(s)}>View</button><button className="app-button-ghost" onClick={() => openEditModal(s)}>Edit</button><button className="app-button-ghost" onClick={() => { setSelected(s); void loadCatalog(s.id); openCatalogPicker(); }}>Map Items</button></div></td></tr>; })}</tbody></table></div>
             )}
           </div>
         </div>
@@ -558,15 +565,6 @@ export default function SuppliersPage() {
             </div>
           </div>
         </div>
-      ) : null}
-
-      {selected ? (
-        <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/30" onClick={() => setSelected(null)}><aside className="h-full w-full max-w-2xl overflow-auto bg-background p-6" onClick={(e) => e.stopPropagation()}><div className="mb-3 flex items-center justify-between"><div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="text-sm text-muted">Supplier detail drawer</p></div><div className="flex gap-2"><button className="app-button-secondary" onClick={() => openEditModal(selected)}>Edit Supplier</button><button className="app-button-ghost" onClick={() => setSelected(null)}><X className="h-4 w-4" /></button></div></div><div className="mb-4 flex gap-2">{(["overview", "catalog", "performance", "notes"] as const).map((tab) => <button key={tab} className={`app-button-secondary ${selectedTab === tab ? "ring-2 ring-primary/30" : ""}`} onClick={() => setSelectedTab(tab)}>{tab}</button>)}</div>
-          {selectedTab === "overview" ? <div className="space-y-3 text-sm"><p><span className="text-muted">Legal name:</span> {selected.legal_name ?? "-"}</p><p><span className="text-muted">Website:</span> {selected.website ?? "-"}</p><p><span className="text-muted">Tax ID:</span> {selected.tax_id ?? "-"}</p><p><span className="text-muted">Contact:</span> {selected.contact_name ?? "-"} • {selected.email ?? "-"} • {selected.phone ?? "-"}</p><p><span className="text-muted">Remit-to:</span> {selected.remit_to_address ?? "-"}</p><p><span className="text-muted">Ship-from:</span> {selected.ship_from_address ?? "-"}</p><p><span className="text-muted">Defaults:</span> {selected.currency ?? "USD"} • {selected.payment_terms ?? "-"} • LT {selected.default_lead_time_days ?? "-"}d</p></div> : null}
-          {selectedTab === "catalog" ? <div className="space-y-3"><div className="flex justify-end"><button className="app-button" onClick={openCatalogPicker}><Plus className="h-4 w-4" /> Link Items</button></div>{catalog.length === 0 ? <div className="rounded-xl border border-dashed p-8 text-center"><p className="font-semibold">No catalog items yet</p><button className="app-button mt-3" onClick={openCatalogPicker}>Link items</button></div> : <table className="w-full text-sm"><thead className="text-left text-xs uppercase text-muted"><tr><th>Item</th><th>Unit Price</th><th>Supplier SKU</th><th>Default Unit Cost</th><th>Lead Time</th><th>MOQ</th><th>Active</th></tr></thead><tbody>{catalog.map((row) => <tr key={row.id} className="border-t"><td>{row.item_name}</td><td>{formatCurrency(row.item_unit_price ?? 0)}</td><td>{row.supplier_sku ?? "-"}</td><td>{formatCurrency(row.default_unit_cost ?? 0)}</td><td>{row.lead_time_days ?? "-"}</td><td>{row.min_order_qty ?? "-"}</td><td>{row.is_active ? "Yes" : "No"}</td></tr>)}</tbody></table>}</div> : null}
-          {selectedTab === "performance" ? <div className="rounded-lg border border-dashed p-6 text-sm text-muted">Performance metrics coming soon.</div> : null}
-          {selectedTab === "notes" ? <div className="rounded-lg border p-4 text-sm">{selected.notes || "No notes or documents uploaded yet."}</div> : null}
-        </aside></div>
       ) : null}
 
       {catalogPickerOpen && selected ? (

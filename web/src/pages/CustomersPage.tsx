@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  useArchiveCustomer,
   useCreateCustomer,
   useCustomersEnriched,
   type CustomerFilters,
@@ -85,6 +86,9 @@ export default function CustomersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState("");
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [toast, setToast] = useState("");
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const filters: CustomerFilters = useMemo(
     () => ({
@@ -99,6 +103,7 @@ export default function CustomersPage() {
 
   const { data: customers, isLoading } = useCustomersEnriched(filters);
   const createMutation = useCreateCustomer();
+  const archiveCustomerMutation = useArchiveCustomer();
 
   const normalizedCustomers = useMemo(
     () => (customers ?? []).map((row) => normalizeCustomerRow(row as CustomerListApiRecord)),
@@ -114,6 +119,20 @@ export default function CustomersPage() {
     }),
     [normalizedCustomers],
   );
+  const visibleCustomerIds = useMemo(() => normalizedCustomers.map((customer) => customer.id), [normalizedCustomers]);
+  const allVisibleSelected = visibleCustomerIds.length > 0 && visibleCustomerIds.every((id) => selectedRows.includes(id));
+  const someVisibleSelected = visibleCustomerIds.some((id) => selectedRows.includes(id));
+
+  useEffect(() => {
+    if (!selectAllRef.current) return;
+    selectAllRef.current.indeterminate = someVisibleSelected && !allVisibleSelected;
+  }, [allVisibleSelected, someVisibleSelected]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(""), 2600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const handleSort = (column: string) => {
     if (sortBy === column) {
@@ -144,6 +163,47 @@ export default function CustomersPage() {
     }
   };
 
+  const toggleSelectAllVisible = () => {
+    setSelectedRows((prev) => {
+      if (allVisibleSelected) {
+        return prev.filter((id) => !visibleCustomerIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...visibleCustomerIds]));
+    });
+  };
+
+  const toggleCustomerSelection = (customerId: number) => {
+    setSelectedRows((prev) => (prev.includes(customerId) ? prev.filter((id) => id !== customerId) : [...prev, customerId]));
+  };
+
+  const deleteSelectedCustomers = async () => {
+    if (selectedRows.length === 0) return;
+    const confirmed = window.confirm(
+      `Delete ${selectedRows.length} selected customer${selectedRows.length === 1 ? "" : "s"}? Referenced customers will fail and remain in place.`,
+    );
+    if (!confirmed) return;
+
+    setFormError("");
+    try {
+      const results = await Promise.allSettled(
+        selectedRows.map((id) => archiveCustomerMutation.mutateAsync(id)),
+      );
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const deleted = results.length - failed;
+      setSelectedRows([]);
+      if (failed > 0) {
+        setFormError(
+          `${failed} customer${failed === 1 ? "" : "s"} could not be deleted because they are referenced by other records.`,
+        );
+      }
+      if (deleted > 0) {
+        setToast(`${deleted} customer${deleted === 1 ? "" : "s"} deleted`);
+      }
+    } catch (err) {
+      setFormError((err as Error).message);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -161,6 +221,9 @@ export default function CustomersPage() {
           </button>
         </div>
       </div>
+
+      {toast ? <div className="rounded-xl border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">{toast}</div> : null}
+      {formError && !showForm ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{formError}</div> : null}
 
       {isLoading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -246,6 +309,11 @@ export default function CustomersPage() {
               <X className="h-3 w-3" /> Clear
             </button>
           )}
+          {selectedRows.length > 0 && (
+            <button className="app-button-secondary text-danger" onClick={() => void deleteSelectedCustomers()}>
+              Delete Selected
+            </button>
+          )}
         </div>
 
         {showFilters && (
@@ -296,6 +364,15 @@ export default function CustomersPage() {
             <thead>
               <tr className="border-b bg-gray-50/80 dark:bg-gray-800/50">
                 <th className="px-4 py-3 text-left">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    aria-label="Select all visible customers"
+                  />
+                </th>
+                <th className="px-4 py-3 text-left">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("name")}>
                     Customer <SortIcon col="name" />
                   </button>
@@ -323,7 +400,7 @@ export default function CustomersPage() {
               {isLoading &&
                 Array.from({ length: 5 }).map((_, index) => (
                   <tr key={index} className="border-b">
-                    <td colSpan={6} className="px-4 py-4">
+                    <td colSpan={7} className="px-4 py-4">
                       <div className="h-5 w-full animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
                     </td>
                   </tr>
@@ -334,6 +411,14 @@ export default function CustomersPage() {
                   className="cursor-pointer border-b transition hover:bg-gray-50/60 dark:hover:bg-gray-800/40"
                   onClick={() => navigate(`/sales/customers/${customer.id}`)}
                 >
+                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedRows.includes(customer.id)}
+                      onChange={() => toggleCustomerSelection(customer.id)}
+                      aria-label={`Select customer ${customer.name}`}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
@@ -368,7 +453,7 @@ export default function CustomersPage() {
               ))}
               {!isLoading && normalizedCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center">
+                  <td colSpan={7} className="py-12 text-center">
                     <div className="mx-auto flex max-w-xs flex-col items-center gap-3">
                       <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
                         <Users className="h-6 w-6 text-muted" />

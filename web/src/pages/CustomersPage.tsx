@@ -32,9 +32,21 @@ const STATUS_OPTIONS = [
 ];
 
 const emptyForm = {
+  customer_number: "",
   name: "",
+  address_line_1: "",
+  address_line_2: "",
+  city: "",
+  state: "",
+  zip_code: "",
   email: "",
   phone: "",
+  fax_number: "",
+  primary_contact: "",
+  credit_limit: "",
+  shipping_method: "",
+  payment_terms: "",
+  upload_to_peach: false,
   billing_address: "",
   shipping_address: "",
   notes: "",
@@ -155,7 +167,31 @@ export default function CustomersPage() {
     }
     setFormError("");
     try {
-      await createMutation.mutateAsync(form);
+      const composedAddress = [
+        [form.address_line_1.trim(), form.address_line_2.trim()].filter(Boolean).join(", "),
+        [form.city.trim(), form.state.trim()].filter(Boolean).join(", "),
+        form.zip_code.trim(),
+      ].filter(Boolean).join(" ").replace(/\s+,/g, ",");
+      await createMutation.mutateAsync({
+        ...form,
+        customer_number: form.customer_number.trim() || undefined,
+        name: form.name.trim(),
+        address_line_1: form.address_line_1.trim() || undefined,
+        address_line_2: form.address_line_2.trim() || undefined,
+        city: form.city.trim() || undefined,
+        state: form.state.trim() || undefined,
+        zip_code: form.zip_code.trim() || undefined,
+        email: form.email.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        fax_number: form.fax_number.trim() || undefined,
+        primary_contact: form.primary_contact.trim() || undefined,
+        credit_limit: form.credit_limit ? Number(form.credit_limit) : undefined,
+        shipping_method: form.shipping_method.trim() || undefined,
+        payment_terms: form.payment_terms.trim() || undefined,
+        billing_address: composedAddress || undefined,
+        shipping_address: composedAddress || undefined,
+        notes: form.notes.trim() || undefined,
+      });
       setForm(emptyForm);
       setShowForm(false);
     } catch (err) {
@@ -281,7 +317,7 @@ export default function CustomersPage() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input
               className="app-input w-full pl-9"
-              placeholder="Search by name or email..."
+              placeholder="Search by customer, contact, phone, or email..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -428,13 +464,22 @@ export default function CustomersPage() {
                         <div className="flex items-center gap-2">
                           <span className="truncate font-medium">{customer.name}</span>
                           <TierBadge tier={customer.tier} />
+                          {customer.payment_terms ? (
+                            <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted">
+                              {customer.payment_terms}
+                            </span>
+                          ) : null}
                           {!customer.is_active && (
                             <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-gray-700 dark:text-gray-400">
                               Archived
                             </span>
                           )}
                         </div>
-                        <p className="truncate text-xs text-muted">{customer.email || customer.phone || "No contact info"}</p>
+                        <p className="truncate text-xs text-muted">
+                          {[customer.customer_number ? `#${customer.customer_number}` : "", customer.primary_contact || "", customer.email || customer.phone || ""]
+                            .filter(Boolean)
+                            .join(" | ") || "No contact info"}
+                        </p>
                       </div>
                     </div>
                   </td>
@@ -479,7 +524,7 @@ export default function CustomersPage() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-20 backdrop-blur-sm" onClick={() => setShowForm(false)}>
-          <div className="app-card w-full max-w-lg p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+          <div className="app-card w-full max-w-4xl p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">New Customer</h2>
               <button className="app-button-ghost" onClick={() => setShowForm(false)}>
@@ -487,19 +532,26 @@ export default function CustomersPage() {
               </button>
             </div>
             {formError && <p className="mb-3 text-sm text-danger">{formError}</p>}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className="app-input" placeholder="Name *" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-              <input className="app-input" placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
-              <input className="app-input" placeholder="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
-              <select className="app-input" value={form.tier} onChange={(event) => setForm({ ...form, tier: event.target.value })}>
-                {TIERS.filter((tier) => tier !== "ALL").map((tier) => (
-                  <option key={tier} value={tier}>
-                    {tier}
-                  </option>
-                ))}
-              </select>
-              <input className="app-input sm:col-span-2" placeholder="Billing address" value={form.billing_address} onChange={(event) => setForm({ ...form, billing_address: event.target.value })} />
-              <input className="app-input sm:col-span-2" placeholder="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <input className="app-input" placeholder="Customer Number" value={form.customer_number} onChange={(event) => setForm({ ...form, customer_number: event.target.value })} />
+              <input className="app-input lg:col-span-2" placeholder="Customer Name *" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              <input className="app-input" placeholder="Address Line 1" value={form.address_line_1} onChange={(event) => setForm({ ...form, address_line_1: event.target.value })} />
+              <input className="app-input" placeholder="Address Line 2" value={form.address_line_2} onChange={(event) => setForm({ ...form, address_line_2: event.target.value })} />
+              <input className="app-input" placeholder="City" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} />
+              <input className="app-input" placeholder="State" value={form.state} onChange={(event) => setForm({ ...form, state: event.target.value })} />
+              <input className="app-input" placeholder="Zip Code" value={form.zip_code} onChange={(event) => setForm({ ...form, zip_code: event.target.value })} />
+              <input className="app-input" placeholder="Telephone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+              <input className="app-input" placeholder="Fax Number" value={form.fax_number} onChange={(event) => setForm({ ...form, fax_number: event.target.value })} />
+              <input className="app-input" placeholder="Primary Contact" value={form.primary_contact} onChange={(event) => setForm({ ...form, primary_contact: event.target.value })} />
+              <input className="app-input" placeholder="Customer Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+              <input className="app-input" placeholder="Credit Limit" type="number" min="0" step="0.01" value={form.credit_limit} onChange={(event) => setForm({ ...form, credit_limit: event.target.value })} />
+              <input className="app-input" placeholder="Shipping Method" value={form.shipping_method} onChange={(event) => setForm({ ...form, shipping_method: event.target.value })} />
+              <input className="app-input" placeholder="Payment Terms" value={form.payment_terms} onChange={(event) => setForm({ ...form, payment_terms: event.target.value })} />
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input type="checkbox" checked={form.upload_to_peach} onChange={(event) => setForm({ ...form, upload_to_peach: event.target.checked })} />
+                UploadtoPeach
+              </label>
+              <textarea className="app-input min-h-24 sm:col-span-2 lg:col-span-3" placeholder="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
               <button className="app-button-secondary" onClick={() => setShowForm(false)}>Cancel</button>

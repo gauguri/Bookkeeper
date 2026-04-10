@@ -10,9 +10,21 @@ TaxRateValue = condecimal(max_digits=5, decimal_places=4)
 
 
 class CustomerBase(BaseModel):
+    customer_number: Optional[str] = Field(None, max_length=50)
     name: str = Field(..., max_length=200)
+    address_line_1: Optional[str] = Field(None, max_length=255)
+    address_line_2: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=120)
+    state: Optional[str] = Field(None, max_length=120)
+    zip_code: Optional[str] = Field(None, max_length=20)
     email: Optional[str] = None
     phone: Optional[str] = None
+    fax_number: Optional[str] = Field(None, max_length=50)
+    primary_contact: Optional[str] = Field(None, max_length=200)
+    credit_limit: Optional[DecimalValue] = Field(None, ge=0)
+    shipping_method: Optional[str] = Field(None, max_length=120)
+    payment_terms: Optional[str] = Field(None, max_length=100)
+    upload_to_peach: bool = False
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     notes: Optional[str] = None
@@ -25,9 +37,21 @@ class CustomerCreate(CustomerBase):
 
 
 class CustomerUpdate(BaseModel):
+    customer_number: Optional[str] = Field(None, max_length=50)
     name: Optional[str] = Field(None, max_length=200)
+    address_line_1: Optional[str] = Field(None, max_length=255)
+    address_line_2: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=120)
+    state: Optional[str] = Field(None, max_length=120)
+    zip_code: Optional[str] = Field(None, max_length=20)
     email: Optional[str] = None
     phone: Optional[str] = None
+    fax_number: Optional[str] = Field(None, max_length=50)
+    primary_contact: Optional[str] = Field(None, max_length=200)
+    credit_limit: Optional[DecimalValue] = Field(None, ge=0)
+    shipping_method: Optional[str] = Field(None, max_length=120)
+    payment_terms: Optional[str] = Field(None, max_length=100)
+    upload_to_peach: Optional[bool] = None
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     notes: Optional[str] = None
@@ -376,9 +400,12 @@ class Customer360Response(BaseModel):
 
 class CustomerListItem(BaseModel):
     id: int
+    customer_number: Optional[str] = None
     name: str
+    primary_contact: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    payment_terms: Optional[str] = None
     tier: str = "STANDARD"
     is_active: bool = True
     created_at: datetime

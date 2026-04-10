@@ -329,7 +329,13 @@ def list_customers(db: Session, search: Optional[str]) -> Sequence[Customer]:
     query = db.query(Customer)
     if search:
         like = f"%{search.lower()}%"
-        query = query.filter(func.lower(Customer.name).like(like))
+        query = query.filter(
+            func.lower(Customer.name).like(like)
+            | func.lower(func.coalesce(Customer.email, "")).like(like)
+            | func.lower(func.coalesce(Customer.phone, "")).like(like)
+            | func.lower(func.coalesce(Customer.customer_number, "")).like(like)
+            | func.lower(func.coalesce(Customer.primary_contact, "")).like(like)
+        )
     return query.order_by(Customer.name).all()
 
 
@@ -921,7 +927,10 @@ def get_customers_enriched(
         like = f"%{search.lower()}%"
         query = query.filter(
             func.lower(Customer.name).like(like)
-            | func.lower(Customer.email).like(like)
+            | func.lower(func.coalesce(Customer.email, "")).like(like)
+            | func.lower(func.coalesce(Customer.phone, "")).like(like)
+            | func.lower(func.coalesce(Customer.customer_number, "")).like(like)
+            | func.lower(func.coalesce(Customer.primary_contact, "")).like(like)
         )
     if tier:
         query = query.filter(Customer.tier == tier.upper())
@@ -973,9 +982,12 @@ def get_customers_enriched(
 
         result.append({
             "id": cust.id,
+            "customer_number": cust.customer_number,
             "name": cust.name,
+            "primary_contact": cust.primary_contact,
             "email": cust.email,
             "phone": cust.phone,
+            "payment_terms": cust.payment_terms,
             "tier": cust.tier or "STANDARD",
             "is_active": cust.is_active,
             "created_at": cust.created_at,

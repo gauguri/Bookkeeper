@@ -9,9 +9,15 @@ import { apiFetch } from "../api";
 
 export type CustomerListItem = {
   id: number;
+  customer_number?: string;
   name: string;
+  primary_contact?: string;
   email?: string;
   phone?: string;
+  fax_number?: string;
+  payment_terms?: string;
+  shipping_method?: string;
+  upload_to_peach?: boolean;
   tier: string;
   is_active: boolean;
   created_at: string;
@@ -77,9 +83,21 @@ export type TopItem = {
 
 export type CustomerBasic = {
   id: number;
+  customer_number?: string;
   name: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
   email?: string;
   phone?: string;
+  fax_number?: string;
+  primary_contact?: string;
+  credit_limit?: number | string;
+  shipping_method?: string;
+  payment_terms?: string;
+  upload_to_peach?: boolean;
   billing_address?: string;
   shipping_address?: string;
   notes?: string;

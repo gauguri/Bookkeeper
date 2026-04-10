@@ -198,17 +198,6 @@ export default function CustomersBulkImportPage() {
             The import contract mirrors the customer master fields used by the ledger and profile views.
           </p>
         </div>
-        <div className="relative z-10 flex flex-wrap gap-2">
-          <button className="app-button-secondary" onClick={downloadTemplate} type="button" disabled={!format || loadingFormat}>
-            <Download className="h-4 w-4" /> Download template
-          </button>
-          <button className="app-button-secondary" onClick={runPreview} type="button" disabled={runningPreview}>
-            <ShieldCheck className="h-4 w-4" /> {runningPreview ? "Validating..." : "Validate CSV"}
-          </button>
-          <button className="app-button" onClick={executeImport} type="button" disabled={importing || runningPreview}>
-            <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Import customers"}
-          </button>
-        </div>
       </div>
 
       {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
@@ -239,10 +228,21 @@ export default function CustomersBulkImportPage() {
             <h2 className="text-xl font-semibold">Source CSV</h2>
             <p className="text-sm text-muted">Upload a customer template file or paste CSV directly for validation.</p>
           </div>
-          <label className="app-button-secondary cursor-pointer">
-            <FileSpreadsheet className="h-4 w-4" /> Upload CSV
-            <input accept=".csv,text/csv" className="hidden" onChange={handleFileUpload} type="file" />
-          </label>
+          <div className="relative z-10 flex flex-nowrap items-center gap-2">
+            <button className="app-button-secondary whitespace-nowrap" onClick={downloadTemplate} type="button" disabled={!format || loadingFormat}>
+              <Download className="h-4 w-4" /> Download template
+            </button>
+            <label className="app-button-secondary cursor-pointer whitespace-nowrap">
+              <FileSpreadsheet className="h-4 w-4" /> Upload CSV
+              <input accept=".csv,text/csv" className="hidden" onChange={handleFileUpload} type="file" />
+            </label>
+            <button className="app-button-secondary whitespace-nowrap" onClick={runPreview} type="button" disabled={runningPreview}>
+              <ShieldCheck className="h-4 w-4" /> {runningPreview ? "Validating..." : "Validate CSV"}
+            </button>
+            <button className="app-button whitespace-nowrap" onClick={executeImport} type="button" disabled={importing || runningPreview}>
+              <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Import customers"}
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">

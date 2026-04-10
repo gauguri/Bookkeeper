@@ -69,7 +69,7 @@ const normalizeOverviewResponse = (payload: unknown): InventoryOverviewResponse 
   };
 };
 
-export function useInventoryOverview(limit: number | "all") {
+export function useInventoryOverview(limit: number | "all", refreshToken = 0) {
   const [data, setData] = useState<InventoryOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -90,7 +90,7 @@ export function useInventoryOverview(limit: number | "all") {
     };
 
     void load();
-  }, [limit]);
+  }, [limit, refreshToken]);
 
   return {
     totals: data?.totals ?? null,

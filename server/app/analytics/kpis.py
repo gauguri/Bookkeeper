@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 import logging
 from decimal import Decimal
+import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import case, exists, func, inspect
@@ -50,6 +51,13 @@ D = Decimal
 ZERO = D("0")
 HUNDRED = D("100")
 
+CURRENT_ASSET_GROUP_RULES = (
+    ("cash_and_cash_equivalents", "Cash and Cash Equivalents", ("cash", "checking", "money market", "petty cash", "cash equivalent")),
+    ("accounts_receivable", "Accounts Receivable", ("accounts receivable", "trade receivable", "receivable")),
+    ("inventory", "Inventory", ("inventory",)),
+    ("prepaids_and_supplies", "Prepaids and Supplies", ("prepaid", "supplies")),
+)
+
 # The seed chart-of-accounts uses type "INCOME" for revenue accounts while the
 # GL engine's auto-create fallback uses "REVENUE".  Accept both so the P&L
 # correctly aggregates revenue regardless of which label a given account carries.
@@ -84,6 +92,29 @@ def _normalized_account_type(account_number: str | None, gl_account_type: str | 
         normalized = coa_type.upper()
         return "REVENUE" if normalized == "INCOME" else normalized
     return (gl_account_type or "").upper()
+
+
+def _normalize_account_label(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _current_asset_group_for_account(account: Account | None, gl_account: GLAccount) -> tuple[str, str]:
+    searchable = " ".join(
+        part
+        for part in (
+            _normalize_account_label(account.subtype if account else None),
+            _normalize_account_label(account.name if account else None),
+            _normalize_account_label(gl_account.name),
+        )
+        if part
+    )
+    for group_key, label, keywords in CURRENT_ASSET_GROUP_RULES:
+        if any(keyword in searchable for keyword in keywords):
+            return group_key, label
+    code = (gl_account.account_number or "").strip()
+    if code.startswith("1"):
+        return "other_current_assets", "Other Current Assets"
+    return "other_assets", "Other Assets"
 
 
 def _expense_debit_rows(
@@ -760,6 +791,7 @@ def _balance_sheet_section_breakdown(
     )
     items: list[dict[str, Any]] = []
     current_asset_components: list[dict[str, Any]] = []
+    current_asset_rollups: dict[str, dict[str, Any]] = {}
     debit_normal = account_type in {"ASSET", "EXPENSE", "COGS"}
 
     for gl_account in gl_accounts:
@@ -788,17 +820,63 @@ def _balance_sheet_section_breakdown(
             "total_debits": round(float(total_debits), 2),
             "total_credits": round(float(total_credits), 2),
         }
+        if account_type == "ASSET":
+            group_key, group_label = _current_asset_group_for_account(account, gl_account)
+            rollup = current_asset_rollups.setdefault(
+                group_key,
+                {
+                    "label": group_label,
+                    "component_name": group_label,
+                    "value": ZERO,
+                    "account_ids": [],
+                    "account_codes": [],
+                    "normal_balance": "DEBIT",
+                    "total_debits": ZERO,
+                    "total_credits": ZERO,
+                    "net": ZERO,
+                },
+            )
+            if code and code not in rollup["account_codes"]:
+                rollup["account_codes"].append(code)
+            if account and account.id not in rollup["account_ids"]:
+                rollup["account_ids"].append(account.id)
+            rollup["value"] += net
+            rollup["total_debits"] += total_debits
+            rollup["total_credits"] += total_credits
+            rollup["net"] += net
+            continue
+
         items.append(item)
 
-        if account_type == "ASSET":
+    if account_type == "ASSET":
+        for _, component in sorted(
+            current_asset_rollups.items(),
+            key=lambda item: (
+                1 if item[0] in {"other_current_assets", "other_assets"} else 0,
+                item[1]["label"],
+            ),
+        ):
+            if abs(component["net"]) < Decimal("0.005"):
+                continue
+            items.append(
+                {
+                    "label": component["label"],
+                    "value": round(float(component["value"]), 2),
+                    "account_id": component["account_ids"][0] if len(component["account_ids"]) == 1 else None,
+                    "account_code": ",".join(component["account_codes"]) if component["account_codes"] else None,
+                    "normal_balance": component["normal_balance"],
+                    "total_debits": round(float(component["total_debits"]), 2),
+                    "total_credits": round(float(component["total_credits"]), 2),
+                }
+            )
             current_asset_components.append(
                 {
-                    "component_name": label,
-                    "account_ids": [account.id] if account else [],
-                    "total_debits": round(float(total_debits), 2),
-                    "total_credits": round(float(total_credits), 2),
-                    "net": round(float(net), 2),
-                    "normal_balance": normal_balance,
+                    "component_name": component["component_name"],
+                    "account_ids": component["account_ids"],
+                    "total_debits": round(float(component["total_debits"]), 2),
+                    "total_credits": round(float(component["total_credits"]), 2),
+                    "net": round(float(component["net"]), 2),
+                    "normal_balance": component["normal_balance"],
                 }
             )
 

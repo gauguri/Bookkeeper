@@ -174,19 +174,15 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
     ctx.closePath();
     ctx.fill();
 
-    const visibleFaces = geometry.faces
+    const renderedFaces = geometry.faces
       .map((face) => {
         const pts = face.points.map((index) => projected[index]);
         const avgZ = pts.reduce((sum, point) => sum + point.z, 0) / pts.length;
-        const edgeA = { x: pts[1].sx - pts[0].sx, y: pts[1].sy - pts[0].sy };
-        const edgeB = { x: pts[2].sx - pts[1].sx, y: pts[2].sy - pts[1].sy };
-        const cross = edgeA.x * edgeB.y - edgeA.y * edgeB.x;
-        return { ...face, pts, avgZ, cross };
+        return { ...face, pts, avgZ };
       })
-      .filter((face) => face.cross < 0)
       .sort((a, b) => a.avgZ - b.avgZ);
 
-    for (const face of visibleFaces) {
+    for (const face of renderedFaces) {
       ctx.beginPath();
       ctx.moveTo(face.pts[0].sx, face.pts[0].sy);
       face.pts.slice(1).forEach((point) => ctx.lineTo(point.sx, point.sy));
@@ -217,7 +213,7 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
     }
 
     if (beveled) {
-      const topFace = visibleFaces.find((face) => face.name === "top");
+      const topFace = renderedFaces.find((face) => face.name === "top");
       if (topFace) {
         ctx.strokeStyle = palette.accent;
         ctx.lineWidth = 3;

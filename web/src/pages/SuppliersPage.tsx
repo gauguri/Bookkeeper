@@ -7,6 +7,7 @@ import { formatCurrency } from "../utils/formatters";
 
 type Supplier = {
   id: number;
+  vendor_number?: string | null;
   name: string;
   legal_name?: string | null;
   website?: string | null;
@@ -64,6 +65,7 @@ const queueOptions: Array<{ key: Queue; label: string }> = [
 ];
 
 const emptyForm = {
+  vendor_number: "",
   name: "",
   legal_name: "",
   website: "",
@@ -227,6 +229,7 @@ export default function SuppliersPage() {
     setError("");
     setSavingSupplier(true);
     const payload = {
+      vendor_number: form.vendor_number.trim() || null,
       name: form.name.trim(),
       legal_name: form.legal_name.trim() || null,
       website: form.website.trim() || null,
@@ -374,6 +377,7 @@ export default function SuppliersPage() {
   const openEditModal = (supplier: Supplier) => {
     setEditingId(supplier.id);
     setForm({
+      vendor_number: supplier.vendor_number ?? "",
       name: supplier.name,
       legal_name: supplier.legal_name ?? "",
       website: supplier.website ?? "",
@@ -529,6 +533,7 @@ export default function SuppliersPage() {
             </div>
             <div className="grid flex-1 gap-4 overflow-y-auto px-6 py-5 md:grid-cols-2">
               {formSubmitError ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger md:col-span-2">{formSubmitError}</div> : null}
+              <label className="text-sm">Vendor Number<input className="app-input mt-1 w-full" value={form.vendor_number} onChange={(e) => setForm((p) => ({ ...p, vendor_number: e.target.value }))} /></label>
               <label className="text-sm md:col-span-2">Supplier name *<input className="app-input mt-1 w-full" value={form.name} onChange={(e) => { setForm((p) => ({ ...p, name: e.target.value })); setFormErrors((prev) => ({ ...prev, name: undefined })); }} />{formErrors.name ? <span className="mt-1 block text-xs text-danger">{formErrors.name}</span> : null}</label>
               <label className="text-sm">Legal name<input className="app-input mt-1 w-full" value={form.legal_name} onChange={(e) => setForm((p) => ({ ...p, legal_name: e.target.value }))} /></label>
               <label className="text-sm">Website<input className="app-input mt-1 w-full" value={form.website} onChange={(e) => { setForm((p) => ({ ...p, website: e.target.value })); setFormErrors((prev) => ({ ...prev, website: undefined })); }} placeholder="https://" />{formErrors.website ? <span className="mt-1 block text-xs text-danger">{formErrors.website}</span> : null}</label>

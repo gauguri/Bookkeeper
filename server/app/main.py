@@ -21,6 +21,7 @@ from .routers import (
     journal_entries,
     pricing,
     purchase_orders,
+    purchase_orders_import,
     sales,
     sales_management,
     sales_requests,
@@ -55,6 +56,7 @@ app.include_router(suppliers.router)
 app.include_router(inventory.router)
 app.include_router(pricing.router)
 app.include_router(sales_requests.router)
+app.include_router(purchase_orders_import.router)
 app.include_router(purchase_orders.router)
 app.include_router(chart_of_accounts.router)
 app.include_router(journal_entries.router)

@@ -24,6 +24,8 @@ import LoginPage from "./pages/LoginPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import NoAccessPage from "./pages/NoAccessPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import PurchaseOrdersBulkImportPage from "./pages/PurchaseOrdersBulkImportPage";
+import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import ARAgingPage from "./pages/ARAgingPage";
 import CashForecastPage from "./pages/CashForecastPage";
@@ -267,6 +269,8 @@ export default function App() {
             <Route path="/procurement/suppliers/:id" element={<ProtectedRoute moduleKey={MODULES.SUPPLIERS}><SuppliersPage /></ProtectedRoute>} />
             <Route path="/purchasing/suppliers" element={<Navigate to="/procurement/suppliers" replace />} />
             <Route path="/purchasing/purchase-orders" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersPage /></ProtectedRoute>} />
+            <Route path="/purchasing/purchase-orders/import" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrdersBulkImportPage /></ProtectedRoute>} />
+            <Route path="/purchasing/purchase-orders/:purchaseOrderId" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrderDetailPage /></ProtectedRoute>} />
             <Route path="/purchasing/purchase-orders/new" element={<ProtectedRoute moduleKey={MODULES.PURCHASE_ORDERS}><PurchaseOrderCreatePage /></ProtectedRoute>} />
             <Route path="/purchase-orders" element={<Navigate to="/purchasing/purchase-orders" replace />} />
             <Route path="/purchase-orders/new" element={<Navigate to="/purchasing/purchase-orders/new" replace />} />

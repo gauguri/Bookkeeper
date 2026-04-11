@@ -14,6 +14,7 @@ SupplierImportRecordAction = Literal["CREATED", "UPDATED"]
 
 
 class SupplierBase(BaseModel):
+    vendor_number: Optional[str] = Field(None, max_length=100)
     name: str = Field(..., max_length=200)
     legal_name: Optional[str] = Field(None, max_length=200)
     website: Optional[HttpUrl] = None
@@ -37,6 +38,7 @@ class SupplierCreate(SupplierBase):
 
 
 class SupplierUpdate(BaseModel):
+    vendor_number: Optional[str] = Field(None, max_length=100)
     name: Optional[str] = Field(None, max_length=200)
     legal_name: Optional[str] = Field(None, max_length=200)
     website: Optional[HttpUrl] = None

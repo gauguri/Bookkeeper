@@ -80,7 +80,6 @@ type PlanningPayload = {
   target_days_supply: number;
 };
 
-const queueFlagMap: Record<string, string> = { low_stock: "low_stock", stockout: "stockouts", at_risk: "at_risk", excess: "excess", reserved_pressure: "reserved_pressure" };
 const formatNumber = (value: number) => (Number.isFinite(value) ? formatCompact(value) : "0");
 const healthPillMap: Record<string, string> = {
   healthy: "bg-success/10 text-success",
@@ -115,6 +114,13 @@ export default function InventoryPage() {
   const [editingPlanning, setEditingPlanning] = useState(false);
   const [planningSaving, setPlanningSaving] = useState(false);
   const [planningForm, setPlanningForm] = useState<PlanningPayload>({ reorder_point_qty: 0, safety_stock_qty: 0, lead_time_days: 14, target_days_supply: 30 });
+  const [adjustmentRefreshToken, setAdjustmentRefreshToken] = useState(0);
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  const [adjustmentItemId, setAdjustmentItemId] = useState<number | null>(null);
+  const [adjustmentQty, setAdjustmentQty] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false);
+  const [adjustmentError, setAdjustmentError] = useState("");
   const [popover, setPopover] = useState<{ itemId: number; x: number; y: number } | null>(null);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [compact, setCompact] = useState(false);
@@ -130,7 +136,7 @@ export default function InventoryPage() {
   const breakdownFilter = searchParams.get("breakdown") || "all";
   const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
   const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
-  const overview = useInventoryOverview(compositionLimit);
+  const overview = useInventoryOverview(compositionLimit, adjustmentRefreshToken);
 
   const mismatchLogged = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -280,6 +286,11 @@ export default function InventoryPage() {
     return new Map(classified.map((row) => [row.id, row.abc_class]));
   }, [normalizedItems]);
 
+  const adjustmentItem = useMemo(
+    () => normalizedItems.find((item) => item.id === adjustmentItemId) ?? null,
+    [normalizedItems, adjustmentItemId],
+  );
+
   const displayedItems = useMemo(() => {
     const all = normalizedItems;
     const breakdownFiltered = breakdownFilter === "reserved"
@@ -306,6 +317,27 @@ export default function InventoryPage() {
         })),
       },
     });
+  };
+
+  const openAdjustmentModal = (itemId?: number | null) => {
+    const fallbackItemId = itemId
+      ?? (selectedIds.length === 1 ? selectedIds[0] : null)
+      ?? highlightedItemId
+      ?? detail?.item.id
+      ?? displayedItems[0]?.id
+      ?? null;
+    setAdjustmentItemId(fallbackItemId);
+    setAdjustmentQty("");
+    setAdjustmentReason("");
+    setAdjustmentError("");
+    setAdjustmentOpen(true);
+  };
+
+  const closeAdjustmentModal = () => {
+    if (adjustmentSaving) return;
+    setAdjustmentOpen(false);
+    setAdjustmentItemId(null);
+    setAdjustmentError("");
   };
 
   const openDetail = async (itemId: number) => {
@@ -345,6 +377,43 @@ export default function InventoryPage() {
       setDetailError((err as Error).message);
     } finally {
       setPlanningSaving(false);
+    }
+  };
+
+  const submitAdjustment = async () => {
+    if (!adjustmentItemId) {
+      setAdjustmentError("Select an item to adjust.");
+      return;
+    }
+    const qtyDelta = Number(adjustmentQty);
+    if (!Number.isFinite(qtyDelta) || qtyDelta === 0) {
+      setAdjustmentError("Enter a positive or negative quantity.");
+      return;
+    }
+
+    setAdjustmentSaving(true);
+    setAdjustmentError("");
+    try {
+      await apiFetch("/inventory/adjustments", {
+        method: "POST",
+        body: JSON.stringify({
+          item_id: adjustmentItemId,
+          qty_delta: qtyDelta,
+          reason: adjustmentReason.trim() || null,
+        }),
+      });
+      setAdjustmentRefreshToken((value) => value + 1);
+      await loadTable();
+      if (detailOpen && detail?.item.id === adjustmentItemId) {
+        await openDetail(adjustmentItemId);
+      }
+      setAdjustmentOpen(false);
+      setAdjustmentItemId(null);
+      setAdjustmentError("");
+    } catch (err) {
+      setAdjustmentError((err as Error).message);
+    } finally {
+      setAdjustmentSaving(false);
     }
   };
 
@@ -399,7 +468,7 @@ export default function InventoryPage() {
           <button className="app-button" onClick={() => navigate("/purchasing/purchase-orders")}><PackagePlus className="h-4 w-4" /> + Receive Inventory</button>
           <button className="app-button-secondary" onClick={() => navigate("/inventory/replenishment")}><Boxes className="h-4 w-4" /> Replenishment</button>
           <button className="app-button-secondary" onClick={createPOForSelection}><ShoppingCart className="h-4 w-4" /> + Create Purchase Order</button>
-          <button className="app-button-ghost" onClick={() => navigate("/items")}><ArrowDownUp className="h-4 w-4" /> Adjust Stock</button>
+          <button className="app-button-ghost" onClick={() => openAdjustmentModal()}><ArrowDownUp className="h-4 w-4" /> Adjust Stock</button>
           <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
         </div>
       </div>
@@ -448,7 +517,7 @@ export default function InventoryPage() {
           onViewAll={handleCompositionViewAll}
           onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
           onSegmentClick={handleCompositionClick}
-          onSetLandedCosts={() => navigate("/items")}
+          onSetLandedCosts={() => navigate("/sales/items")}
           onReceiveInventory={() => navigate("/purchasing/purchase-orders")}
         />
 
@@ -532,7 +601,7 @@ export default function InventoryPage() {
                     {visibleCols.last_receipt && <td className="px-3 py-2">{row.last_receipt ? new Date(row.last_receipt).toLocaleDateString() : "—"}</td>}
                     {visibleCols.last_issue && <td className="px-3 py-2">{row.last_issue ? new Date(row.last_issue).toLocaleDateString() : "—"}</td>}
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.total_value)}</td>
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><button className="app-button-ghost" onClick={() => void openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => setQueue(queueFlagMap[row.health_flag] ?? queue)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><button className="app-button-ghost" onClick={() => void openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => openAdjustmentModal(row.id)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -569,7 +638,7 @@ export default function InventoryPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchasing/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => navigate("/items")}>Adjust</button><button className="app-button-ghost" onClick={() => setEditingPlanning((v) => !v)}>{editingPlanning ? "Cancel planning edit" : "Edit planning"}</button></div>
+                <div className="mt-4 flex flex-wrap gap-2"><button className="app-button" onClick={() => navigate("/purchasing/purchase-orders/new")}>Create PO</button><button className="app-button-secondary" onClick={() => navigate("/purchasing/purchase-orders")}>Receive</button><button className="app-button-ghost" onClick={() => openAdjustmentModal(detail.item.id)}>Adjust</button><button className="app-button-ghost" onClick={() => setEditingPlanning((v) => !v)}>{editingPlanning ? "Cancel planning edit" : "Edit planning"}</button></div>
 
                 <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
                   <p className="text-xs uppercase tracking-[0.2em] text-muted">Reorder point (ROP)</p>
@@ -611,6 +680,79 @@ export default function InventoryPage() {
                 <div className="mt-4 app-card p-3"><p className="font-semibold">Consumption trend (90 days)</p><div className="mt-2 h-48"><ResponsiveContainer width="100%" height="100%"><LineChart data={detail.consumption_trend}><CartesianGrid {...GRID_STYLE} /><XAxis dataKey="date" {...AXIS_STYLE} tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })} /><YAxis {...AXIS_STYLE} /><Tooltip formatter={(v: number) => formatNumber(v)} labelFormatter={(v) => new Date(v).toLocaleDateString()} /><Line type="monotone" dataKey="consumption" stroke={CHART_COLORS[0]} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></div></div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {adjustmentOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4" onClick={closeAdjustmentModal}>
+          <div className="w-full max-w-xl rounded-3xl border border-border bg-surface p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Inventory</p>
+                <h2 className="text-2xl font-semibold">Adjust Stock</h2>
+                <p className="mt-1 text-sm text-muted">Post a manual stock adjustment without leaving the command center.</p>
+              </div>
+              <button className="app-button-ghost" onClick={closeAdjustmentModal} disabled={adjustmentSaving}>Close</button>
+            </div>
+
+            <div className="mt-5 grid gap-4">
+              {adjustmentError && <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{adjustmentError}</div>}
+
+              <label className="text-sm font-medium">
+                Item
+                <select className="app-select mt-1 w-full" value={adjustmentItemId ?? ""} onChange={(event) => setAdjustmentItemId(event.target.value ? Number(event.target.value) : null)}>
+                  <option value="">Select item</option>
+                  {normalizedItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.item}{item.sku ? ` (${item.sku})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium">
+                  Quantity change
+                  <input
+                    className="app-input mt-1 w-full"
+                    type="number"
+                    step="0.01"
+                    placeholder="Use -5 or +10"
+                    value={adjustmentQty}
+                    onChange={(event) => setAdjustmentQty(event.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-muted">Use a negative number to reduce stock and a positive number to increase it.</p>
+                </label>
+
+                <div className="rounded-2xl border border-border/70 bg-secondary/30 px-4 py-3 text-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted">Current on hand</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {formatNumber(adjustmentItem?.on_hand ?? 0)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    Available: {formatNumber(adjustmentItem?.available ?? 0)}
+                  </p>
+                </div>
+              </div>
+
+              <label className="text-sm font-medium">
+                Reason
+                <textarea
+                  className="app-input mt-1 min-h-24 w-full"
+                  placeholder="Cycle count variance, damage, opening balance, manual correction..."
+                  value={adjustmentReason}
+                  onChange={(event) => setAdjustmentReason(event.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button className="app-button-ghost" onClick={closeAdjustmentModal} disabled={adjustmentSaving}>Cancel</button>
+              <button className="app-button" onClick={() => void submitAdjustment()} disabled={adjustmentSaving}>
+                {adjustmentSaving ? "Saving..." : "Save Adjustment"}
+              </button>
+            </div>
           </div>
         </div>
       )}

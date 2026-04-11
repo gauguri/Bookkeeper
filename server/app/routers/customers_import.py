@@ -81,6 +81,27 @@ IMPORT_HEADER_ALIASES = {
     "customer": "name",
     "customer name": "name",
     "customer_name": "name",
+    "customer number": "customer_number",
+    "customer_number": "customer_number",
+    "address": "address",
+    "city": "city",
+    "state": "state",
+    "zip code": "zip_code",
+    "zip_code": "zip_code",
+    "telephone": "phone",
+    "fax number": "fax_number",
+    "fax_number": "fax_number",
+    "primary contact": "primary_contact",
+    "primary_contact": "primary_contact",
+    "credit limit": "credit_limit",
+    "credit_limit": "credit_limit",
+    "shipping method": "shipping_method",
+    "shipping_method": "shipping_method",
+    "payment terms": "payment_terms",
+    "payment_terms": "payment_terms",
+    "uploadtopeach": "upload_to_peach",
+    "upload_to_peach": "upload_to_peach",
+    "customeremail": "email",
     "email": "email",
     "phone": "phone",
     "billing address": "billing_address",
@@ -98,11 +119,24 @@ TRUE_VALUES = {"true", "1", "yes", "y", "active"}
 FALSE_VALUES = {"false", "0", "no", "n", "inactive", "archived"}
 EMAIL_MAX_LENGTH = Customer.__table__.c.email.type.length or 255
 PHONE_MAX_LENGTH = Customer.__table__.c.phone.type.length or 255
+FAX_MAX_LENGTH = Customer.__table__.c.fax_number.type.length or 50
 
 IMPORT_FIELD_SPECS = [
+    CustomerImportFieldSpec(field="customer_number", label="Customer Number", required=False, description="Legacy customer identifier from Glenrock.", example="513"),
     CustomerImportFieldSpec(field="name", label="Customer Name", required=True, description="Primary customer name.", example="DAVYDOV MONUMENTS"),
+    CustomerImportFieldSpec(field="address_line_1", label="Address Line 1", required=False, description="Primary address line."),
+    CustomerImportFieldSpec(field="address_line_2", label="Address Line 2", required=False, description="Secondary address line."),
+    CustomerImportFieldSpec(field="city", label="City", required=False, description="Customer city."),
+    CustomerImportFieldSpec(field="state", label="State", required=False, description="Customer state."),
+    CustomerImportFieldSpec(field="zip_code", label="Zip Code", required=False, description="Customer postal code."),
     CustomerImportFieldSpec(field="email", label="Email", required=False, description="Primary customer email address.", example="sales@davydov-monuments.pro"),
     CustomerImportFieldSpec(field="phone", label="Phone", required=False, description="Primary customer phone number.", example="+1-555-0100"),
+    CustomerImportFieldSpec(field="fax_number", label="Fax Number", required=False, description="Customer fax number."),
+    CustomerImportFieldSpec(field="primary_contact", label="Primary Contact", required=False, description="Primary contact name."),
+    CustomerImportFieldSpec(field="credit_limit", label="Credit Limit", required=False, description="Customer credit limit.", example="0.00"),
+    CustomerImportFieldSpec(field="shipping_method", label="Shipping Method", required=False, description="Preferred shipping method."),
+    CustomerImportFieldSpec(field="payment_terms", label="Payment Terms", required=False, description="Customer payment terms.", example="Net 30"),
+    CustomerImportFieldSpec(field="upload_to_peach", label="Upload to Peach", required=False, description="Legacy Peach export flag.", accepted_values=["true", "false"], example="false"),
     CustomerImportFieldSpec(field="billing_address", label="Billing Address", required=False, description="Default bill-to address for invoices."),
     CustomerImportFieldSpec(field="shipping_address", label="Shipping Address", required=False, description="Default ship-to location for deliveries."),
     CustomerImportFieldSpec(field="notes", label="Notes", required=False, description="Internal customer notes or selling guidance."),
@@ -111,9 +145,9 @@ IMPORT_FIELD_SPECS = [
 
 IMPORT_SAMPLE_CSV = "\n".join(
     [
-        "name,email,phone,billing_address,shipping_address,notes,is_active",
-        'DAVYDOV MONUMENTS,davydov@monuments.pro,+1-555-0100,"123 Granite Way, Charlotte, NC","123 Granite Way, Charlotte, NC","Priority monument buyer",true',
-        'North Ridge Memorials,accounting@northridge.test,+1-555-0133,"Atlanta, GA","Savannah, GA","Seasonal reorder account",false',
+        "Customer Number,Customer Name,Address,Address,City,State,Zip Code,Telephone,Fax Number,Primary Contact,Credit Limit,Shipping Method,Payment Terms,UploadtoPeach,CustomerEmail",
+        '513,"1843, LLC",1000 CEDAR AVE.,,DARBY,PA,19023,610-789-5525,610-853-1719,GREG STEFEN,0.00,,Net 30,FALSE,laura@1843memorials.com',
+        '598,A. MATALUCCI & SONS,P.O. BOX 234,,SOUTH DENNIS,NJ,08245,609-602-3927,480-772-4867,ZETH,0.00,,,FALSE,info@amatalucci.com',
     ]
 )
 
@@ -127,6 +161,13 @@ def _normalize_nullable_string(value: Any) -> Optional[str]:
 
 def _normalize_customer_name(value: Optional[str]) -> str:
     return (value or "").strip().lower()
+
+
+def _normalize_zip_code(value: Any) -> Optional[str]:
+    normalized = _normalize_nullable_string(value)
+    if normalized is None:
+        return None
+    return normalized.replace(" ", "")
 
 
 def _canonicalize_header(value: str) -> str:
@@ -146,20 +187,58 @@ def _parse_bool(value: Optional[str]) -> Optional[bool]:
     return None
 
 
+def _compose_address(line_1: Optional[str], line_2: Optional[str], city: Optional[str], state: Optional[str], zip_code: Optional[str]) -> Optional[str]:
+    street = ", ".join(part for part in [line_1, line_2] if part)
+    locality = ", ".join(part for part in [city, state] if part)
+    final_line = " ".join(part for part in [locality, zip_code] if part).strip()
+    combined = ", ".join(part for part in [street, final_line] if part)
+    return combined or None
+
+
+def _parse_credit_limit(value: Optional[str]) -> tuple[Optional[str], bool]:
+    normalized = _normalize_nullable_string(value)
+    if normalized is None:
+        return None, True
+    cleaned = normalized.replace("$", "").replace(",", "")
+    try:
+        return cleaned, True
+    except ValueError:
+        return normalized, False
+
+
 def _customer_csv_format_response() -> CustomerImportFormatResponse:
     return CustomerImportFormatResponse(
         delimiter=",",
         has_header=True,
         required_fields=["name"],
-        optional_fields=["email", "phone", "billing_address", "shipping_address", "notes", "is_active"],
+        optional_fields=[
+            "customer_number",
+            "address_line_1",
+            "address_line_2",
+            "city",
+            "state",
+            "zip_code",
+            "email",
+            "phone",
+            "fax_number",
+            "primary_contact",
+            "credit_limit",
+            "shipping_method",
+            "payment_terms",
+            "upload_to_peach",
+            "billing_address",
+            "shipping_address",
+            "notes",
+            "is_active",
+        ],
         fields=IMPORT_FIELD_SPECS,
         sample_csv=IMPORT_SAMPLE_CSV,
         notes=[
             "Customer name is required and is used as the matching key for update/upsert operations.",
-            "Customer tier is not assigned during bulk import. New customers default to STANDARD and existing tiers remain unchanged.",
+            "The Glenrock customer CSV format is supported directly, including duplicate Address columns.",
             "is_active accepts true/false, yes/no, 1/0, or active/archived.",
             "Conflict strategy controls whether matching customer names are created, updated, or both.",
-            "No-header imports support either 4 columns (name, email, phone, billing_address) or 7 columns (full contract).",
+            "No-header imports support either 4 columns, 7 columns, or the Glenrock 15-column customer export.",
         ],
     )
 
@@ -170,33 +249,54 @@ def _parse_customer_import_rows(payload: CustomerImportRequest) -> list[dict[str
         raise HTTPException(status_code=400, detail="CSV data is empty.")
 
     if payload.has_header:
-        reader = csv.DictReader(StringIO(content))
-        if not reader.fieldnames:
+        raw_rows = list(csv.reader(StringIO(content)))
+        if not raw_rows:
             raise HTTPException(status_code=400, detail="CSV header row is required.")
-
-        header_map: dict[str, str] = {}
-        for field_name in reader.fieldnames:
-            if field_name is None:
-                continue
-            canonical = _canonicalize_header(field_name)
-            if canonical and canonical != "ignored":
-                header_map[canonical] = field_name
-
-        if "name" not in header_map:
+        header_row = raw_rows[0]
+        canonical_headers = [_canonicalize_header(field_name) for field_name in header_row]
+        if "name" not in canonical_headers:
             raise HTTPException(status_code=400, detail="Missing required CSV header: name")
 
+        def values_for(field: str, row: list[str]) -> list[str]:
+            return [row[index] for index, canonical in enumerate(canonical_headers) if canonical == field and index < len(row)]
+
         rows: list[dict[str, Any]] = []
-        for row_number, raw_row in enumerate(reader, start=2):
+        for row_number, raw_row in enumerate(raw_rows[1:], start=2):
+            address_values = values_for("address", raw_row)
+            address_line_1 = address_values[0] if len(address_values) > 0 else ""
+            address_line_2 = address_values[1] if len(address_values) > 1 else ""
+            city = next((value for value in values_for("city", raw_row) if value.strip()), "")
+            state = next((value for value in values_for("state", raw_row) if value.strip()), "")
+            zip_code = next((value for value in values_for("zip_code", raw_row) if value.strip()), "")
+            composed_address = _compose_address(
+                _normalize_nullable_string(address_line_1),
+                _normalize_nullable_string(address_line_2),
+                _normalize_nullable_string(city),
+                _normalize_nullable_string(state),
+                _normalize_zip_code(zip_code),
+            ) or ""
             rows.append(
                 {
                     "row_number": row_number,
-                    "name": raw_row.get(header_map.get("name", ""), ""),
-                    "email": raw_row.get(header_map.get("email", ""), ""),
-                    "phone": raw_row.get(header_map.get("phone", ""), ""),
-                    "billing_address": raw_row.get(header_map.get("billing_address", ""), ""),
-                    "shipping_address": raw_row.get(header_map.get("shipping_address", ""), ""),
-                    "notes": raw_row.get(header_map.get("notes", ""), ""),
-                    "is_active": raw_row.get(header_map.get("is_active", ""), ""),
+                    "customer_number": next((value for value in values_for("customer_number", raw_row) if value.strip()), ""),
+                    "name": next((value for value in values_for("name", raw_row) if value.strip()), ""),
+                    "address_line_1": address_line_1,
+                    "address_line_2": address_line_2,
+                    "city": city,
+                    "state": state,
+                    "zip_code": zip_code,
+                    "email": next((value for value in values_for("email", raw_row) if value.strip()), ""),
+                    "phone": next((value for value in values_for("phone", raw_row) if value.strip()), ""),
+                    "fax_number": next((value for value in values_for("fax_number", raw_row) if value.strip()), ""),
+                    "primary_contact": next((value for value in values_for("primary_contact", raw_row) if value.strip()), ""),
+                    "credit_limit": next((value for value in values_for("credit_limit", raw_row) if value.strip()), ""),
+                    "shipping_method": next((value for value in values_for("shipping_method", raw_row) if value.strip()), ""),
+                    "payment_terms": next((value for value in values_for("payment_terms", raw_row) if value.strip()), ""),
+                    "upload_to_peach": next((value for value in values_for("upload_to_peach", raw_row) if value.strip()), ""),
+                    "billing_address": next((value for value in values_for("billing_address", raw_row) if value.strip()), "") or composed_address,
+                    "shipping_address": next((value for value in values_for("shipping_address", raw_row) if value.strip()), "") or composed_address,
+                    "notes": next((value for value in values_for("notes", raw_row) if value.strip()), ""),
+                    "is_active": next((value for value in values_for("is_active", raw_row) if value.strip()), "") or "true",
                 }
             )
         return rows
@@ -236,9 +336,44 @@ def _parse_customer_import_rows(payload: CustomerImportRequest) -> list[dict[str
             )
             continue
 
+        if len(normalized) == 15:
+            composed_address = _compose_address(
+                _normalize_nullable_string(normalized[2]),
+                _normalize_nullable_string(normalized[3]),
+                _normalize_nullable_string(normalized[4]),
+                _normalize_nullable_string(normalized[5]),
+                _normalize_zip_code(normalized[6]),
+            ) or ""
+            parsed_rows.append(
+                {
+                    "row_number": row_number,
+                    "customer_number": normalized[0],
+                    "name": normalized[1],
+                    "address_line_1": normalized[2],
+                    "address_line_2": normalized[3],
+                    "city": normalized[4],
+                    "state": normalized[5],
+                    "zip_code": normalized[6],
+                    "phone": normalized[7],
+                    "fax_number": normalized[8],
+                    "primary_contact": normalized[9],
+                    "credit_limit": normalized[10],
+                    "shipping_method": normalized[11],
+                    "payment_terms": normalized[12],
+                    "upload_to_peach": normalized[13],
+                    "email": normalized[14],
+                    "billing_address": composed_address,
+                    "shipping_address": composed_address,
+                    "notes": "",
+                    "is_active": "true",
+                }
+            )
+            continue
+
         parsed_rows.append(
             {
                 "row_number": row_number,
+                "customer_number": normalized[0] if len(normalized) > 0 else "",
                 "name": normalized[0] if len(normalized) > 0 else "",
                 "email": normalized[1] if len(normalized) > 1 else "",
                 "phone": normalized[2] if len(normalized) > 2 else "",
@@ -246,7 +381,7 @@ def _parse_customer_import_rows(payload: CustomerImportRequest) -> list[dict[str
                 "shipping_address": normalized[4] if len(normalized) > 4 else "",
                 "notes": normalized[5] if len(normalized) > 5 else "",
                 "is_active": normalized[6] if len(normalized) > 6 else "",
-                "row_error": "No-header imports require either 4 columns (name, email, phone, billing_address) or 7 columns (full customer import contract).",
+                "row_error": "No-header imports require either 4 columns, 7 columns, or the Glenrock 15-column customer export.",
             }
         )
 
@@ -302,10 +437,29 @@ def _analyze_customer_import(payload: CustomerImportRequest, db: Session) -> dic
         if phone and len(phone) > PHONE_MAX_LENGTH:
             messages.append(f"Phone exceeds max length of {PHONE_MAX_LENGTH} characters.")
 
+        fax_number = _normalize_nullable_string(raw_row.get("fax_number"))
+        if fax_number and len(fax_number) > FAX_MAX_LENGTH:
+            messages.append(f"Fax number exceeds max length of {FAX_MAX_LENGTH} characters.")
+
+        credit_limit_raw = _normalize_nullable_string(raw_row.get("credit_limit"))
+        credit_limit = None
+        if credit_limit_raw:
+            cleaned_credit_limit = credit_limit_raw.replace("$", "").replace(",", "")
+            try:
+                float(cleaned_credit_limit)
+                credit_limit = cleaned_credit_limit
+            except ValueError:
+                messages.append("Credit limit must be numeric.")
+
         is_active_raw = _normalize_nullable_string(raw_row.get("is_active"))
         is_active = _parse_bool(is_active_raw)
         if is_active is None:
             messages.append("is_active must be true/false, yes/no, 1/0, or active/archived.")
+
+        upload_to_peach_raw = _normalize_nullable_string(raw_row.get("upload_to_peach"))
+        upload_to_peach = _parse_bool(upload_to_peach_raw)
+        if upload_to_peach_raw and upload_to_peach is None:
+            messages.append("UploadtoPeach must be true/false, yes/no, 1/0, or active/archived.")
 
         name_key = _normalize_customer_name(name)
         if name_key:
@@ -330,9 +484,21 @@ def _analyze_customer_import(payload: CustomerImportRequest, db: Session) -> dic
             else:
                 action = "UPDATE" if exists else "CREATE"
                 candidate_payload = {
+                    "customer_number": _normalize_nullable_string(raw_row.get("customer_number")),
                     "name": name,
+                    "address_line_1": _normalize_nullable_string(raw_row.get("address_line_1")),
+                    "address_line_2": _normalize_nullable_string(raw_row.get("address_line_2")),
+                    "city": _normalize_nullable_string(raw_row.get("city")),
+                    "state": _normalize_nullable_string(raw_row.get("state")),
+                    "zip_code": _normalize_zip_code(raw_row.get("zip_code")),
                     "email": email,
                     "phone": phone,
+                    "fax_number": fax_number,
+                    "primary_contact": _normalize_nullable_string(raw_row.get("primary_contact")),
+                    "credit_limit": credit_limit,
+                    "shipping_method": _normalize_nullable_string(raw_row.get("shipping_method")),
+                    "payment_terms": _normalize_nullable_string(raw_row.get("payment_terms")),
+                    "upload_to_peach": bool(upload_to_peach) if upload_to_peach is not None else False,
                     "billing_address": _normalize_nullable_string(raw_row.get("billing_address")),
                     "shipping_address": _normalize_nullable_string(raw_row.get("shipping_address")),
                     "notes": _normalize_nullable_string(raw_row.get("notes")),

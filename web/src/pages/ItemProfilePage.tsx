@@ -13,6 +13,7 @@ import InventoryGauge from "../components/items/InventoryGauge";
 import ItemTopCustomersTable from "../components/items/ItemTopCustomersTable";
 import ItemSupplierTable from "../components/items/ItemSupplierTable";
 import ItemMovementTimeline from "../components/items/ItemMovementTimeline";
+import MonumentPreviewCard from "../components/items/MonumentPreviewCard";
 
 type Tab = "overview" | "sales" | "inventory" | "suppliers";
 
@@ -154,6 +155,8 @@ export default function ItemProfilePage() {
             </button>
           </div>
         </div>
+
+        <MonumentPreviewCard item={item} />
 
         {/* Expandable details */}
         {showDetails && (

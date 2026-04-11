@@ -180,6 +180,7 @@ export default function ItemsBulkImportPage() {
   };
 
   const previewRows = preview?.rows ?? [];
+  const errorRows = previewRows.filter((row) => row.status === "ERROR");
   const importedItems = preview?.imported_items ?? [];
   const totalMappedFields = format ? format.required_fields.length + format.optional_fields.length : 0;
 
@@ -389,7 +390,7 @@ export default function ItemsBulkImportPage() {
                 </tr>
               </thead>
               <tbody>
-                {previewRows.map((row) => (
+                {errorRows.map((row) => (
                   <tr key={`${row.row_number}-${row.name || "row"}`} className="border-t border-border/70 align-top">
                     <td className="px-3 py-3 font-mono text-xs text-muted">{row.row_number}</td>
                     <td className="px-3 py-3 font-mono text-xs">{row.item_code || row.sku || "-"}</td>
@@ -401,6 +402,13 @@ export default function ItemsBulkImportPage() {
                     <td className="px-3 py-3 text-xs text-muted">{row.messages.length ? row.messages.join(" ") : "No issues detected."}</td>
                   </tr>
                 ))}
+                {errorRows.length === 0 ? (
+                  <tr className="border-t border-border/70">
+                    <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted">
+                      No validation errors. All rows are ready to import.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

@@ -560,6 +560,13 @@ class ItemListEnriched(BaseModel):
     unique_customers: int = 0
 
 
+class ItemListPageResponse(BaseModel):
+    items: List[ItemListEnriched]
+    total_count: int
+    page: int
+    page_size: int
+
+
 class ItemsSummaryResponse(BaseModel):
     total_items: int = 0
     active_items: int = 0

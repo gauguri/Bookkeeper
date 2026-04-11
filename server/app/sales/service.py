@@ -1262,7 +1262,9 @@ def get_items_enriched(
     stock_status: Optional[str] = None,
     sort_by: str = "name",
     sort_dir: str = "asc",
-) -> List[dict]:
+    page: int = 0,
+    page_size: int = 50,
+) -> dict:
     """Return enriched item list with inventory, revenue, margin data."""
     from app.models import Inventory, SupplierItem, Supplier
 
@@ -1393,7 +1395,18 @@ def get_items_enriched(
     key_fn = sort_key_map.get(sort_by, sort_key_map["name"])
     result.sort(key=key_fn, reverse=(sort_dir == "desc"))
 
-    return result
+    total_count = len(result)
+    safe_page = max(page, 0)
+    safe_page_size = max(1, min(page_size, 200))
+    start = safe_page * safe_page_size
+    end = start + safe_page_size
+
+    return {
+        "items": result[start:end],
+        "total_count": total_count,
+        "page": safe_page,
+        "page_size": safe_page_size,
+    }
 
 
 def get_items_summary(db: Session) -> dict:

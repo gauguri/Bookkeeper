@@ -26,6 +26,13 @@ export type ItemListEnriched = {
   unique_customers: number;
 };
 
+export type ItemListPage = {
+  items: ItemListEnriched[];
+  total_count: number;
+  page: number;
+  page_size: number;
+};
+
 export type ItemsSummary = {
   total_items: number;
   active_items: number;
@@ -140,6 +147,8 @@ export type ItemFilters = {
   stock_status?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
 };
 
 // ── Hooks ────────────────────────────────────────────────
@@ -167,10 +176,12 @@ export function useItemsEnriched(filters: ItemFilters = {}) {
     stock_status: filters.stock_status,
     sort_by: filters.sort_by,
     sort_dir: filters.sort_dir,
+    page: filters.page !== undefined ? String(filters.page) : undefined,
+    page_size: filters.page_size !== undefined ? String(filters.page_size) : undefined,
   });
   return useQuery({
     queryKey: ["items", "enriched", filters],
-    queryFn: () => apiFetch<ItemListEnriched[]>(`/items-enriched${qs}`),
+    queryFn: () => apiFetch<ItemListPage>(`/items-enriched${qs}`),
     staleTime: 30_000,
   });
 }

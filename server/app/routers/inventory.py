@@ -42,6 +42,22 @@ def _q2(value: Decimal | float | int | None) -> Decimal:
     return _safe_decimal(value).quantize(Decimal("0.01"))
 
 
+def _resolve_inventory_unit_cost(item: Item, inventory: Inventory | None) -> Decimal:
+    inventory_cost = _q2(inventory.landed_unit_cost) if inventory and inventory.landed_unit_cost is not None else Decimal("0.00")
+    if inventory_cost > 0:
+        return inventory_cost
+
+    item_cost = _q2(item.cost_price) if item.cost_price is not None else Decimal("0.00")
+    if item_cost > 0:
+        return item_cost
+
+    preferred_cost = _q2(item.preferred_landed_cost) if item.preferred_landed_cost is not None else Decimal("0.00")
+    if preferred_cost > 0:
+        return preferred_cost
+
+    return Decimal("0.00")
+
+
 def _avg_usage_by_item(db: Session, item_ids: list[int], usage_days: int) -> dict[int, Decimal]:
     if not item_ids:
         return {}
@@ -135,8 +151,7 @@ def _build_inventory_rows(
     for item in items:
         inv = inv_by_id.get(item.id)
         on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
-        landed_cost = _q2(inv.landed_unit_cost if inv else item.preferred_landed_cost)
-        inventory_total_value = _q2(inv.total_value) if inv else None
+        landed_cost = _resolve_inventory_unit_cost(item, inv)
         reserved = _q2(reserved_by_id.get(item.id, Decimal("0")))
         available = on_hand - reserved
         avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))
@@ -173,13 +188,7 @@ def _build_inventory_rows(
         elif pressure:
             health_flag = "reserved_pressure"
 
-        computed_total_value = _q2(on_hand * landed_cost) if on_hand > 0 else Decimal("0.00")
-        effective_total_value = Decimal("0.00")
-        if on_hand > 0:
-            if computed_total_value > 0:
-                effective_total_value = computed_total_value
-            elif inventory_total_value is not None and inventory_total_value > 0:
-                effective_total_value = _q2(inventory_total_value)
+        effective_total_value = _q2(on_hand * landed_cost) if on_hand >= Decimal("1") and landed_cost > 0 else Decimal("0.00")
 
         rows.append(
             schemas.InventoryItemRow(
@@ -453,13 +462,20 @@ def get_inventory_composition(
     metric: str = Query("value", pattern="^(value|quantity)$"),
     db: Session = Depends(get_db),
 ):
-    rows = _build_inventory_rows(db, usage_days=90)
-    inventory_by_item_id = {record.item_id: record for record in db.query(Inventory).filter(Inventory.item_id.in_([row.id for row in rows])).all()}
+    rows = _build_inventory_rows(db, usage_days=90, include_activity_dates=False)
+    item_ids = [row.id for row in rows]
+    items_by_id = {item.id: item for item in db.query(Item).options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier)).filter(Item.id.in_(item_ids)).all()}
+    inventory_by_item_id = {record.item_id: record for record in db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()}
     composition: list[schemas.InventoryCompositionPoint] = []
     for row in rows:
+        if row.on_hand < Decimal("1"):
+            continue
+        item = items_by_id.get(row.id)
+        if item is None:
+            continue
         inventory = inventory_by_item_id.get(row.id)
-        landed_unit_cost_raw = _safe_decimal(inventory.landed_unit_cost if inventory else Decimal("0"))
-        landed_unit_cost_missing = inventory is None or inventory.landed_unit_cost is None
+        landed_unit_cost_raw = _resolve_inventory_unit_cost(item, inventory)
+        landed_unit_cost_missing = landed_unit_cost_raw <= 0
         on_hand_qty = _q2(row.on_hand)
         reserved_qty = _q2(row.reserved)
         available_qty = _q2(on_hand_qty - reserved_qty)

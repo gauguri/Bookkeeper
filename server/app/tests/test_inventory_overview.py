@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db import Base
 from app.models import Inventory, InventoryReservation, Item, SalesRequest
-from app.routers.inventory import get_inventory_overview
+from app.routers.inventory import get_inventory_composition, get_inventory_overview
 
 
 @compiles(JSONB, "sqlite")
@@ -26,9 +26,15 @@ def create_session():
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
 
 
-def test_inventory_overview_uses_inventory_total_value_and_quantities():
+def test_inventory_overview_values_stock_using_resolved_unit_cost():
     db = create_session()
-    item = Item(name="Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    item = Item(
+        name="Widget",
+        unit_price=Decimal("10.00"),
+        cost_price=Decimal("15.00"),
+        on_hand_qty=Decimal("0"),
+        reserved_qty=Decimal("0"),
+    )
     db.add(item)
     db.flush()
 
@@ -57,7 +63,7 @@ def test_inventory_overview_uses_inventory_total_value_and_quantities():
 
     response = get_inventory_overview(limit=10, db=db)
 
-    assert response.totals.total_inventory_value == Decimal("11414.00")
+    assert response.totals.total_inventory_value == Decimal("150.00")
     assert response.totals.total_on_hand_qty == Decimal("10.00")
     assert response.totals.total_reserved_qty == Decimal("2.00")
     assert response.totals.total_available_qty == Decimal("8.00")
@@ -68,7 +74,8 @@ def test_inventory_overview_uses_inventory_total_value_and_quantities():
     assert row.on_hand_qty == Decimal("10.00")
     assert row.reserved_qty == Decimal("2.00")
     assert row.available_qty == Decimal("8.00")
-    assert row.total_value == Decimal("11414.00")
+    assert row.total_value == Decimal("150.00")
+    assert row.landed_unit_cost == Decimal("15.00")
 
 
 def test_inventory_overview_excludes_zero_quantity_rows_from_value_totals():
@@ -102,3 +109,42 @@ def test_inventory_overview_excludes_zero_quantity_rows_from_value_totals():
     assert response.totals.total_inventory_value == Decimal("100.00")
     assert len(response.items) == 1
     assert response.items[0].item_name == "Stocked Widget"
+
+
+def test_inventory_composition_uses_same_stocked_quantity_rule_and_cost_fallback():
+    db = create_session()
+    item = Item(
+        name="Composed Widget",
+        unit_price=Decimal("10.00"),
+        cost_price=Decimal("22.00"),
+        on_hand_qty=Decimal("0"),
+        reserved_qty=Decimal("0"),
+    )
+    zero_qty_item = Item(name="Ghost Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    db.add_all([item, zero_qty_item])
+    db.flush()
+
+    db.add_all(
+        [
+            Inventory(
+                item_id=item.id,
+                quantity_on_hand=Decimal("3.00"),
+                landed_unit_cost=Decimal("0.00"),
+                total_value=Decimal("9999.00"),
+            ),
+            Inventory(
+                item_id=zero_qty_item.id,
+                quantity_on_hand=Decimal("0.00"),
+                landed_unit_cost=Decimal("500.00"),
+                total_value=Decimal("500.00"),
+            ),
+        ]
+    )
+    db.commit()
+
+    response = get_inventory_composition(limit=10, metric="value", db=db)
+
+    assert len(response) == 1
+    assert response[0].item_name == "Composed Widget"
+    assert response[0].landed_unit_cost == Decimal("22.00")
+    assert response[0].total_value == Decimal("66.00")

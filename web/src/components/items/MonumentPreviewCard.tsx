@@ -1,3 +1,5 @@
+import { useState, type MouseEvent } from "react";
+
 type MonumentPreviewProps = {
   item: {
     color?: string | null;
@@ -47,6 +49,7 @@ function finishLabel(finish: string | null | undefined) {
 }
 
 export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const widthFeet = Math.max(toFeet(item.lr_feet, item.lr_inches), 0.5);
   const depthFeet = Math.max(toFeet(item.fb_feet, item.fb_inches), 0.4);
   const heightFeet = Math.max(toFeet(item.tb_feet, item.tb_inches), 0.2);
@@ -97,10 +100,27 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
   const specialShape = shape.includes("SPECIAL") || description.includes("SPECIAL");
   const flatShape = shape.includes("FLAT") || shape.includes("BASE") || shape.includes("MARKER");
 
+  const handlePointerMove = (event: MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width;
+    const py = (event.clientY - rect.top) / rect.height;
+    setTilt({
+      x: (0.5 - py) * 18,
+      y: (px - 0.5) * 24,
+    });
+  };
+
+  const resetTilt = () => setTilt({ x: 0, y: 0 });
+  const monumentTransform = `perspective(1200px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`;
+
   return (
     <div className="mt-5 overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(135deg,#eef3fb_0%,#f7f4ef_58%,#efe9df_100%)]">
       <div className="grid gap-0 lg:grid-cols-[1.35fr_0.65fr]">
-        <div className="relative min-h-[320px] overflow-hidden px-6 py-6">
+        <div
+          className="relative min-h-[320px] overflow-hidden px-6 py-6"
+          onMouseMove={handlePointerMove}
+          onMouseLeave={resetTilt}
+        >
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(255,255,255,0.9),transparent_35%),radial-gradient(circle_at_80%_25%,rgba(255,255,255,0.5),transparent_28%)]" />
           <svg viewBox="0 0 640 320" className="relative z-10 h-full w-full">
             <defs>
@@ -117,55 +137,64 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
             <path d="M120 248 H500 L546 228 H164 Z" fill="url(#pedestal)" />
             <path d="M164 228 H546 L500 214 H120 Z" fill="#edf2f8" />
 
-            <g filter="url(#shadow)">
-              <polygon points={frontPoints} fill={allPolished ? palette.accent : palette.left} />
-              <polygon points={leftPoints} fill={sawnSides && !allPolished ? "#6f767d" : palette.left} />
-              <polygon points={rightPoints} fill={allPolished ? palette.accent : palette.right} />
-              <polygon points={topPoints} fill={palette.top} />
+            <foreignObject x="70" y="32" width="500" height="230">
+              <div
+                className="h-full w-full origin-center transition-transform duration-150 ease-out"
+                style={{ transform: monumentTransform, transformStyle: "preserve-3d" }}
+              >
+                <svg viewBox="0 0 640 320" className="h-full w-full overflow-visible">
+                  <g filter="url(#shadow)">
+                    <polygon points={frontPoints} fill={allPolished ? palette.accent : palette.left} />
+                    <polygon points={leftPoints} fill={sawnSides && !allPolished ? "#6f767d" : palette.left} />
+                    <polygon points={rightPoints} fill={allPolished ? palette.accent : palette.right} />
+                    <polygon points={topPoints} fill={palette.top} />
 
-              {polishedMargin ? (
-                <polygon
-                  points={[
-                    `${x + 10},${y + 3}`,
-                    `${x + widthPx - 10},${y + 3}`,
-                    `${x + widthPx + depthPx - 10},${y - depthPx * 0.58 + 3}`,
-                    `${x + depthPx + 10},${y - depthPx * 0.58 + 3}`,
-                  ].join(" ")}
-                  fill="none"
-                  stroke={palette.accent}
-                  strokeWidth="8"
-                  strokeLinejoin="round"
-                  opacity="0.95"
-                />
-              ) : null}
+                    {polishedMargin ? (
+                      <polygon
+                        points={[
+                          `${x + 10},${y + 3}`,
+                          `${x + widthPx - 10},${y + 3}`,
+                          `${x + widthPx + depthPx - 10},${y - depthPx * 0.58 + 3}`,
+                          `${x + depthPx + 10},${y - depthPx * 0.58 + 3}`,
+                        ].join(" ")}
+                        fill="none"
+                        stroke={palette.accent}
+                        strokeWidth="8"
+                        strokeLinejoin="round"
+                        opacity="0.95"
+                      />
+                    ) : null}
 
-              {beveled ? (
-                <>
-                  <line x1={x + 14} y1={y + 4} x2={x + depthPx + 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
-                  <line x1={x + widthPx - 14} y1={y + 4} x2={x + widthPx + depthPx - 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
-                </>
-              ) : null}
+                    {beveled ? (
+                      <>
+                        <line x1={x + 14} y1={y + 4} x2={x + depthPx + 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
+                        <line x1={x + widthPx - 14} y1={y + 4} x2={x + widthPx + depthPx - 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
+                      </>
+                    ) : null}
 
-              {specialShape ? (
-                <path
-                  d={`M ${x + widthPx * 0.18} ${y + heightPx * 0.12} Q ${x + widthPx * 0.5} ${y - 18} ${x + widthPx * 0.82} ${y + heightPx * 0.12}`}
-                  stroke={palette.accent}
-                  strokeWidth="4"
-                  fill="none"
-                  opacity="0.85"
-                />
-              ) : null}
+                    {specialShape ? (
+                      <path
+                        d={`M ${x + widthPx * 0.18} ${y + heightPx * 0.12} Q ${x + widthPx * 0.5} ${y - 18} ${x + widthPx * 0.82} ${y + heightPx * 0.12}`}
+                        stroke={palette.accent}
+                        strokeWidth="4"
+                        fill="none"
+                        opacity="0.85"
+                      />
+                    ) : null}
 
-              {!flatShape ? (
-                <path
-                  d={`M ${x} ${y + heightPx * 0.4} Q ${x + widthPx * 0.08} ${y + heightPx * 0.16} ${x + widthPx * 0.16} ${y + heightPx * 0.06}`}
-                  stroke={palette.accent}
-                  strokeWidth="4"
-                  fill="none"
-                  opacity="0.7"
-                />
-              ) : null}
-            </g>
+                    {!flatShape ? (
+                      <path
+                        d={`M ${x} ${y + heightPx * 0.4} Q ${x + widthPx * 0.08} ${y + heightPx * 0.16} ${x + widthPx * 0.16} ${y + heightPx * 0.06}`}
+                        stroke={palette.accent}
+                        strokeWidth="4"
+                        fill="none"
+                        opacity="0.7"
+                      />
+                    ) : null}
+                  </g>
+                </svg>
+              </div>
+            </foreignObject>
 
             <text x="320" y="296" textAnchor="middle" className="fill-slate-600 text-[12px] font-semibold tracking-[0.18em] uppercase">
               Concept Preview

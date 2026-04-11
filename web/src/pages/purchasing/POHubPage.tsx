@@ -38,7 +38,7 @@ type Supplier = {
   created_at?: string;
 };
 
-type PODetailLine = { id: number; item_id: number; item_name: string; quantity: number; unit_cost: number };
+type PODetailLine = { id: number; item_id: number; item_name: string; quantity: number | string; unit_cost: number | string };
 type PODetail = {
   id: number;
   po_number: string;
@@ -47,10 +47,10 @@ type PODetail = {
   order_date: string;
   expected_date?: string | null;
   notes?: string | null;
-  freight_cost: number;
-  tariff_cost: number;
+  freight_cost: number | string;
+  tariff_cost: number | string;
   status: string;
-  total?: number;
+  total?: number | string;
   lines: PODetailLine[];
 };
 
@@ -82,6 +82,11 @@ const EMPTY_ANALYTICS: ProcurementHubAnalytics = {
   risk_items: [],
   insights: [],
 };
+
+function toNumber(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 export default function POHubPage() {
   const navigate = useNavigate();
@@ -327,7 +332,13 @@ export default function POHubPage() {
     }
   };
 
-  const poTotal = detailPO ? (detailPO.total ?? detailPO.lines.reduce((sum, line) => sum + line.quantity * line.unit_cost, 0) + detailPO.freight_cost + detailPO.tariff_cost) : 0;
+  const poTotal = detailPO
+    ? (detailPO.total != null
+      ? toNumber(detailPO.total)
+      : detailPO.lines.reduce((sum, line) => sum + toNumber(line.quantity) * toNumber(line.unit_cost), 0)
+        + toNumber(detailPO.freight_cost)
+        + toNumber(detailPO.tariff_cost))
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -409,20 +420,24 @@ export default function POHubPage() {
                             <tr><th className="px-3 py-2">Item</th><th className="px-3 py-2">Qty</th><th className="px-3 py-2">Unit Cost</th><th className="px-3 py-2 text-right">Total</th></tr>
                           </thead>
                           <tbody>
-                            {detailPO.lines.map((line) => (
-                              <tr key={line.id} className="border-t">
-                                <td className="px-3 py-2 font-medium">{line.item_name}</td>
-                                <td className="px-3 py-2">{line.quantity}</td>
-                                <td className="px-3 py-2">${line.unit_cost.toFixed(2)}</td>
-                                <td className="px-3 py-2 text-right font-semibold">${(line.quantity * line.unit_cost).toFixed(2)}</td>
-                              </tr>
-                            ))}
+                            {detailPO.lines.map((line) => {
+                              const quantity = toNumber(line.quantity);
+                              const unitCost = toNumber(line.unit_cost);
+                              return (
+                                <tr key={line.id} className="border-t">
+                                  <td className="px-3 py-2 font-medium">{line.item_name}</td>
+                                  <td className="px-3 py-2">{quantity}</td>
+                                  <td className="px-3 py-2">${unitCost.toFixed(2)}</td>
+                                  <td className="px-3 py-2 text-right font-semibold">${(quantity * unitCost).toFixed(2)}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
                       <div className="mt-4 space-y-1 text-right text-sm">
-                        {detailPO.freight_cost > 0 ? <p className="text-muted">Freight: ${detailPO.freight_cost.toFixed(2)}</p> : null}
-                        {detailPO.tariff_cost > 0 ? <p className="text-muted">Tariff: ${detailPO.tariff_cost.toFixed(2)}</p> : null}
+                        {toNumber(detailPO.freight_cost) > 0 ? <p className="text-muted">Freight: ${toNumber(detailPO.freight_cost).toFixed(2)}</p> : null}
+                        {toNumber(detailPO.tariff_cost) > 0 ? <p className="text-muted">Tariff: ${toNumber(detailPO.tariff_cost).toFixed(2)}</p> : null}
                         <p className="text-lg font-bold">Total: ${Number(poTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                       </div>
                     </div>

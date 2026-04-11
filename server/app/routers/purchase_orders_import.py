@@ -178,8 +178,13 @@ def _parse_decimal(value: Optional[str]) -> Optional[Decimal]:
     text = value.strip()
     if not text:
         return None
+    is_negative = False
+    if text.startswith("(") and text.endswith(")"):
+        is_negative = True
+        text = text[1:-1]
     try:
-        return Decimal(text.replace("$", "").replace(",", ""))
+        parsed = Decimal(text.replace("$", "").replace(",", ""))
+        return -parsed if is_negative else parsed
     except InvalidOperation:
         return None
 
@@ -433,19 +438,31 @@ def _analyze_purchase_order_import(payload: PurchaseOrderImportRequest, db: Sess
         row_number = int(raw_row["row_number"])
         po_number = _normalize_nullable_string(raw_row.get("po_number"))
         item_code = _normalize_nullable_string(raw_row.get("item_code"))
-        quantity = _parse_decimal(_normalize_nullable_string(raw_row.get("quantity")))
-        price = _parse_decimal(_normalize_nullable_string(raw_row.get("price")))
+        quantity_raw = _normalize_nullable_string(raw_row.get("quantity"))
+        price_raw = _normalize_nullable_string(raw_row.get("price"))
+        quantity = _parse_decimal(quantity_raw)
+        price = _parse_decimal(price_raw)
         inv_updated = _parse_bool(_normalize_nullable_string(raw_row.get("inv_updated")))
         messages: list[str] = []
+        skip_row = False
 
         if not po_number:
             messages.append("P.O. Number is required.")
         if not item_code:
             messages.append("Item Code is required.")
-        if quantity is None or quantity <= 0:
-            messages.append("Quantity must be greater than zero.")
-        if price is None or price < 0:
-            messages.append("Price must be zero or greater.")
+        if quantity is None:
+            skip_row = True
+            messages.append("Skipped legacy line because quantity is blank.")
+        elif quantity == 0:
+            skip_row = True
+            messages.append("Skipped legacy line because quantity is zero.")
+        elif quantity < 0:
+            quantity = abs(quantity)
+
+        if price is None:
+            price = Decimal("0.00")
+        elif price < 0:
+            price = abs(price)
         if _normalize_nullable_string(raw_row.get("inv_updated")) and inv_updated is None:
             messages.append("Inv Updated must be TRUE or FALSE when provided.")
 
@@ -474,9 +491,15 @@ def _analyze_purchase_order_import(payload: PurchaseOrderImportRequest, db: Sess
                 if item is None:
                     messages.append("Item Code does not match any item in the Product Catalog.")
 
+        blocking_messages = [message for message in messages if not message.startswith("Skipped legacy line because")]
         action = "ERROR"
-        if not messages:
-            action = "UPDATE" if (existing_po or header_record and header_record["action"] == "UPDATE") else "CREATE"
+        if not blocking_messages:
+            if skip_row:
+                action = "SKIP"
+            else:
+                action = "UPDATE" if (existing_po or header_record and header_record["action"] == "UPDATE") else "CREATE"
+
+        status = "ERROR" if blocking_messages else "VALID"
 
         row_record = {
             "source": "INVENTORY",
@@ -487,11 +510,12 @@ def _analyze_purchase_order_import(payload: PurchaseOrderImportRequest, db: Sess
             "quantity": quantity,
             "unit_cost": price,
             "action": action,
-            "status": "ERROR" if messages else "VALID",
+            "status": status,
             "messages": messages,
             "item": item,
             "inv_updated": bool(inv_updated),
             "existing_po": existing_po,
+            "skip_row": skip_row,
         }
         analysis_rows.append(row_record)
         if po_key:
@@ -514,6 +538,7 @@ def _analyze_purchase_order_import(payload: PurchaseOrderImportRequest, db: Sess
     valid_headers = [row for row in header_analysis_by_po.values() if row["status"] == "VALID"]
     create_count = sum(1 for row in valid_headers if row["action"] == "CREATE")
     update_count = sum(1 for row in valid_headers if row["action"] == "UPDATE")
+    skip_count = sum(1 for row in analysis_rows if row["action"] == "SKIP")
     error_rows = sum(1 for row in analysis_rows if row["status"] == "ERROR")
 
     return {
@@ -523,14 +548,14 @@ def _analyze_purchase_order_import(payload: PurchaseOrderImportRequest, db: Sess
             "error_rows": error_rows,
             "create_count": create_count,
             "update_count": update_count,
-            "skip_count": 0,
+            "skip_count": skip_count,
             "purchase_order_rows": len(header_rows),
             "inventory_rows": len(inventory_rows),
         },
         "rows": analysis_rows,
         "valid_headers": valid_headers,
         "valid_lines_by_po": {
-            po_key: [row for row in rows if row["status"] == "VALID"]
+            po_key: [row for row in rows if row["status"] == "VALID" and row["action"] != "SKIP"]
             for po_key, rows in line_rows_by_po.items()
         },
     }

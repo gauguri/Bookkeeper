@@ -169,3 +169,66 @@ def test_purchase_order_import_creates_purchase_order_lines_and_inventory(client
     item_payload = item_detail_response.json()["item"]
     assert item_payload["on_hand_qty"] in {"4.0", "4.00", 4}
     assert item_payload["preferred_supplier_name"] == "Dahnay Logistics"
+
+
+def test_purchase_order_import_normalizes_legacy_blank_and_negative_values(client: TestClient):
+    supplier_response = client.post(
+        "/api/suppliers",
+        json={
+            "vendor_number": "66",
+            "name": "Legacy Granite",
+            "payment_terms": "Net 30",
+            "currency": "USD",
+            "status": "active",
+        },
+    )
+    assert supplier_response.status_code == 201
+
+    for item_code, item_name in [("3717", "Blank Price Item"), ("3419", "Negative Price Item"), ("3610", "Negative Qty Item"), ("10079", "Blank Qty Item")]:
+        item_response = client.post(
+            "/api/items",
+            json={
+                "item_code": item_code,
+                "sku": item_code,
+                "name": item_name,
+                "unit_price": "100.00",
+                "is_active": True,
+            },
+        )
+        assert item_response.status_code == 201
+
+    response = client.post(
+        "/api/purchase-orders/import-preview",
+        json={
+            "purchase_orders_csv": "\n".join(
+                [
+                    "P.O. Number,P.O. Date,Vendor Number,Expected Ship Date,Comments,P.O. Status,Ship Line,Total for PO,InventoryUpdateOn,SentToPeachtree",
+                    "GR-01/2004,9/8/2004,66,10/9/2004,,RECEIVED,DAHNAY,$0.00,19-Nov-10,FALSE",
+                    "GR-01/2026,9/8/2026,66,10/9/2026,,RECEIVED,DAHNAY,$0.00,19-Nov-10,FALSE",
+                    "GR-30/2003,9/8/2003,66,10/9/2003,,RECEIVED,DAHNAY,$0.00,19-Nov-10,FALSE",
+                    "GR-12/2016,9/8/2016,66,10/9/2016,,RECEIVED,DAHNAY,$0.00,19-Nov-10,FALSE",
+                ]
+            ),
+            "inventory_csv": "\n".join(
+                [
+                    "P.O. Number,Item Code,Quantity,Price,Family Name,Item Status,Sub Total Weight,Inv Updated",
+                    "GR-01/2004,3717,1,,,,0.00,TRUE",
+                    'GR-01/2026,3419,1,"($1,530.00)",,,0.00,TRUE',
+                    'GR-30/2003,3610,-1,"($526.00)",,,0.00,TRUE',
+                    "GR-12/2016,10079,,,,,0.00,TRUE",
+                ]
+            ),
+            "has_header": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["error_rows"] == 0
+    assert payload["summary"]["skip_count"] == 1
+    by_po = {row["po_number"]: row for row in payload["rows"] if row["source"] == "INVENTORY"}
+    assert by_po["GR-01/2004"]["unit_cost"] in {"0.0", "0.00", 0, "0"}
+    assert by_po["GR-01/2026"]["unit_cost"] in {"1530.0", "1530.00", 1530, "1530"}
+    assert by_po["GR-30/2003"]["quantity"] in {"1.0", "1.00", 1, "1"}
+    assert by_po["GR-30/2003"]["unit_cost"] in {"526.0", "526.00", 526, "526"}
+    assert by_po["GR-12/2016"]["action"] == "SKIP"

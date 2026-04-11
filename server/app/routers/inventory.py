@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,6 +23,7 @@ from app.models import (
     PurchaseOrderLine,
     SalesRequest,
     SalesRequestLine,
+    SupplierItem,
 )
 
 
@@ -56,8 +58,18 @@ def _avg_usage_by_item(db: Session, item_ids: list[int], usage_days: int) -> dic
     return {item_id: (totals.get(item_id, Decimal("0")) / Decimal(usage_days)) for item_id in item_ids}
 
 
-def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.InventoryItemRow]:
-    items = db.query(Item).options(selectinload(Item.supplier_items)).order_by(Item.name.asc()).all()
+def _build_inventory_rows(
+    db: Session,
+    usage_days: int = 90,
+    *,
+    include_activity_dates: bool = True,
+) -> list[schemas.InventoryItemRow]:
+    items = (
+        db.query(Item)
+        .options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
+        .order_by(Item.name.asc())
+        .all()
+    )
     item_ids = [item.id for item in items]
 
     inv_by_id = {row.item_id: row for row in db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()}
@@ -74,18 +86,49 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
     for item_id, qty_ordered, qty_received in inbound_rows:
         inbound_by_item[item_id] = inbound_by_item.get(item_id, Decimal("0")) + max(Decimal("0"), _safe_decimal(qty_ordered) - _safe_decimal(qty_received))
 
-    movements = db.query(InventoryMovement.item_id, InventoryMovement.reason, InventoryMovement.created_at).filter(InventoryMovement.item_id.in_(item_ids)).all()
     last_receipt: dict[int, datetime] = {}
     last_issue: dict[int, datetime] = {}
     last_movement: dict[int, datetime] = {}
-    for item_id, reason, created_at in movements:
-        if created_at:
-            last_movement[item_id] = max(last_movement.get(item_id, created_at), created_at)
-            reason_norm = (reason or "").upper()
-            if "RECEIPT" in reason_norm:
-                last_receipt[item_id] = max(last_receipt.get(item_id, created_at), created_at)
-            if "ISSUE" in reason_norm or "SHIP" in reason_norm:
-                last_issue[item_id] = max(last_issue.get(item_id, created_at), created_at)
+    if include_activity_dates and item_ids:
+        last_movement = {
+            item_id: created_at
+            for item_id, created_at in (
+                db.query(InventoryMovement.item_id, func.max(InventoryMovement.created_at))
+                .filter(InventoryMovement.item_id.in_(item_ids))
+                .group_by(InventoryMovement.item_id)
+                .all()
+            )
+            if created_at is not None
+        }
+        last_receipt = {
+            item_id: created_at
+            for item_id, created_at in (
+                db.query(InventoryMovement.item_id, func.max(InventoryMovement.created_at))
+                .filter(
+                    InventoryMovement.item_id.in_(item_ids),
+                    func.upper(InventoryMovement.reason).like("%RECEIPT%"),
+                )
+                .group_by(InventoryMovement.item_id)
+                .all()
+            )
+            if created_at is not None
+        }
+        last_issue = {
+            item_id: created_at
+            for item_id, created_at in (
+                db.query(InventoryMovement.item_id, func.max(InventoryMovement.created_at))
+                .filter(
+                    InventoryMovement.item_id.in_(item_ids),
+                    (
+                        func.upper(InventoryMovement.reason).like("%ISSUE%")
+                        | func.upper(InventoryMovement.reason).like("%SHIP%")
+                    ),
+                )
+                .group_by(InventoryMovement.item_id)
+                .all()
+            )
+            if created_at is not None
+        }
 
     now = datetime.utcnow()
     rows: list[schemas.InventoryItemRow] = []
@@ -130,8 +173,13 @@ def _build_inventory_rows(db: Session, usage_days: int = 90) -> list[schemas.Inv
         elif pressure:
             health_flag = "reserved_pressure"
 
-        computed_total_value = _q2(on_hand * landed_cost)
-        effective_total_value = inventory_total_value if inventory_total_value is not None and inventory_total_value > 0 else computed_total_value
+        computed_total_value = _q2(on_hand * landed_cost) if on_hand > 0 else Decimal("0.00")
+        effective_total_value = Decimal("0.00")
+        if on_hand > 0:
+            if computed_total_value > 0:
+                effective_total_value = computed_total_value
+            elif inventory_total_value is not None and inventory_total_value > 0:
+                effective_total_value = _q2(inventory_total_value)
 
         rows.append(
             schemas.InventoryItemRow(
@@ -354,7 +402,7 @@ def update_inventory_planning(item_id: int, payload: schemas.InventoryPlanningUp
 
 @router.get("/analytics", response_model=schemas.InventoryAnalyticsResponse)
 def get_inventory_analytics(db: Session = Depends(get_db)):
-    rows = _build_inventory_rows(db, usage_days=90)
+    rows = _build_inventory_rows(db, usage_days=90, include_activity_dates=False)
     now = datetime.utcnow()
 
     value_trend: list[schemas.InventoryTrendPoint] = []
@@ -444,11 +492,12 @@ def get_inventory_overview(
     limit: int = Query(10, ge=0, le=500),
     db: Session = Depends(get_db),
 ):
-    rows = _build_inventory_rows(db, usage_days=90)
+    rows = _build_inventory_rows(db, usage_days=90, include_activity_dates=False)
     items: list[schemas.InventoryOverviewItem] = []
     missing_landed_cost_count = 0
+    stocked_rows = [row for row in rows if row.on_hand >= Decimal("1")]
 
-    for row in rows:
+    for row in stocked_rows:
         on_hand_qty = _q2(row.on_hand)
         reserved_qty = _q2(row.reserved)
         available_qty = _q2(max(Decimal("0"), row.available))
@@ -481,10 +530,10 @@ def get_inventory_overview(
         items = items[:limit]
 
     totals = schemas.InventoryOverviewTotals(
-        total_on_hand_qty=_q2(sum((row.on_hand for row in rows), Decimal("0"))),
-        total_reserved_qty=_q2(sum((row.reserved for row in rows), Decimal("0"))),
-        total_available_qty=_q2(sum((max(Decimal("0"), row.available) for row in rows), Decimal("0"))),
-        total_inventory_value=_q2(sum((row.total_value for row in rows), Decimal("0"))),
+        total_on_hand_qty=_q2(sum((row.on_hand for row in stocked_rows), Decimal("0"))),
+        total_reserved_qty=_q2(sum((row.reserved for row in stocked_rows), Decimal("0"))),
+        total_available_qty=_q2(sum((max(Decimal("0"), row.available) for row in stocked_rows), Decimal("0"))),
+        total_inventory_value=_q2(sum((row.total_value for row in stocked_rows), Decimal("0"))),
     )
 
     queues = [

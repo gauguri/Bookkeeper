@@ -69,3 +69,36 @@ def test_inventory_overview_uses_inventory_total_value_and_quantities():
     assert row.reserved_qty == Decimal("2.00")
     assert row.available_qty == Decimal("8.00")
     assert row.total_value == Decimal("11414.00")
+
+
+def test_inventory_overview_excludes_zero_quantity_rows_from_value_totals():
+    db = create_session()
+    stocked_item = Item(name="Stocked Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    zero_qty_item = Item(name="Zero Widget", unit_price=Decimal("10.00"), on_hand_qty=Decimal("0"), reserved_qty=Decimal("0"))
+    db.add_all([stocked_item, zero_qty_item])
+    db.flush()
+
+    db.add_all(
+        [
+            Inventory(
+                item_id=stocked_item.id,
+                quantity_on_hand=Decimal("5.00"),
+                landed_unit_cost=Decimal("20.00"),
+                total_value=Decimal("100.00"),
+            ),
+            Inventory(
+                item_id=zero_qty_item.id,
+                quantity_on_hand=Decimal("0.00"),
+                landed_unit_cost=Decimal("5000.00"),
+                total_value=Decimal("999999.00"),
+            ),
+        ]
+    )
+    db.commit()
+
+    response = get_inventory_overview(limit=10, db=db)
+
+    assert response.totals.total_on_hand_qty == Decimal("5.00")
+    assert response.totals.total_inventory_value == Decimal("100.00")
+    assert len(response.items) == 1
+    assert response.items[0].item_name == "Stocked Widget"

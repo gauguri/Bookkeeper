@@ -90,7 +90,6 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
   const finish = (item.finish || "").toUpperCase();
   const description = `${item.description || ""} ${item.sales_description || ""}`.toUpperCase();
   const polishedMargin = finish.includes("POL MRG") || description.includes("POL MARGIN");
-  const beveled = description.includes("BRP") || description.includes("BEVEL");
   const allPolished = finish.includes("ALL POL");
   const sawnSides = finish.includes("SS");
 
@@ -173,8 +172,8 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
       ctx.closePath();
       ctx.fillStyle = face.fill;
       ctx.fill();
-      ctx.strokeStyle = "rgba(41,52,70,0.22)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(41,52,70,0.08)";
+      ctx.lineWidth = 0.6;
       ctx.stroke();
 
       if (face.name === "top" && polishedMargin) {
@@ -196,23 +195,11 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
       }
     }
 
-    if (beveled) {
-      const topFace = renderedFaces.find((face) => face.name === "top");
-      if (topFace) {
-        ctx.strokeStyle = palette.accent;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(topFace.pts[0].sx + 12, topFace.pts[0].sy + 4);
-        ctx.lineTo(topFace.pts[1].sx - 12, topFace.pts[1].sy + 4);
-        ctx.stroke();
-      }
-    }
-
     ctx.fillStyle = "#52627c";
     ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("CONCEPT PREVIEW", centerX, height - 18);
-  }, [beveled, geometry, palette.accent, polishedMargin, view]);
+  }, [geometry, palette.accent, polishedMargin, view]);
 
   const handleMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
     dragRef.current = {

@@ -9,12 +9,12 @@ import {
   AlertTriangle,
   Sparkles,
   Plus,
-  X,
   Loader2,
   Mail,
   Phone,
   MapPin,
   FileUp,
+  X,
 } from "lucide-react";
 import POKpiCards from "../../components/purchasing/POKpiCards";
 import SpendAnalysisChart from "../../components/purchasing/SpendAnalysisChart";
@@ -25,7 +25,7 @@ import RiskHeatMap from "../../components/purchasing/RiskHeatMap";
 import AIInsightsPanel from "../../components/purchasing/AIInsightsPanel";
 import type { ProcurementHubAnalytics } from "../../components/purchasing/types";
 import POTable from "../../components/purchasing/POTable";
-import { apiFetch, getPurchaseOrder } from "../../api";
+import { apiFetch } from "../../api";
 
 type Section = "dashboard" | "orders" | "vendors" | "analytics" | "compliance" | "risk" | "ai";
 
@@ -36,22 +36,6 @@ type Supplier = {
   phone?: string | null;
   address?: string | null;
   created_at?: string;
-};
-
-type PODetailLine = { id: number; item_id: number; item_name: string; quantity: number | string; unit_cost: number | string };
-type PODetail = {
-  id: number;
-  po_number: string;
-  supplier_id: number;
-  supplier_name?: string;
-  order_date: string;
-  expected_date?: string | null;
-  notes?: string | null;
-  freight_cost: number | string;
-  tariff_cost: number | string;
-  status: string;
-  total?: number | string;
-  lines: PODetailLine[];
 };
 
 const NAV_ITEMS: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
@@ -83,11 +67,6 @@ const EMPTY_ANALYTICS: ProcurementHubAnalytics = {
   insights: [],
 };
 
-function toNumber(value: number | string | null | undefined) {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 export default function POHubPage() {
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("dashboard");
@@ -95,9 +74,6 @@ export default function POHubPage() {
   const [hubAnalytics, setHubAnalytics] = useState<ProcurementHubAnalytics>(EMPTY_ANALYTICS);
   const [hubLoading, setHubLoading] = useState(true);
   const [hubError, setHubError] = useState("");
-
-  const [detailPO, setDetailPO] = useState<PODetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
@@ -122,17 +98,14 @@ export default function POHubPage() {
     }
   };
 
-  const handleViewPO = async (po: { id: number; po_number: string; supplier_name: string; order_date: string; expected_date?: string | null; status: string; total: number }) => {
-    setDetailLoading(true);
-    setDetailPO({ id: po.id, po_number: po.po_number, supplier_id: 0, supplier_name: po.supplier_name, order_date: po.order_date, expected_date: po.expected_date || null, status: po.status, total: po.total, freight_cost: 0, tariff_cost: 0, lines: [] });
-    try {
-      const detail = await getPurchaseOrder<PODetail>(po.id);
-      setDetailPO({ ...detail, supplier_name: detail.supplier_name || po.supplier_name });
-    } catch {
-      // Keep basic info if detail fetch fails.
-    } finally {
-      setDetailLoading(false);
-    }
+  const handleViewPO = (po: { id: number; po_number: string; supplier_name: string }) => {
+    navigate(`/purchasing/purchase-orders/${po.id}`, {
+      state: {
+        supplierName: po.supplier_name,
+        backTo: "/purchasing/po-hub",
+        backLabel: "Back to Procurement Hub",
+      },
+    });
   };
 
   const loadSuppliers = async () => {
@@ -332,14 +305,6 @@ export default function POHubPage() {
     }
   };
 
-  const poTotal = detailPO
-    ? (detailPO.total != null
-      ? toNumber(detailPO.total)
-      : detailPO.lines.reduce((sum, line) => sum + toNumber(line.quantity) * toNumber(line.unit_cost), 0)
-        + toNumber(detailPO.freight_cost)
-        + toNumber(detailPO.tariff_cost))
-    : 0;
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -375,89 +340,6 @@ export default function POHubPage() {
       </div>
 
       {renderSection()}
-
-      {detailPO && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={() => setDetailPO(null)}>
-          <div className="h-full w-full max-w-lg overflow-y-auto bg-white p-0 shadow-xl dark:bg-slate-900" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b px-6 py-5">
-              <div>
-                <h2 className="text-lg font-semibold">{detailPO.po_number}</h2>
-                <p className="text-sm text-muted">{detailPO.supplier_name || `Supplier #${detailPO.supplier_id}`}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={`app-badge ${detailPO.status === "DRAFT" ? "border-slate-300 bg-slate-100 text-slate-600" : detailPO.status === "SENT" ? "border-blue-300 bg-blue-50 text-blue-700" : detailPO.status === "RECEIVED" ? "border-green-300 bg-green-50 text-green-700" : "border-slate-300 bg-slate-100 text-slate-600"}`}>
-                  {detailPO.status.replace("_", " ")}
-                </span>
-                <button className="app-button-ghost" onClick={() => setDetailPO(null)}><X className="h-5 w-5" /></button>
-              </div>
-            </div>
-
-            <div className="space-y-6 p-6">
-              {detailLoading ? (
-                <div className="flex flex-col items-center gap-3 py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                  <p className="text-sm text-muted">Loading details...</p>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-xl border p-3">
-                      <span className="text-xs text-muted">Order Date</span>
-                      <p className="mt-1 font-semibold">{detailPO.order_date}</p>
-                    </div>
-                    <div className="rounded-xl border p-3">
-                      <span className="text-xs text-muted">Expected Date</span>
-                      <p className="mt-1 font-semibold">{detailPO.expected_date || "-"}</p>
-                    </div>
-                  </div>
-
-                  {detailPO.lines.length > 0 ? (
-                    <div>
-                      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Line Items</h3>
-                      <div className="overflow-hidden rounded-xl border">
-                        <table className="w-full text-left text-sm">
-                          <thead className="text-xs uppercase text-muted">
-                            <tr><th className="px-3 py-2">Item</th><th className="px-3 py-2">Qty</th><th className="px-3 py-2">Unit Cost</th><th className="px-3 py-2 text-right">Total</th></tr>
-                          </thead>
-                          <tbody>
-                            {detailPO.lines.map((line) => {
-                              const quantity = toNumber(line.quantity);
-                              const unitCost = toNumber(line.unit_cost);
-                              return (
-                                <tr key={line.id} className="border-t">
-                                  <td className="px-3 py-2 font-medium">{line.item_name}</td>
-                                  <td className="px-3 py-2">{quantity}</td>
-                                  <td className="px-3 py-2">${unitCost.toFixed(2)}</td>
-                                  <td className="px-3 py-2 text-right font-semibold">${(quantity * unitCost).toFixed(2)}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="mt-4 space-y-1 text-right text-sm">
-                        {toNumber(detailPO.freight_cost) > 0 ? <p className="text-muted">Freight: ${toNumber(detailPO.freight_cost).toFixed(2)}</p> : null}
-                        {toNumber(detailPO.tariff_cost) > 0 ? <p className="text-muted">Tariff: ${toNumber(detailPO.tariff_cost).toFixed(2)}</p> : null}
-                        <p className="text-lg font-bold">Total: ${Number(poTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted">No line items.</p>
-                  )}
-
-                  {detailPO.notes ? (
-                    <div>
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Notes</h3>
-                      <p className="whitespace-pre-wrap rounded-xl border p-3 text-sm text-muted">{detailPO.notes}</p>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {addSupplierOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4" onClick={() => setAddSupplierOpen(false)}>
           <div className="app-card w-full max-w-md space-y-5 p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>

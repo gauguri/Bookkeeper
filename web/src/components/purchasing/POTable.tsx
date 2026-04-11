@@ -141,14 +141,22 @@ export default function POTable({ onViewPO, onCreatePO, refreshKey }: Props) {
             <tbody>
               {paginated.map((po) => (
                 <tr key={po.id} className="app-table-row border-t">
-                  <td className="px-4 py-3 font-semibold text-primary">{po.po_number}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      className="font-semibold text-primary hover:underline"
+                      onClick={() => onViewPO(po)}
+                      type="button"
+                    >
+                      {po.po_number}
+                    </button>
+                  </td>
                   <td className="px-4 py-3">{po.supplier_name}</td>
                   <td className="px-4 py-3 text-muted">{po.order_date}</td>
                   <td className="px-4 py-3"><span className={statusBadge(po.status)}>{po.status.replace("_", " ")}</span></td>
                   <td className="px-4 py-3 font-medium">${Number(po.total).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button className="app-button-ghost" title="View" onClick={() => onViewPO(po)}><Eye className="h-4 w-4" /></button>
+                      <button className="app-button-ghost" title="View Details" onClick={() => onViewPO(po)} type="button"><Eye className="h-4 w-4" /></button>
                       {po.status === "DRAFT" && <button className="app-button-ghost" title="Send" onClick={() => handleSend(po)}><Send className="h-4 w-4" /></button>}
                       {po.status === "DRAFT" && <button className="app-button-ghost text-danger" title="Delete" onClick={() => handleDelete(po)}><Trash2 className="h-4 w-4" /></button>}
                     </div>

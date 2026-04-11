@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   ArrowLeft, Package, Tag, DollarSign, BarChart3,
   Truck, Activity, AlertTriangle, Edit3, ChevronDown, ChevronUp,
@@ -27,6 +27,8 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 export default function ItemProfilePage() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationState = (location.state as { backTo?: string; backLabel?: string } | null) ?? null;
   const id = itemId ? parseInt(itemId, 10) : undefined;
   const { data, isLoading, error } = useItem360(id);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
@@ -54,14 +56,16 @@ export default function ItemProfilePage() {
       <div className="app-card p-8 text-center">
         <AlertTriangle className="mx-auto h-8 w-8 text-amber-500" />
         <p className="mt-2 text-sm text-muted">Failed to load item data.</p>
-        <button className="app-button mt-4" onClick={() => navigate("/sales/items")}>
-          Back to Items
+        <button className="app-button mt-4" onClick={() => navigate(locationState?.backTo || "/sales/items")}>
+          {locationState?.backLabel || "Back to Items"}
         </button>
       </div>
     );
   }
 
   const { item, kpis, sales_trend, top_customers, suppliers, recent_movements } = data;
+  const backTo = locationState?.backTo || "/sales/items";
+  const backLabel = locationState?.backLabel || "Back to Items";
   const monumentAttributes = [
     { label: "Item Code", value: item.item_code || item.sku || "-" },
     { label: "Color", value: item.color || "-" },
@@ -96,10 +100,10 @@ export default function ItemProfilePage() {
     <div className="space-y-6">
       {/* ── Back button ── */}
       <button
-        onClick={() => navigate("/sales/items")}
+        onClick={() => navigate(backTo)}
         className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-foreground transition"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to Items
+        <ArrowLeft className="h-4 w-4" /> {backLabel}
       </button>
 
       {/* ── Header Card ── */}

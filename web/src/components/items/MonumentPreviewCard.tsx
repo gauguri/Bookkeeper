@@ -57,7 +57,7 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
 
   const widthPx = 130 + Math.min(widthFeet * 44, 180);
   const depthPx = 34 + Math.min(depthFeet * 26, 90);
-  const heightPx = 42 + Math.min(heightFeet * 86, 130);
+  const heightPx = 14 + Math.min(heightFeet * 46, 72);
 
   const x = 160;
   const y = 165;
@@ -81,6 +81,13 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
     `${x + widthPx + depthPx},${y - depthPx * 0.58}`,
     `${x + widthPx + depthPx},${y - depthPx * 0.58 + heightPx}`,
     `${x + widthPx},${y + heightPx}`,
+  ].join(" ");
+
+  const frontPoints = [
+    `${x},${y}`,
+    `${x + widthPx},${y}`,
+    `${x + widthPx},${y + heightPx}`,
+    `${x},${y + heightPx}`,
   ].join(" ");
 
   const polishedMargin = finish.includes("POL MRG") || description.includes("POL MARGIN");
@@ -111,6 +118,7 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
             <path d="M164 228 H546 L500 214 H120 Z" fill="#edf2f8" />
 
             <g filter="url(#shadow)">
+              <polygon points={frontPoints} fill={allPolished ? palette.accent : palette.left} />
               <polygon points={leftPoints} fill={sawnSides && !allPolished ? "#6f767d" : palette.left} />
               <polygon points={rightPoints} fill={allPolished ? palette.accent : palette.right} />
               <polygon points={topPoints} fill={palette.top} />

@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 
 type MonumentPreviewProps = {
   item: {
@@ -18,20 +18,23 @@ type MonumentPreviewProps = {
   };
 };
 
-const COLOR_MAP: Array<{ match: string[]; top: string; left: string; right: string; accent: string }> = [
-  { match: ["black", "dark", "jet"], top: "#5b6070", left: "#2c303d", right: "#444b5d", accent: "#aeb8cb" },
-  { match: ["grey", "gray", "silver"], top: "#b8bec6", left: "#7f8793", right: "#9ca5b1", accent: "#eef2f6" },
-  { match: ["white", "light"], top: "#ede8e1", left: "#c9c0b4", right: "#ddd4c8", accent: "#fffdf7" },
-  { match: ["red", "rainbow", "aurora"], top: "#824e53", left: "#553238", right: "#6f4349", accent: "#d8a1aa" },
-  { match: ["blue"], top: "#7390ad", left: "#4f6684", right: "#627c9b", accent: "#d3e1f0" },
-  { match: ["brown"], top: "#8a6b57", left: "#5d4538", right: "#745747", accent: "#d8c0af" },
-  { match: ["green"], top: "#7d9184", left: "#55645c", right: "#677970", accent: "#ced9d2" },
+type Vec3 = { x: number; y: number; z: number };
+type Projected = Vec3 & { sx: number; sy: number; visible: boolean };
+
+const COLOR_MAP: Array<{ match: string[]; top: string; left: string; right: string; front: string; accent: string }> = [
+  { match: ["black", "dark", "jet"], top: "#586071", left: "#2b313f", right: "#444c5e", front: "#353c4d", accent: "#aeb8cb" },
+  { match: ["grey", "gray", "silver"], top: "#bcc3cb", left: "#7e8794", right: "#a2abb7", front: "#9099a6", accent: "#eef2f6" },
+  { match: ["white", "light"], top: "#efe9e0", left: "#ccc1b4", right: "#dfd5c8", front: "#d7ccbf", accent: "#fffdf7" },
+  { match: ["red", "rainbow", "aurora"], top: "#8b5960", left: "#553339", right: "#72474d", front: "#643d43", accent: "#d9a9b2" },
+  { match: ["blue"], top: "#7592b0", left: "#4f6784", right: "#67809d", front: "#5c7492", accent: "#d5e1ef" },
+  { match: ["brown"], top: "#8b6c57", left: "#5f4739", right: "#765848", front: "#6c5142", accent: "#d9c1ae" },
+  { match: ["green"], top: "#7d9184", left: "#56655c", right: "#687b71", front: "#5f7168", accent: "#ced9d2" },
 ];
 
 function stonePalette(color: string | null | undefined) {
   const normalized = (color || "").toLowerCase();
   return COLOR_MAP.find((entry) => entry.match.some((token) => normalized.includes(token)))
-    ?? { top: "#a79f98", left: "#746d67", right: "#8a837c", accent: "#f1ebe3" };
+    ?? { top: "#a79f98", left: "#746d67", right: "#8a837c", front: "#80776f", accent: "#f1ebe3" };
 }
 
 function toFeet(feet?: number | null, inches?: number | null) {
@@ -48,165 +51,255 @@ function finishLabel(finish: string | null | undefined) {
   return normalized;
 }
 
+function rotatePoint(point: Vec3, rotX: number, rotY: number): Vec3 {
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const x1 = point.x * cosY + point.z * sinY;
+  const z1 = -point.x * sinY + point.z * cosY;
+
+  const cosX = Math.cos(rotX);
+  const sinX = Math.sin(rotX);
+  const y2 = point.y * cosX - z1 * sinX;
+  const z2 = point.y * sinX + z1 * cosX;
+
+  return { x: x1, y: y2, z: z2 };
+}
+
 export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
-  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dragRef = useRef<{ dragging: boolean; mode: "orbit" | "pan"; x: number; y: number }>({
+    dragging: false,
+    mode: "orbit",
+    x: 0,
+    y: 0,
+  });
+
+  const [view, setView] = useState({
+    rotX: -0.42,
+    rotY: 0.72,
+    zoom: 1,
+    panX: 0,
+    panY: 8,
+  });
+
   const widthFeet = Math.max(toFeet(item.lr_feet, item.lr_inches), 0.5);
   const depthFeet = Math.max(toFeet(item.fb_feet, item.fb_inches), 0.4);
-  const heightFeet = Math.max(toFeet(item.tb_feet, item.tb_inches), 0.2);
+  const heightFeet = Math.max(toFeet(item.tb_feet, item.tb_inches), 0.15);
   const palette = stonePalette(item.color);
   const shape = (item.shape || item.monument_type || "stone").toUpperCase();
   const finish = (item.finish || "").toUpperCase();
   const description = `${item.description || ""} ${item.sales_description || ""}`.toUpperCase();
-
-  const widthPx = 130 + Math.min(widthFeet * 44, 180);
-  const depthPx = 34 + Math.min(depthFeet * 26, 90);
-  const heightPx = 14 + Math.min(heightFeet * 46, 72);
-
-  const x = 160;
-  const y = 165;
-
-  const topPoints = [
-    `${x},${y}`,
-    `${x + widthPx},${y}`,
-    `${x + widthPx + depthPx},${y - depthPx * 0.58}`,
-    `${x + depthPx},${y - depthPx * 0.58}`,
-  ].join(" ");
-
-  const leftPoints = [
-    `${x},${y}`,
-    `${x + depthPx},${y - depthPx * 0.58}`,
-    `${x + depthPx},${y - depthPx * 0.58 + heightPx}`,
-    `${x},${y + heightPx}`,
-  ].join(" ");
-
-  const rightPoints = [
-    `${x + widthPx},${y}`,
-    `${x + widthPx + depthPx},${y - depthPx * 0.58}`,
-    `${x + widthPx + depthPx},${y - depthPx * 0.58 + heightPx}`,
-    `${x + widthPx},${y + heightPx}`,
-  ].join(" ");
-
-  const frontPoints = [
-    `${x},${y}`,
-    `${x + widthPx},${y}`,
-    `${x + widthPx},${y + heightPx}`,
-    `${x},${y + heightPx}`,
-  ].join(" ");
-
   const polishedMargin = finish.includes("POL MRG") || description.includes("POL MARGIN");
   const beveled = description.includes("BRP") || description.includes("BEVEL");
   const allPolished = finish.includes("ALL POL");
   const sawnSides = finish.includes("SS");
-  const specialShape = shape.includes("SPECIAL") || description.includes("SPECIAL");
-  const flatShape = shape.includes("FLAT") || shape.includes("BASE") || shape.includes("MARKER");
 
-  const handlePointerMove = (event: MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const px = (event.clientX - rect.left) / rect.width;
-    const py = (event.clientY - rect.top) / rect.height;
-    setTilt({
-      x: (0.5 - py) * 18,
-      y: (px - 0.5) * 24,
+  const geometry = useMemo(() => {
+    const sx = widthFeet * 60;
+    const sy = heightFeet * 90;
+    const sz = depthFeet * 60;
+    const halfX = sx / 2;
+    const halfY = sy / 2;
+    const halfZ = sz / 2;
+
+    const vertices: Vec3[] = [
+      { x: -halfX, y: -halfY, z: -halfZ },
+      { x: halfX, y: -halfY, z: -halfZ },
+      { x: halfX, y: halfY, z: -halfZ },
+      { x: -halfX, y: halfY, z: -halfZ },
+      { x: -halfX, y: -halfY, z: halfZ },
+      { x: halfX, y: -halfY, z: halfZ },
+      { x: halfX, y: halfY, z: halfZ },
+      { x: -halfX, y: halfY, z: halfZ },
+    ];
+
+    const faces = [
+      { name: "back", points: [0, 1, 2, 3], fill: sawnSides && !allPolished ? "#676f77" : palette.left },
+      { name: "front", points: [4, 5, 6, 7], fill: allPolished ? palette.accent : palette.front },
+      { name: "left", points: [0, 4, 7, 3], fill: sawnSides && !allPolished ? "#6f767d" : palette.left },
+      { name: "right", points: [1, 5, 6, 2], fill: allPolished ? palette.accent : palette.right },
+      { name: "top", points: [3, 2, 6, 7], fill: palette.top },
+      { name: "bottom", points: [0, 1, 5, 4], fill: "#444" },
+    ];
+
+    return { vertices, faces, sx, sy, sz };
+  }, [allPolished, depthFeet, heightFeet, palette, sawnSides, widthFeet]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const width = rect.width;
+    const height = rect.height;
+    ctx.clearRect(0, 0, width, height);
+
+    const centerX = width * 0.48 + view.panX;
+    const centerY = height * 0.53 + view.panY;
+    const cameraDistance = 560;
+    const scale = 1.2 * view.zoom;
+
+    const projected: Projected[] = geometry.vertices.map((vertex) => {
+      const rotated = rotatePoint(vertex, view.rotX, view.rotY);
+      const perspective = cameraDistance / (cameraDistance - rotated.z);
+      return {
+        ...rotated,
+        sx: centerX + rotated.x * perspective * scale,
+        sy: centerY + rotated.y * perspective * scale,
+        visible: perspective > 0,
+      };
     });
+
+    const shadowWidth = geometry.sx * 0.72 * scale;
+    const shadowDepth = geometry.sz * 0.26 * scale;
+    ctx.fillStyle = "rgba(67,85,111,0.14)";
+    ctx.beginPath();
+    ctx.ellipse(centerX + 10, centerY + geometry.sy * 0.55 * scale, shadowWidth, Math.max(shadowDepth, 16), 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#dfe7f4";
+    ctx.beginPath();
+    ctx.moveTo(85, height - 66);
+    ctx.lineTo(width - 80, height - 66);
+    ctx.lineTo(width - 34, height - 86);
+    ctx.lineTo(131, height - 86);
+    ctx.closePath();
+    ctx.fill();
+
+    const visibleFaces = geometry.faces
+      .map((face) => {
+        const pts = face.points.map((index) => projected[index]);
+        const avgZ = pts.reduce((sum, point) => sum + point.z, 0) / pts.length;
+        const edgeA = { x: pts[1].sx - pts[0].sx, y: pts[1].sy - pts[0].sy };
+        const edgeB = { x: pts[2].sx - pts[1].sx, y: pts[2].sy - pts[1].sy };
+        const cross = edgeA.x * edgeB.y - edgeA.y * edgeB.x;
+        return { ...face, pts, avgZ, cross };
+      })
+      .filter((face) => face.cross < 0)
+      .sort((a, b) => a.avgZ - b.avgZ);
+
+    for (const face of visibleFaces) {
+      ctx.beginPath();
+      ctx.moveTo(face.pts[0].sx, face.pts[0].sy);
+      face.pts.slice(1).forEach((point) => ctx.lineTo(point.sx, point.sy));
+      ctx.closePath();
+      ctx.fillStyle = face.fill;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(41,52,70,0.22)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (face.name === "top" && polishedMargin) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(face.pts[0].sx, face.pts[0].sy);
+        face.pts.slice(1).forEach((point) => ctx.lineTo(point.sx, point.sy));
+        ctx.closePath();
+        ctx.clip();
+        ctx.strokeStyle = palette.accent;
+        ctx.lineWidth = 8;
+        ctx.strokeRect(
+          Math.min(...face.pts.map((point) => point.sx)) + 10,
+          Math.min(...face.pts.map((point) => point.sy)) + 8,
+          Math.max(...face.pts.map((point) => point.sx)) - Math.min(...face.pts.map((point) => point.sx)) - 20,
+          Math.max(...face.pts.map((point) => point.sy)) - Math.min(...face.pts.map((point) => point.sy)) - 14,
+        );
+        ctx.restore();
+      }
+    }
+
+    if (beveled) {
+      const topFace = visibleFaces.find((face) => face.name === "top");
+      if (topFace) {
+        ctx.strokeStyle = palette.accent;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(topFace.pts[0].sx + 12, topFace.pts[0].sy + 4);
+        ctx.lineTo(topFace.pts[1].sx - 12, topFace.pts[1].sy + 4);
+        ctx.stroke();
+      }
+    }
+
+    ctx.fillStyle = "#52627c";
+    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("CONCEPT PREVIEW", centerX, height - 18);
+  }, [beveled, geometry, palette.accent, polishedMargin, view]);
+
+  const handleMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
+    dragRef.current = {
+      dragging: true,
+      mode: event.shiftKey ? "pan" : "orbit",
+      x: event.clientX,
+      y: event.clientY,
+    };
   };
 
-  const resetTilt = () => setTilt({ x: 0, y: 0 });
-  const monumentTransform = `perspective(1200px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`;
+  const handleMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (!dragRef.current.dragging) return;
+    const dx = event.clientX - dragRef.current.x;
+    const dy = event.clientY - dragRef.current.y;
+    dragRef.current.x = event.clientX;
+    dragRef.current.y = event.clientY;
+
+    if (dragRef.current.mode === "pan") {
+      setView((prev) => ({
+        ...prev,
+        panX: prev.panX + dx,
+        panY: prev.panY + dy,
+      }));
+      return;
+    }
+
+    setView((prev) => ({
+      ...prev,
+      rotY: prev.rotY + dx * 0.012,
+      rotX: Math.max(-1.35, Math.min(1.35, prev.rotX + dy * 0.01)),
+    }));
+  };
+
+  const handleMouseUp = () => {
+    dragRef.current.dragging = false;
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.08 : 0.08;
+    setView((prev) => ({
+      ...prev,
+      zoom: Math.max(0.55, Math.min(2.2, prev.zoom + delta)),
+    }));
+  };
 
   return (
     <div className="mt-5 overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(135deg,#eef3fb_0%,#f7f4ef_58%,#efe9df_100%)]">
       <div className="grid gap-0 lg:grid-cols-[1.35fr_0.65fr]">
-        <div
-          className="relative min-h-[320px] overflow-hidden px-6 py-6"
-          onMouseMove={handlePointerMove}
-          onMouseLeave={resetTilt}
-        >
+        <div className="relative min-h-[340px] overflow-hidden px-6 py-6">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(255,255,255,0.9),transparent_35%),radial-gradient(circle_at_80%_25%,rgba(255,255,255,0.5),transparent_28%)]" />
-          <svg viewBox="0 0 640 320" className="relative z-10 h-full w-full">
-            <defs>
-              <linearGradient id="pedestal" x1="0%" x2="100%">
-                <stop offset="0%" stopColor="#d8deea" />
-                <stop offset="100%" stopColor="#c1cad9" />
-              </linearGradient>
-              <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
-                <feDropShadow dx="0" dy="14" stdDeviation="12" floodColor="#6f7785" floodOpacity="0.22" />
-              </filter>
-            </defs>
-
-            <ellipse cx="326" cy="252" rx="190" ry="34" fill="rgba(67,85,111,0.14)" />
-            <path d="M120 248 H500 L546 228 H164 Z" fill="url(#pedestal)" />
-            <path d="M164 228 H546 L500 214 H120 Z" fill="#edf2f8" />
-
-            <foreignObject x="70" y="32" width="500" height="230">
-              <div
-                className="h-full w-full origin-center transition-transform duration-150 ease-out"
-                style={{ transform: monumentTransform, transformStyle: "preserve-3d" }}
-              >
-                <svg viewBox="0 0 640 320" className="h-full w-full overflow-visible">
-                  <g filter="url(#shadow)">
-                    <polygon points={frontPoints} fill={allPolished ? palette.accent : palette.left} />
-                    <polygon points={leftPoints} fill={sawnSides && !allPolished ? "#6f767d" : palette.left} />
-                    <polygon points={rightPoints} fill={allPolished ? palette.accent : palette.right} />
-                    <polygon points={topPoints} fill={palette.top} />
-
-                    {polishedMargin ? (
-                      <polygon
-                        points={[
-                          `${x + 10},${y + 3}`,
-                          `${x + widthPx - 10},${y + 3}`,
-                          `${x + widthPx + depthPx - 10},${y - depthPx * 0.58 + 3}`,
-                          `${x + depthPx + 10},${y - depthPx * 0.58 + 3}`,
-                        ].join(" ")}
-                        fill="none"
-                        stroke={palette.accent}
-                        strokeWidth="8"
-                        strokeLinejoin="round"
-                        opacity="0.95"
-                      />
-                    ) : null}
-
-                    {beveled ? (
-                      <>
-                        <line x1={x + 14} y1={y + 4} x2={x + depthPx + 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
-                        <line x1={x + widthPx - 14} y1={y + 4} x2={x + widthPx + depthPx - 14} y2={y - depthPx * 0.58 + 4} stroke={palette.accent} strokeWidth="3" opacity="0.85" />
-                      </>
-                    ) : null}
-
-                    {specialShape ? (
-                      <path
-                        d={`M ${x + widthPx * 0.18} ${y + heightPx * 0.12} Q ${x + widthPx * 0.5} ${y - 18} ${x + widthPx * 0.82} ${y + heightPx * 0.12}`}
-                        stroke={palette.accent}
-                        strokeWidth="4"
-                        fill="none"
-                        opacity="0.85"
-                      />
-                    ) : null}
-
-                    {!flatShape ? (
-                      <path
-                        d={`M ${x} ${y + heightPx * 0.4} Q ${x + widthPx * 0.08} ${y + heightPx * 0.16} ${x + widthPx * 0.16} ${y + heightPx * 0.06}`}
-                        stroke={palette.accent}
-                        strokeWidth="4"
-                        fill="none"
-                        opacity="0.7"
-                      />
-                    ) : null}
-                  </g>
-                </svg>
-              </div>
-            </foreignObject>
-
-            <text x="320" y="296" textAnchor="middle" className="fill-slate-600 text-[12px] font-semibold tracking-[0.18em] uppercase">
-              Concept Preview
-            </text>
-          </svg>
+          <canvas
+            ref={canvasRef}
+            className="relative z-10 h-[320px] w-full cursor-grab active:cursor-grabbing"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+          />
         </div>
 
         <div className="border-t border-border/60 bg-white/65 px-5 py-5 lg:border-l lg:border-t-0">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">3D Preview</p>
-          <h3 className="mt-2 text-lg font-semibold">Rule-Based Monument Render</h3>
+          <h3 className="mt-2 text-lg font-semibold">Interactive Monument Viewer</h3>
           <p className="mt-2 text-sm text-muted">
-            Dimensions, color, shape, finish, and description are being translated into an approximate isometric stone preview.
+            Drag to orbit the model, hold <span className="font-medium">Shift</span> while dragging to pan, and use the mouse wheel to zoom.
           </p>
 
           <div className="mt-4 grid gap-3">
@@ -225,7 +318,7 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
               <p className="mt-1 font-medium">{shape || "Standard block form"}</p>
             </div>
             <div className="rounded-2xl border border-dashed border-border/70 bg-white/55 px-3 py-3 text-xs text-muted">
-              This is a visualization preview, not an exact CAD or shop drawing.
+              This is a real interactive perspective viewer for the inferred monument block, but it is still an approximation rather than a fabrication-grade CAD model.
             </div>
           </div>
         </div>

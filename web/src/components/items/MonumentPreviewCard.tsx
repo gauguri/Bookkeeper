@@ -158,22 +158,6 @@ export default function MonumentPreviewCard({ item }: MonumentPreviewProps) {
       };
     });
 
-    const shadowWidth = geometry.sx * 0.72 * scale;
-    const shadowDepth = geometry.sz * 0.26 * scale;
-    ctx.fillStyle = "rgba(67,85,111,0.14)";
-    ctx.beginPath();
-    ctx.ellipse(centerX + 10, centerY + geometry.sy * 0.55 * scale, shadowWidth, Math.max(shadowDepth, 16), 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#dfe7f4";
-    ctx.beginPath();
-    ctx.moveTo(85, height - 66);
-    ctx.lineTo(width - 80, height - 66);
-    ctx.lineTo(width - 34, height - 86);
-    ctx.lineTo(131, height - 86);
-    ctx.closePath();
-    ctx.fill();
-
     const renderedFaces = geometry.faces
       .map((face) => {
         const pts = face.points.map((index) => projected[index]);

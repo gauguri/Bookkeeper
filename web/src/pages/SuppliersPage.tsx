@@ -114,6 +114,7 @@ export default function SuppliersPage() {
   const [columnsCompact, setColumnsCompact] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [initialForm, setInitialForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
@@ -256,6 +257,7 @@ export default function SuppliersPage() {
       }
       setShowForm(false);
       setForm(emptyForm);
+      setInitialForm(emptyForm);
       setEditingId(null);
       setFormErrors({});
       setFormSubmitError("");
@@ -369,14 +371,14 @@ export default function SuppliersPage() {
   const openCreateModal = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setInitialForm(emptyForm);
     setFormErrors({});
     setFormSubmitError("");
     setShowForm(true);
   };
 
   const openEditModal = (supplier: Supplier) => {
-    setEditingId(supplier.id);
-    setForm({
+    const nextForm = {
       vendor_number: supplier.vendor_number ?? "",
       name: supplier.name,
       legal_name: supplier.legal_name ?? "",
@@ -393,13 +395,16 @@ export default function SuppliersPage() {
       currency: supplier.currency ?? "USD",
       shipping_terms: supplier.shipping_terms ?? "",
       notes: supplier.notes ?? "",
-    });
+    };
+    setEditingId(supplier.id);
+    setForm(nextForm);
+    setInitialForm(nextForm);
     setFormErrors({});
     setFormSubmitError("");
     setShowForm(true);
   };
 
-  const formDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(emptyForm), [form]);
+  const formDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(initialForm), [form, initialForm]);
   const requestCloseModal = () => {
     if (formDirty) {
       setShowDiscardConfirm(true);
@@ -410,6 +415,7 @@ export default function SuppliersPage() {
     setFormErrors({});
     setFormSubmitError("");
     setForm(emptyForm);
+    setInitialForm(emptyForm);
   };
 
   useEffect(() => {
@@ -566,7 +572,7 @@ export default function SuppliersPage() {
             <p className="mt-2 text-sm text-muted">You have unsaved edits. Do you want to discard them?</p>
             <div className="mt-4 flex justify-end gap-2">
               <button className="app-button-secondary" onClick={() => setShowDiscardConfirm(false)}>Keep editing</button>
-              <button className="app-button" onClick={() => { setShowDiscardConfirm(false); setShowForm(false); setEditingId(null); setForm(emptyForm); setFormErrors({}); setFormSubmitError(""); }}>Discard</button>
+              <button className="app-button" onClick={() => { setShowDiscardConfirm(false); setShowForm(false); setEditingId(null); setForm(emptyForm); setInitialForm(emptyForm); setFormErrors({}); setFormSubmitError(""); }}>Discard</button>
             </div>
           </div>
         </div>

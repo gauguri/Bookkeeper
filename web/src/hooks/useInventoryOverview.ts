@@ -57,8 +57,6 @@ const normalizeOverviewResponse = (payload: unknown): InventoryOverviewResponse 
     };
   });
 
-  console.debug("[InventoryOverview] API response", payload);
-
   return {
     totals,
     items,

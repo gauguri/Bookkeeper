@@ -102,6 +102,7 @@ IMPORT_HEADER_ALIASES = {
 }
 
 IMPORT_FIELD_SPECS = [
+    schemas.SupplierImportFieldSpec(field="vendor_number", label="Vendor Number", required=False, description="Legacy vendor number used for Glenrock purchasing imports.", example="62"),
     schemas.SupplierImportFieldSpec(field="name", label="Supplier Name", required=True, description="Primary supplier name.", example="Regatta Granites India"),
     schemas.SupplierImportFieldSpec(field="legal_name", label="Legal Name", required=False, description="Registered legal entity name.", example="Regatta Granites India Private Limited"),
     schemas.SupplierImportFieldSpec(field="website", label="Website", required=False, description="Supplier website URL.", example="https://www.regattagranitesindia.com/"),
@@ -122,9 +123,9 @@ IMPORT_FIELD_SPECS = [
 
 IMPORT_SAMPLE_CSV = "\n".join(
     [
-        "name,legal_name,website,contact_name,email,phone,tax_id,remit_to_address,ship_from_address,default_lead_time_days,payment_terms,currency,status,shipping_terms,notes,address",
-        'Regatta Granites India,Regatta Granites India Private Limited,https://www.regattagranitesindia.com/,Sundeep Gandotra,sgandotra@regattagranitesindia.com,+91 9910066990,GSTIN-123,"Property No -1, Lane No-2, Westend Marg, New Delhi","Property No -1, Lane No-2, Westend Marg, New Delhi",90,Net 30,USD,active,FOB,"Preferred premium monument supplier","Property No -1, Lane No-2, Westend Marg, New Delhi"',
-        'North Ridge Stone,,,,contact@northridge.test,+1-555-0100,,"Atlanta, GA","Atlanta, GA",30,Net 15,USD,inactive,,,',
+        "vendor_number,name,legal_name,website,contact_name,email,phone,tax_id,remit_to_address,ship_from_address,default_lead_time_days,payment_terms,currency,status,shipping_terms,notes,address",
+        '62,Regatta Granites India,Regatta Granites India Private Limited,https://www.regattagranitesindia.com/,Sundeep Gandotra,sgandotra@regattagranitesindia.com,+91 9910066990,GSTIN-123,"Property No -1, Lane No-2, Westend Marg, New Delhi","Property No -1, Lane No-2, Westend Marg, New Delhi",90,Net 30,USD,active,FOB,"Preferred premium monument supplier","Property No -1, Lane No-2, Westend Marg, New Delhi"',
+        '77,North Ridge Stone,,,,contact@northridge.test,+1-555-0100,,"Atlanta, GA","Atlanta, GA",30,Net 15,USD,inactive,,,',
     ]
 )
 
@@ -190,6 +191,7 @@ def _supplier_csv_format_response() -> schemas.SupplierImportFormatResponse:
         has_header=True,
         required_fields=["name"],
         optional_fields=[
+            "vendor_number",
             "legal_name",
             "website",
             "contact_name",
@@ -210,6 +212,7 @@ def _supplier_csv_format_response() -> schemas.SupplierImportFormatResponse:
         sample_csv=IMPORT_SAMPLE_CSV,
         notes=[
             "Supplier name is required and used as the matching key for update/upsert operations.",
+            "Vendor Number is stored directly on the supplier record and is used by purchase order bulk imports.",
             "Website must be a valid URL including http:// or https://.",
             "Email supports single or multiple addresses separated by semicolon/comma.",
             "Status accepts active or inactive. Blank defaults to active.",
@@ -263,6 +266,7 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
             rows.append(
                 {
                     "row_number": row_number,
+                    "vendor_number": vendor_number.strip() if vendor_number else "",
                     "name": next((value for value in values_for("name", raw_row) if value.strip()), ""),
                     "legal_name": next((value for value in values_for("legal_name", raw_row) if value.strip()), ""),
                     "website": next((value for value in values_for("website", raw_row) if value.strip()), ""),
@@ -305,6 +309,7 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
             parsed_rows.append(
                 {
                     "row_number": row_number,
+                    "vendor_number": "",
                     "name": name,
                     "legal_name": legal_name,
                     "website": website,
@@ -321,6 +326,50 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
                     "shipping_terms": "",
                     "notes": "",
                     "address": "",
+                }
+            )
+            continue
+
+        if len(normalized) == 17:
+            (
+                vendor_number,
+                name,
+                legal_name,
+                website,
+                contact_name,
+                email,
+                phone,
+                tax_id,
+                remit_to_address,
+                ship_from_address,
+                default_lead_time_days,
+                payment_terms,
+                currency,
+                status_value,
+                shipping_terms,
+                notes,
+                address,
+            ) = normalized
+            parsed_rows.append(
+                {
+                    "row_number": row_number,
+                    "vendor_number": vendor_number,
+                    "name": name,
+                    "legal_name": legal_name,
+                    "website": website,
+                    "contact_name": contact_name,
+                    "email": email,
+                    "phone": phone,
+                    "tax_id": tax_id,
+                    "remit_to_address": remit_to_address,
+                    "ship_from_address": ship_from_address,
+                    "default_lead_time_days": default_lead_time_days,
+                    "payment_terms": payment_terms,
+                    "currency": currency,
+                    "status": status_value,
+                    "shipping_terms": shipping_terms,
+                    "notes": notes,
+                    "address": address,
                 }
             )
             continue
@@ -347,6 +396,7 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
             parsed_rows.append(
                 {
                     "row_number": row_number,
+                    "vendor_number": "",
                     "name": name,
                     "legal_name": legal_name,
                     "website": website,
@@ -370,23 +420,24 @@ def _parse_supplier_import_rows(payload: schemas.SupplierImportRequest) -> list[
         parsed_rows.append(
             {
                 "row_number": row_number,
-                "name": normalized[0] if normalized else "",
-                "legal_name": normalized[1] if len(normalized) > 1 else "",
-                "website": normalized[2] if len(normalized) > 2 else "",
-                "contact_name": normalized[3] if len(normalized) > 3 else "",
-                "email": normalized[4] if len(normalized) > 4 else "",
-                "phone": normalized[5] if len(normalized) > 5 else "",
-                "tax_id": normalized[6] if len(normalized) > 6 else "",
-                "remit_to_address": normalized[7] if len(normalized) > 7 else "",
-                "ship_from_address": normalized[8] if len(normalized) > 8 else "",
-                "default_lead_time_days": normalized[9] if len(normalized) > 9 else "",
-                "payment_terms": normalized[10] if len(normalized) > 10 else "",
-                "currency": normalized[11] if len(normalized) > 11 else "",
-                "status": normalized[12] if len(normalized) > 12 else "",
-                "shipping_terms": normalized[13] if len(normalized) > 13 else "",
-                "notes": normalized[14] if len(normalized) > 14 else "",
-                "address": normalized[15] if len(normalized) > 15 else "",
-                "row_error": "No-header imports require either 12 columns (New Supplier fields) or 16 columns (full supplier import contract).",
+                "vendor_number": normalized[0] if normalized else "",
+                "name": normalized[1] if len(normalized) > 1 else "",
+                "legal_name": normalized[2] if len(normalized) > 2 else "",
+                "website": normalized[3] if len(normalized) > 3 else "",
+                "contact_name": normalized[4] if len(normalized) > 4 else "",
+                "email": normalized[5] if len(normalized) > 5 else "",
+                "phone": normalized[6] if len(normalized) > 6 else "",
+                "tax_id": normalized[7] if len(normalized) > 7 else "",
+                "remit_to_address": normalized[8] if len(normalized) > 8 else "",
+                "ship_from_address": normalized[9] if len(normalized) > 9 else "",
+                "default_lead_time_days": normalized[10] if len(normalized) > 10 else "",
+                "payment_terms": normalized[11] if len(normalized) > 11 else "",
+                "currency": normalized[12] if len(normalized) > 12 else "",
+                "status": normalized[13] if len(normalized) > 13 else "",
+                "shipping_terms": normalized[14] if len(normalized) > 14 else "",
+                "notes": normalized[15] if len(normalized) > 15 else "",
+                "address": normalized[16] if len(normalized) > 16 else "",
+                "row_error": "No-header imports require either 12 columns (New Supplier fields) or 17 columns (full supplier import contract with vendor number).",
             }
         )
 
@@ -427,6 +478,7 @@ def _build_supplier_payload(raw_row: dict[str, Any]) -> tuple[Optional[dict[str,
             messages.append("Lead time days must be a whole number.")
 
     payload = {
+        "vendor_number": _normalize_nullable_string(raw_row.get("vendor_number")),
         "name": name or "",
         "legal_name": _normalize_nullable_string(raw_row.get("legal_name")),
         "website": _normalize_nullable_string(raw_row.get("website")),

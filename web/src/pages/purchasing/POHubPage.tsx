@@ -14,6 +14,7 @@ import {
   Mail,
   Phone,
   MapPin,
+  FileUp,
 } from "lucide-react";
 import POKpiCards from "../../components/purchasing/POKpiCards";
 import SpendAnalysisChart from "../../components/purchasing/SpendAnalysisChart";
@@ -101,6 +102,7 @@ export default function POHubPage() {
   const [addError, setAddError] = useState("");
 
   const goCreatePO = () => navigate("/purchasing/purchase-orders/new");
+  const goImportPOs = () => navigate("/purchasing/purchase-orders/import");
 
   const loadHubAnalytics = async () => {
     setHubLoading(true);
@@ -334,9 +336,14 @@ export default function POHubPage() {
           <h1 className="text-2xl font-bold">Procurement Hub</h1>
           <p className="text-xs text-muted">Command center for purchasing operations</p>
         </div>
-        <button className="app-button" onClick={goCreatePO}>
-          <Plus className="h-4 w-4" /> New Purchase Order
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="app-button-secondary" onClick={goImportPOs}>
+            <FileUp className="h-4 w-4" /> Bulk Import
+          </button>
+          <button className="app-button" onClick={goCreatePO}>
+            <Plus className="h-4 w-4" /> New Purchase Order
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

@@ -1,4 +1,3 @@
-import re
 from decimal import Decimal
 
 import pytest
@@ -41,16 +40,21 @@ def test_item_import_format_contract(client: TestClient):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["required_fields"] == ["name", "unit_price"]
-    assert "sku" in payload["optional_fields"]
-    assert payload["sample_csv"].startswith("name,sku,description,unit_price")
+    assert payload["required_fields"] == ["item_code", "quantity"]
+    assert "cost_price" in payload["optional_fields"]
+    assert payload["sample_csv"].startswith("Item Code,Color,Type")
 
 
-def test_item_import_preview_generates_sku_from_name_prefix(client: TestClient):
+def test_item_import_preview_uses_item_code_and_quantity(client: TestClient):
     response = client.post(
         "/api/items/import-preview",
         json={
-            "csv_data": "name,unit_price\n6 x 2 x 2 Monument,200.00",
+            "csv_data": "\n".join(
+                [
+                    "Item Code,Quantity,Sell Price,Item Description,Sales Description,Cost Price",
+                    "12480,35,83.00,SELECT GREY MARKER,SELECT GREY MARKER,23.00",
+                ]
+            ),
             "has_header": True,
             "conflict_strategy": "UPSERT",
         },
@@ -62,22 +66,23 @@ def test_item_import_preview_generates_sku_from_name_prefix(client: TestClient):
     assert payload["summary"]["create_count"] == 1
     row = payload["rows"][0]
     assert row["status"] == "VALID"
-    assert row["sku"].startswith("6X2X")
-    assert re.match(r"^[A-Z0-9]+$", row["sku"]) is not None
+    assert row["item_code"] == "12480"
+    assert row["sku"] == "12480"
+    assert Decimal(str(row["quantity"])) == Decimal("35")
 
 
 def test_item_import_executes_create_and_update(client: TestClient):
     create_existing = client.post(
         "/api/items",
-        json={"name": "Garden Bench Monument", "sku": "GBM0001", "unit_price": 450.00, "is_active": True},
+        json={"name": "Garden Bench Monument", "item_code": "2035", "sku": "2035", "unit_price": 25.00, "is_active": True},
     )
     assert create_existing.status_code == 201
 
     csv_data = "\n".join(
         [
-            "name,sku,description,unit_price,is_active",
-            "6 x 2 x 2 Monument,,Premium granite monument,200.00,true",
-            "Garden Bench Monument,GBM0001,Updated description,475.00,true",
+            "Item Code,Color,Type,Quantity,Sell Price,Item Description,Sales Description,Cost Price,ReOrder Qty,InventoryCheck",
+            "12480,GREY,MARKER,35,83.00,SELECT GREY MARKER,SELECT GREY MARKER,23.00,5,FALSE",
+            "2035,BLACK,DIE,30,25.00,REPLICA,REPLICA,5.00,3,TRUE",
         ]
     )
 
@@ -99,21 +104,24 @@ def test_item_import_executes_create_and_update(client: TestClient):
     items_response = client.get("/api/items")
     assert items_response.status_code == 200
     items = items_response.json()
-    by_name = {item["name"]: item for item in items}
+    by_code = {item["item_code"]: item for item in items}
 
-    created = by_name["6 x 2 x 2 Monument"]
-    assert re.match(r"^[A-Z0-9]+$", created["sku"]) is not None
-    assert created["sku"].startswith("6X2X")
+    created = by_code["12480"]
+    assert created["sku"] == "12480"
+    assert created["name"] == "SELECT GREY MARKER"
+    assert Decimal(str(created["unit_price"])) == Decimal("83.00")
+    assert Decimal(str(created["cost_price"])) == Decimal("23.00")
 
-    updated = by_name["Garden Bench Monument"]
-    assert Decimal(str(updated["unit_price"])) == Decimal("475.00")
+    updated = by_code["2035"]
+    assert Decimal(str(updated["unit_price"])) == Decimal("25.00")
+    assert updated["inventory_check"] is True
 
 
 def test_item_import_rejects_execution_when_preview_has_errors(client: TestClient):
     response = client.post(
         "/api/items/import",
         json={
-            "csv_data": "name,unit_price\nBad Item,abc",
+            "csv_data": "Item Code,Quantity,Sell Price\nBAD-1,abc,12.00",
             "has_header": True,
             "conflict_strategy": "UPSERT",
         },

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_module
 from app.db import get_db
-from app.models import Item
+from app.models import Inventory, Item
 from app.module_keys import ModuleKey
 from app.sales import schemas as sales_schemas
 
@@ -58,8 +58,10 @@ class ItemImportSummary(BaseModel):
 
 class ItemImportRowResult(BaseModel):
     row_number: int
+    item_code: Optional[str] = None
     name: Optional[str] = None
     sku: Optional[str] = None
+    quantity: Optional[Decimal] = None
     unit_price: Optional[Decimal] = None
     action: Literal["CREATE", "UPDATE", "SKIP", "ERROR"]
     status: Literal["VALID", "ERROR"]
@@ -80,43 +82,88 @@ class ItemImportResponse(BaseModel):
 
 
 IMPORT_HEADER_ALIASES = {
-    "name": "name",
-    "item": "name",
-    "item name": "name",
-    "item_name": "name",
-    "product": "name",
-    "product name": "name",
-    "product_name": "name",
-    "sku": "sku",
-    "skew": "sku",
-    "description": "description",
+    "item code": "item_code",
+    "item_code": "item_code",
+    "color": "color",
+    "type": "monument_type",
+    "lr (ft)": "lr_feet",
+    "lr_ft": "lr_feet",
+    "lr (in.)": "lr_inches",
+    "lr_in": "lr_inches",
+    "fb (ft)": "fb_feet",
+    "fb_ft": "fb_feet",
+    "fb (in.)": "fb_inches",
+    "fb_in": "fb_inches",
+    "tb (ft)": "tb_feet",
+    "tb_ft": "tb_feet",
+    "tb (in.)": "tb_inches",
+    "tb_in": "tb_inches",
+    "shape": "shape",
+    "finish": "finish",
+    "category": "category",
+    "quantity": "quantity",
+    "sell price": "unit_price",
+    "sell_price": "unit_price",
     "unit price": "unit_price",
-    "unit_price": "unit_price",
-    "list price": "unit_price",
-    "list_price": "unit_price",
     "price": "unit_price",
-    "income account id": "income_account_id",
-    "income_account_id": "income_account_id",
-    "income account": "income_account_id",
-    "active": "is_active",
-    "is_active": "is_active",
-    "status": "is_active",
+    "item description": "description",
+    "description": "description",
+    "sales description": "sales_description",
+    "purchase description": "purchase_description",
+    "cost price": "cost_price",
+    "weight(lbs)": "weight_lbs",
+    "weight (lbs)": "weight_lbs",
+    "location": "location",
+    "peachid": "peach_id",
+    "peach id": "peach_id",
+    "newcode": "new_code",
+    "new code": "new_code",
+    "reorder qty": "reorder_point",
+    "re-order qty": "reorder_point",
+    "exclude from price list": "exclude_from_price_list",
+    "uploadtopeach": "upload_to_peach",
+    "upload to peach": "upload_to_peach",
+    "itemtype": "item_type",
+    "item type": "item_type",
+    "inventorycheck": "inventory_check",
+    "inventory check": "inventory_check",
 }
 
 IMPORT_FIELD_SPECS = [
-    ItemImportFieldSpec(field="name", label="Item Name", required=True, description="Product or service name.", example="6 x 2 x 2 Monument"),
-    ItemImportFieldSpec(field="unit_price", label="Unit Price", required=True, description="List price per unit.", example="200.00"),
-    ItemImportFieldSpec(field="sku", label="SKU", required=False, description="Optional SKU. If blank, SKU is auto-generated from item name prefix.", example="MONU0001"),
-    ItemImportFieldSpec(field="description", label="Description", required=False, description="Item description shown in catalog and transactions."),
-    ItemImportFieldSpec(field="income_account_id", label="Income Account ID", required=False, description="Revenue account ID used for item sales posting.", example="12"),
-    ItemImportFieldSpec(field="is_active", label="Is Active", required=False, description="Item lifecycle status.", accepted_values=["true", "false", "active", "inactive"], example="true"),
+    ItemImportFieldSpec(field="item_code", label="Item Code", required=True, description="Primary item code from Glenrock inventory.", example="12480"),
+    ItemImportFieldSpec(field="color", label="Color", required=False, description="Stone color.", example="GREY"),
+    ItemImportFieldSpec(field="monument_type", label="Type", required=False, description="Monument type classification.", example="MARKER"),
+    ItemImportFieldSpec(field="lr_feet", label="LR (ft)", required=False, description="Length-right feet component.", example="3"),
+    ItemImportFieldSpec(field="lr_inches", label="LR (in.)", required=False, description="Length-right inches component.", example="0"),
+    ItemImportFieldSpec(field="fb_feet", label="FB (ft)", required=False, description="Front-back feet component.", example="1"),
+    ItemImportFieldSpec(field="fb_inches", label="FB (in.)", required=False, description="Front-back inches component.", example="0"),
+    ItemImportFieldSpec(field="tb_feet", label="TB (ft)", required=False, description="Top-bottom feet component.", example="0"),
+    ItemImportFieldSpec(field="tb_inches", label="TB (in.)", required=False, description="Top-bottom inches component.", example="2"),
+    ItemImportFieldSpec(field="shape", label="Shape", required=False, description="Monument shape.", example="FLAT"),
+    ItemImportFieldSpec(field="finish", label="Finish", required=False, description="Finish treatment.", example="ALL POL"),
+    ItemImportFieldSpec(field="category", label="Category", required=False, description="Category or quality tier.", example="DELUXE"),
+    ItemImportFieldSpec(field="quantity", label="Quantity", required=True, description="Current on-hand quantity imported into inventory.", example="35"),
+    ItemImportFieldSpec(field="unit_price", label="Sell Price", required=False, description="Selling price used as the item list price.", example="83.00"),
+    ItemImportFieldSpec(field="description", label="Item Description", required=False, description="Primary item description shown in the item profile."),
+    ItemImportFieldSpec(field="sales_description", label="Sales Description", required=False, description="Sales-facing description."),
+    ItemImportFieldSpec(field="purchase_description", label="Purchase Description", required=False, description="Purchasing-facing description."),
+    ItemImportFieldSpec(field="cost_price", label="Cost Price", required=False, description="Current cost per unit.", example="23.00"),
+    ItemImportFieldSpec(field="weight_lbs", label="Weight (lbs)", required=False, description="Unit weight in pounds.", example="96"),
+    ItemImportFieldSpec(field="location", label="Location", required=False, description="Yard or warehouse location."),
+    ItemImportFieldSpec(field="peach_id", label="PeachID", required=False, description="External Peach identifier."),
+    ItemImportFieldSpec(field="new_code", label="NewCode", required=False, description="Secondary or migrated code."),
+    ItemImportFieldSpec(field="reorder_point", label="ReOrder Qty", required=False, description="Reorder threshold quantity.", example="3"),
+    ItemImportFieldSpec(field="exclude_from_price_list", label="Exclude From Price List", required=False, description="Whether to omit from pricing exports.", accepted_values=["true", "false"]),
+    ItemImportFieldSpec(field="upload_to_peach", label="UploadtoPeach", required=False, description="Whether the item should sync to Peach.", accepted_values=["true", "false"]),
+    ItemImportFieldSpec(field="item_type", label="ItemType", required=False, description="External item type classification."),
+    ItemImportFieldSpec(field="inventory_check", label="InventoryCheck", required=False, description="Whether the item should participate in inventory checks.", accepted_values=["true", "false"]),
 ]
 
 IMPORT_SAMPLE_CSV = "\n".join(
     [
-        "name,sku,description,unit_price,income_account_id,is_active",
-        "6 x 2 x 2 Monument,,Premium granite monument,200.00,,true",
-        "Garden Bench Monument,GBM0001,Polished custom bench monument,450.00,,true",
+        "Item Code,Color,Type,LR (ft),LR (in.),FB (ft),FB (in.),TB (ft),TB (in.),Shape,Finish,Category,Quantity,Sell Price,Item Description,Sales Description,Purchase Description,Cost Price,Weight(lbs),Location,PeachID,NewCode,ReOrder Qty,Exclude From Price List,UploadtoPeach,ItemType,InventoryCheck",
+        "12480,GREY,MARKER,3,0,1,0,0,2,FLAT,ALL POL,DELUXE,35,83.00,SELECT GREY MARKER: 3-0X1-0X0-2 POL TOP/ SAWN SIDES,SELECT GREY MARKER: 3-0X1-0X0-2 POL TOP/ SAWN SIDES,SHANDONG GREY MARKER: 3-0X1-0X0-2 POL TOP/ SAWN SIDES,23.00,96,YARD-A,,12480,5,false,false,MONUMENT,false",
+        "2035,BLACK,DIE,1,1,1,1,1,1,SPECIAL,ALL POL,DELUXE,30,25.00,REPLICA,REPLICA,REPLICA,5.00,4,SHOWROOM,REPLICAS,,3,true,true,SAMPLE,false",
     ]
 )
 
@@ -160,7 +207,19 @@ def _parse_unit_price(value: Optional[str]) -> Optional[Decimal]:
     if not text:
         return None
     try:
-        return Decimal(text)
+        return Decimal(text.replace("$", "").replace(",", ""))
+    except InvalidOperation:
+        return None
+
+
+def _parse_decimal(value: Optional[str]) -> Optional[Decimal]:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text.replace("$", "").replace(",", ""))
     except InvalidOperation:
         return None
 
@@ -194,16 +253,21 @@ def _item_csv_format_response() -> ItemImportFormatResponse:
     return ItemImportFormatResponse(
         delimiter=",",
         has_header=True,
-        required_fields=["name", "unit_price"],
-        optional_fields=["sku", "description", "income_account_id", "is_active"],
+        required_fields=["item_code", "quantity"],
+        optional_fields=[
+            "color", "monument_type", "lr_feet", "lr_inches", "fb_feet", "fb_inches", "tb_feet", "tb_inches",
+            "shape", "finish", "category", "unit_price", "description", "sales_description", "purchase_description",
+            "cost_price", "weight_lbs", "location", "peach_id", "new_code", "reorder_point",
+            "exclude_from_price_list", "upload_to_peach", "item_type", "inventory_check",
+        ],
         fields=IMPORT_FIELD_SPECS,
         sample_csv=IMPORT_SAMPLE_CSV,
         notes=[
-            "Required fields are name and unit_price.",
-            "If sku is blank, the system auto-generates an alphanumeric SKU using the item name prefix.",
-            "Conflict strategy controls create/update behavior for existing items.",
-            "is_active accepts true/false, yes/no, 1/0, or active/inactive.",
-            "No-header imports support either 2 columns (name, unit_price) or 6 columns (full contract).",
+            "The Glenrock inventory template is header-based and maps directly to monument item master fields.",
+            "Required fields are item_code and quantity. Sell Price defaults to 0.00 when blank.",
+            "Item Code is stored as both item_code and sku so existing catalog flows continue to work.",
+            "Quantity updates both the item on-hand quantity and the backing inventory record.",
+            "Boolean fields accept true/false, yes/no, y/n, or 1/0.",
         ],
     )
 
@@ -226,71 +290,30 @@ def _parse_item_import_rows(payload: ItemImportRequest) -> list[dict[str, Any]]:
             if canonical:
                 header_map[canonical] = field_name
 
-        if "name" not in header_map:
-            raise HTTPException(status_code=400, detail="Missing required CSV header: name")
-        if "unit_price" not in header_map:
-            raise HTTPException(status_code=400, detail="Missing required CSV header: unit_price")
+        if "item_code" not in header_map:
+            raise HTTPException(status_code=400, detail="Missing required CSV header: Item Code")
+        if "quantity" not in header_map:
+            raise HTTPException(status_code=400, detail="Missing required CSV header: Quantity")
 
         rows: list[dict[str, Any]] = []
         for row_number, raw_row in enumerate(reader, start=2):
-            rows.append(
-                {
-                    "row_number": row_number,
-                    "name": raw_row.get(header_map.get("name", ""), ""),
-                    "sku": raw_row.get(header_map.get("sku", ""), ""),
-                    "description": raw_row.get(header_map.get("description", ""), ""),
-                    "unit_price": raw_row.get(header_map.get("unit_price", ""), ""),
-                    "income_account_id": raw_row.get(header_map.get("income_account_id", ""), ""),
-                    "is_active": raw_row.get(header_map.get("is_active", ""), ""),
-                }
-            )
+            parsed_row: dict[str, Any] = {"row_number": row_number}
+            for canonical_field in [spec.field for spec in IMPORT_FIELD_SPECS]:
+                parsed_row[canonical_field] = raw_row.get(header_map.get(canonical_field, ""), "")
+            rows.append(parsed_row)
         return rows
 
     raw_rows = list(csv.reader(StringIO(content)))
     parsed_rows: list[dict[str, Any]] = []
+    ordered_fields = [spec.field for spec in IMPORT_FIELD_SPECS]
     for row_number, row in enumerate(raw_rows, start=1):
         normalized = [cell.strip() for cell in row]
-
-        if len(normalized) == 2:
-            parsed_rows.append(
-                {
-                    "row_number": row_number,
-                    "name": normalized[0],
-                    "sku": "",
-                    "description": "",
-                    "unit_price": normalized[1],
-                    "income_account_id": "",
-                    "is_active": "true",
-                }
-            )
-            continue
-
-        if len(normalized) == 6:
-            parsed_rows.append(
-                {
-                    "row_number": row_number,
-                    "name": normalized[0],
-                    "sku": normalized[1],
-                    "description": normalized[2],
-                    "unit_price": normalized[3],
-                    "income_account_id": normalized[4],
-                    "is_active": normalized[5],
-                }
-            )
-            continue
-
-        parsed_rows.append(
-            {
-                "row_number": row_number,
-                "name": normalized[0] if len(normalized) > 0 else "",
-                "sku": normalized[1] if len(normalized) > 1 else "",
-                "description": normalized[2] if len(normalized) > 2 else "",
-                "unit_price": normalized[3] if len(normalized) > 3 else "",
-                "income_account_id": normalized[4] if len(normalized) > 4 else "",
-                "is_active": normalized[5] if len(normalized) > 5 else "",
-                "row_error": "No-header imports require either 2 columns (name, unit_price) or 6 columns (name, sku, description, unit_price, income_account_id, is_active).",
-            }
-        )
+        parsed_row = {"row_number": row_number}
+        for index, field in enumerate(ordered_fields):
+            parsed_row[field] = normalized[index] if len(normalized) > index else ""
+        if len(normalized) != len(ordered_fields):
+            parsed_row["row_error"] = f"No-header imports require exactly {len(ordered_fields)} columns in the Glenrock item order."
+        parsed_rows.append(parsed_row)
 
     return parsed_rows
 
@@ -310,19 +333,20 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
     parsed_rows = _parse_item_import_rows(payload)
     existing_items = db.query(Item).order_by(Item.id.asc()).all()
 
-    existing_by_name: dict[str, Item] = {}
-    ambiguous_name_keys: set[str] = set()
+    existing_by_code: dict[str, Item] = {}
+    ambiguous_code_keys: set[str] = set()
     existing_by_sku: dict[str, Item] = {}
     ambiguous_sku_keys: set[str] = set()
     reserved_skus: set[str] = set()
 
     for item in existing_items:
-        name_key = _normalize_item_name(item.name)
-        if name_key:
-            if name_key in existing_by_name:
-                ambiguous_name_keys.add(name_key)
+        item_code_key = _normalize_nullable_string(item.item_code)
+        if item_code_key:
+            normalized_code = item_code_key.upper()
+            if normalized_code in existing_by_code:
+                ambiguous_code_keys.add(normalized_code)
             else:
-                existing_by_name[name_key] = item
+                existing_by_code[normalized_code] = item
 
         if item.sku:
             sku_key = item.sku.upper()
@@ -332,7 +356,7 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
             else:
                 existing_by_sku[sku_key] = item
 
-    first_seen_name_key: dict[str, int] = {}
+    first_seen_code_key: dict[str, int] = {}
     first_seen_sku_key: dict[str, int] = {}
     analysis_rows: list[dict[str, Any]] = []
 
@@ -344,46 +368,113 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
         if row_error:
             messages.append(str(row_error))
 
-        name = _normalize_nullable_string(raw_row.get("name"))
-        if not name:
-            messages.append("Item name is required.")
+        item_code = _normalize_nullable_string(raw_row.get("item_code"))
+        if not item_code:
+            messages.append("Item Code is required.")
+
+        quantity_raw = _normalize_nullable_string(raw_row.get("quantity"))
+        quantity = _parse_decimal(quantity_raw)
+        if quantity_raw is None:
+            messages.append("Quantity is required.")
+        elif quantity is None:
+            messages.append("Quantity must be a valid decimal number.")
+        elif quantity < 0:
+            messages.append("Quantity must be greater than or equal to 0.")
 
         unit_price_raw = _normalize_nullable_string(raw_row.get("unit_price"))
-        unit_price = _parse_unit_price(unit_price_raw)
-        if unit_price_raw is None:
-            messages.append("Unit price is required.")
-        elif unit_price is None:
-            messages.append("Unit price must be a valid decimal number.")
-        elif unit_price < 0:
-            messages.append("Unit price must be greater than or equal to 0.")
+        unit_price = Decimal("0.00") if unit_price_raw is None else _parse_unit_price(unit_price_raw)
+        if unit_price_raw is not None and unit_price is None:
+            messages.append("Sell Price must be a valid decimal number.")
+        elif unit_price is not None and unit_price < 0:
+            messages.append("Sell Price must be greater than or equal to 0.")
 
-        sku = _normalize_sku(_normalize_nullable_string(raw_row.get("sku")))
+        sku = _normalize_sku(item_code)
         if sku and len(sku) > (Item.__table__.c.sku.type.length or 100):
             messages.append(f"SKU exceeds max length of {Item.__table__.c.sku.type.length or 100} characters.")
 
         description = _normalize_nullable_string(raw_row.get("description"))
+        sales_description = _normalize_nullable_string(raw_row.get("sales_description"))
+        purchase_description = _normalize_nullable_string(raw_row.get("purchase_description"))
+        color = _normalize_nullable_string(raw_row.get("color"))
+        monument_type = _normalize_nullable_string(raw_row.get("monument_type"))
+        shape = _normalize_nullable_string(raw_row.get("shape"))
+        finish = _normalize_nullable_string(raw_row.get("finish"))
+        category = _normalize_nullable_string(raw_row.get("category"))
+        location = _normalize_nullable_string(raw_row.get("location"))
+        peach_id = _normalize_nullable_string(raw_row.get("peach_id"))
+        new_code = _normalize_nullable_string(raw_row.get("new_code"))
+        item_type = _normalize_nullable_string(raw_row.get("item_type"))
 
-        income_account_raw = _normalize_nullable_string(raw_row.get("income_account_id"))
-        income_account_id: Optional[int] = None
-        if income_account_raw is not None:
-            try:
-                income_account_id = int(income_account_raw)
-            except ValueError:
-                messages.append("Income account ID must be a whole number.")
+        dimension_fields = {
+            "LR (ft)": _parse_decimal(_normalize_nullable_string(raw_row.get("lr_feet"))),
+            "LR (in.)": _parse_decimal(_normalize_nullable_string(raw_row.get("lr_inches"))),
+            "FB (ft)": _parse_decimal(_normalize_nullable_string(raw_row.get("fb_feet"))),
+            "FB (in.)": _parse_decimal(_normalize_nullable_string(raw_row.get("fb_inches"))),
+            "TB (ft)": _parse_decimal(_normalize_nullable_string(raw_row.get("tb_feet"))),
+            "TB (in.)": _parse_decimal(_normalize_nullable_string(raw_row.get("tb_inches"))),
+        }
+        for label, value in dimension_fields.items():
+            raw_value = _normalize_nullable_string(raw_row.get(
+                {
+                    "LR (ft)": "lr_feet",
+                    "LR (in.)": "lr_inches",
+                    "FB (ft)": "fb_feet",
+                    "FB (in.)": "fb_inches",
+                    "TB (ft)": "tb_feet",
+                    "TB (in.)": "tb_inches",
+                }[label]
+            ))
+            if raw_value is not None and value is None:
+                messages.append(f"{label} must be a valid decimal number.")
 
-        is_active_raw = _normalize_nullable_string(raw_row.get("is_active"))
-        is_active = _parse_bool(is_active_raw)
-        if is_active is None:
-            messages.append("is_active must be true/false, yes/no, 1/0, or active/inactive.")
+        cost_price_raw = _normalize_nullable_string(raw_row.get("cost_price"))
+        cost_price = _parse_decimal(cost_price_raw)
+        if cost_price_raw is not None and cost_price is None:
+            messages.append("Cost Price must be a valid decimal number.")
+        elif cost_price is not None and cost_price < 0:
+            messages.append("Cost Price must be greater than or equal to 0.")
 
-        name_key = _normalize_item_name(name)
+        weight_raw = _normalize_nullable_string(raw_row.get("weight_lbs"))
+        weight_lbs = _parse_decimal(weight_raw)
+        if weight_raw is not None and weight_lbs is None:
+            messages.append("Weight(lbs) must be a valid decimal number.")
+        elif weight_lbs is not None and weight_lbs < 0:
+            messages.append("Weight(lbs) must be greater than or equal to 0.")
+
+        reorder_raw = _normalize_nullable_string(raw_row.get("reorder_point"))
+        reorder_point = _parse_decimal(reorder_raw)
+        if reorder_raw is not None and reorder_point is None:
+            messages.append("ReOrder Qty must be a valid decimal number.")
+        elif reorder_point is not None and reorder_point < 0:
+            messages.append("ReOrder Qty must be greater than or equal to 0.")
+
+        exclude_from_price_list = _parse_bool(_normalize_nullable_string(raw_row.get("exclude_from_price_list")))
+        upload_to_peach = _parse_bool(_normalize_nullable_string(raw_row.get("upload_to_peach")))
+        inventory_check = _parse_bool(_normalize_nullable_string(raw_row.get("inventory_check")))
+        for label, value in {
+            "Exclude From Price List": exclude_from_price_list,
+            "UploadtoPeach": upload_to_peach,
+            "InventoryCheck": inventory_check,
+        }.items():
+            raw_value = _normalize_nullable_string(raw_row.get(
+                {
+                    "Exclude From Price List": "exclude_from_price_list",
+                    "UploadtoPeach": "upload_to_peach",
+                    "InventoryCheck": "inventory_check",
+                }[label]
+            ))
+            if raw_value is not None and value is None:
+                messages.append(f"{label} must be true/false, yes/no, or 1/0.")
+
+        name = (sales_description or description or purchase_description or item_code or "Unnamed Item").strip()[:200]
+        item_code_key = item_code.upper() if item_code else None
         sku_key = sku.upper() if sku else None
 
-        if name_key:
-            if name_key in first_seen_name_key:
-                messages.append(f"Duplicate item name in file. First seen at row {first_seen_name_key[name_key]}.")
+        if item_code_key:
+            if item_code_key in first_seen_code_key:
+                messages.append(f"Duplicate Item Code in file. First seen at row {first_seen_code_key[item_code_key]}.")
             else:
-                first_seen_name_key[name_key] = row_number
+                first_seen_code_key[item_code_key] = row_number
 
         if sku_key:
             if sku_key in first_seen_sku_key:
@@ -393,14 +484,14 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
 
         if sku_key and sku_key in ambiguous_sku_keys:
             messages.append("Multiple existing items already use this SKU. Resolve duplicates before UPDATE/UPSERT.")
-        if name_key and name_key in ambiguous_name_keys:
-            messages.append("Multiple existing items already use this name. Resolve duplicates before UPDATE/UPSERT.")
+        if item_code_key and item_code_key in ambiguous_code_keys:
+            messages.append("Multiple existing items already use this Item Code. Resolve duplicates before UPDATE/UPSERT.")
 
         existing_item: Optional[Item] = None
+        if item_code_key and item_code_key not in ambiguous_code_keys:
+            existing_item = existing_by_code.get(item_code_key)
         if sku_key and sku_key not in ambiguous_sku_keys:
-            existing_item = existing_by_sku.get(sku_key)
-        if existing_item is None and name_key and name_key not in ambiguous_name_keys:
-            existing_item = existing_by_name.get(name_key)
+            existing_item = existing_item or existing_by_sku.get(sku_key)
 
         action: Literal["CREATE", "UPDATE", "SKIP", "ERROR"] = "ERROR"
         item_payload: Optional[dict[str, Any]] = None
@@ -415,14 +506,13 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
             else:
                 action = "UPDATE" if exists else "CREATE"
                 if action == "CREATE":
-                    if not resolved_sku:
-                        resolved_sku = _generate_sku(name or "ITEM", reserved_skus)
+                    resolved_sku_key = resolved_sku.upper() if resolved_sku else None
+                    if not resolved_sku_key:
+                        messages.append("Item Code is required to create a SKU.")
+                    elif resolved_sku_key in reserved_skus:
+                        messages.append("SKU already exists.")
                     else:
-                        resolved_sku_key = resolved_sku.upper()
-                        if resolved_sku_key in reserved_skus:
-                            messages.append("SKU already exists.")
-                        else:
-                            reserved_skus.add(resolved_sku_key)
+                        reserved_skus.add(resolved_sku_key)
                 elif action == "UPDATE" and existing_item is not None:
                     if not resolved_sku:
                         resolved_sku = existing_item.sku
@@ -436,16 +526,42 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
 
                 if not messages:
                     candidate_payload = {
-                        "name": name,
+                        "item_code": item_code,
                         "sku": resolved_sku,
+                        "name": name,
+                        "color": color,
+                        "monument_type": monument_type,
+                        "lr_feet": dimension_fields["LR (ft)"],
+                        "lr_inches": dimension_fields["LR (in.)"],
+                        "fb_feet": dimension_fields["FB (ft)"],
+                        "fb_inches": dimension_fields["FB (in.)"],
+                        "tb_feet": dimension_fields["TB (ft)"],
+                        "tb_inches": dimension_fields["TB (in.)"],
+                        "shape": shape,
+                        "finish": finish,
+                        "category": category,
                         "description": description,
-                        "unit_price": unit_price,
-                        "income_account_id": income_account_id,
-                        "is_active": True if is_active is None else is_active,
+                        "sales_description": sales_description,
+                        "purchase_description": purchase_description,
+                        "unit_price": unit_price or Decimal("0.00"),
+                        "cost_price": cost_price,
+                        "weight_lbs": weight_lbs,
+                        "location": location,
+                        "peach_id": peach_id,
+                        "new_code": new_code,
+                        "exclude_from_price_list": bool(exclude_from_price_list) if exclude_from_price_list is not None else False,
+                        "upload_to_peach": bool(upload_to_peach) if upload_to_peach is not None else False,
+                        "item_type": item_type,
+                        "inventory_check": bool(inventory_check) if inventory_check is not None else False,
+                        "income_account_id": existing_item.income_account_id if existing_item is not None else None,
+                        "is_active": True,
                     }
                     try:
                         validated = sales_schemas.ItemCreate(**candidate_payload)
                         item_payload = validated.model_dump()
+                        item_payload["on_hand_qty"] = quantity or Decimal("0")
+                        item_payload["reorder_point"] = reorder_point
+                        item_payload["quantity"] = quantity or Decimal("0")
                     except ValidationError as exc:
                         for error in exc.errors():
                             field = ".".join(str(part) for part in error.get("loc", []))
@@ -458,8 +574,10 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
         analysis_rows.append(
             {
                 "row_number": row_number,
+                "item_code": item_code,
                 "name": name,
                 "sku": resolved_sku,
+                "quantity": quantity,
                 "unit_price": unit_price,
                 "action": action,
                 "status": status_value,
@@ -481,8 +599,10 @@ def _analyze_item_import(payload: ItemImportRequest, db: Session) -> dict[str, A
     rows = [
         ItemImportRowResult(
             row_number=row["row_number"],
+            item_code=row["item_code"],
             name=row["name"],
             sku=row["sku"],
+            quantity=row["quantity"],
             unit_price=row["unit_price"],
             action=row["action"],
             status=row["status"],
@@ -523,10 +643,20 @@ def import_items(payload: ItemImportRequest, db: Session = Depends(get_db)) -> I
             continue
 
         item_payload = row["payload"]
+        quantity = Decimal(item_payload.pop("quantity", 0))
+        cost_price = Decimal(item_payload.get("cost_price") or 0)
         if row["action"] == "CREATE":
             item = Item(**item_payload)
             db.add(item)
             _safe_item_import_flush(db, row["row_number"])
+            inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+            if inventory is None:
+                inventory = Inventory(item_id=item.id, quantity_on_hand=quantity, landed_unit_cost=cost_price, total_value=quantity * cost_price)
+                db.add(inventory)
+            else:
+                inventory.quantity_on_hand = quantity
+                inventory.landed_unit_cost = cost_price
+                inventory.total_value = quantity * cost_price
             imported_items.append(ItemImportItemResult(id=item.id, name=item.name, sku=item.sku, action="CREATED"))
             continue
 
@@ -536,6 +666,14 @@ def import_items(payload: ItemImportRequest, db: Session = Depends(get_db)) -> I
                 raise HTTPException(status_code=400, detail="Item matching key could not be resolved during import.")
             for key, value in item_payload.items():
                 setattr(item, key, value)
+            inventory = db.query(Inventory).filter(Inventory.item_id == item.id).first()
+            if inventory is None:
+                inventory = Inventory(item_id=item.id, quantity_on_hand=quantity, landed_unit_cost=cost_price, total_value=quantity * cost_price)
+                db.add(inventory)
+            else:
+                inventory.quantity_on_hand = quantity
+                inventory.landed_unit_cost = cost_price
+                inventory.total_value = quantity * cost_price
             _safe_item_import_flush(db, row["row_number"])
             imported_items.append(ItemImportItemResult(id=item.id, name=item.name, sku=item.sku, action="UPDATED"))
 

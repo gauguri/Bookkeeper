@@ -66,10 +66,33 @@ class CustomerResponse(CustomerBase):
 
 
 class ItemBase(BaseModel):
+    item_code: Optional[str] = Field(None, max_length=100)
     sku: Optional[str] = None
     name: str = Field(..., max_length=200)
+    color: Optional[str] = Field(None, max_length=100)
+    monument_type: Optional[str] = Field(None, max_length=100)
+    lr_feet: Optional[DecimalValue] = None
+    lr_inches: Optional[DecimalValue] = None
+    fb_feet: Optional[DecimalValue] = None
+    fb_inches: Optional[DecimalValue] = None
+    tb_feet: Optional[DecimalValue] = None
+    tb_inches: Optional[DecimalValue] = None
+    shape: Optional[str] = Field(None, max_length=100)
+    finish: Optional[str] = Field(None, max_length=100)
+    category: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
+    sales_description: Optional[str] = None
+    purchase_description: Optional[str] = None
     unit_price: DecimalValue
+    cost_price: Optional[DecimalValue] = Field(None, ge=0)
+    weight_lbs: Optional[DecimalValue] = Field(None, ge=0)
+    location: Optional[str] = Field(None, max_length=255)
+    peach_id: Optional[str] = Field(None, max_length=100)
+    new_code: Optional[str] = Field(None, max_length=100)
+    exclude_from_price_list: bool = False
+    upload_to_peach: bool = False
+    item_type: Optional[str] = Field(None, max_length=100)
+    inventory_check: bool = False
     income_account_id: Optional[int] = None
     is_active: bool = True
 
@@ -79,10 +102,33 @@ class ItemCreate(ItemBase):
 
 
 class ItemUpdate(BaseModel):
+    item_code: Optional[str] = None
     sku: Optional[str] = None
     name: Optional[str] = None
+    color: Optional[str] = None
+    monument_type: Optional[str] = None
+    lr_feet: Optional[DecimalValue] = None
+    lr_inches: Optional[DecimalValue] = None
+    fb_feet: Optional[DecimalValue] = None
+    fb_inches: Optional[DecimalValue] = None
+    tb_feet: Optional[DecimalValue] = None
+    tb_inches: Optional[DecimalValue] = None
+    shape: Optional[str] = None
+    finish: Optional[str] = None
+    category: Optional[str] = None
     description: Optional[str] = None
+    sales_description: Optional[str] = None
+    purchase_description: Optional[str] = None
     unit_price: Optional[DecimalValue] = None
+    cost_price: Optional[DecimalValue] = Field(None, ge=0)
+    weight_lbs: Optional[DecimalValue] = Field(None, ge=0)
+    location: Optional[str] = None
+    peach_id: Optional[str] = None
+    new_code: Optional[str] = None
+    exclude_from_price_list: Optional[bool] = None
+    upload_to_peach: Optional[bool] = None
+    item_type: Optional[str] = None
+    inventory_check: Optional[bool] = None
     income_account_id: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -512,6 +558,13 @@ class ItemListEnriched(BaseModel):
     preferred_landed_cost: Optional[Decimal] = None
     stock_status: str = "in_stock"
     unique_customers: int = 0
+
+
+class ItemListPageResponse(BaseModel):
+    items: List[ItemListEnriched]
+    total_count: int
+    page: int
+    page_size: int
 
 
 class ItemsSummaryResponse(BaseModel):

@@ -35,8 +35,10 @@ type ItemImportSummary = {
 
 type ItemImportRowResult = {
   row_number: number;
+  item_code?: string | null;
   name?: string | null;
   sku?: string | null;
+  quantity?: string | number | null;
   unit_price?: string | number | null;
   action: "CREATE" | "UPDATE" | "SKIP" | "ERROR";
   status: "VALID" | "ERROR";
@@ -115,7 +117,7 @@ export default function ItemsBulkImportPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "items-import-template.csv";
+    link.download = "glenrock-items-import-template.csv";
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -178,6 +180,7 @@ export default function ItemsBulkImportPage() {
   };
 
   const previewRows = preview?.rows ?? [];
+  const errorRows = previewRows.filter((row) => row.status === "ERROR");
   const importedItems = preview?.imported_items ?? [];
   const totalMappedFields = format ? format.required_fields.length + format.optional_fields.length : 0;
 
@@ -191,8 +194,8 @@ export default function ItemsBulkImportPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Items Import Workbench</p>
           <h1 className="text-3xl font-semibold">Items Bulk Import</h1>
           <p className="max-w-4xl text-muted">
-            Validate, stage, and load item master data with conflict controls and row-level diagnostics.
-            SKU values can be provided, or auto-generated from item name prefixes.
+            Validate, stage, and load the Glenrock monument inventory master with conflict controls and row-level diagnostics.
+            Item Code becomes the catalog code/SKU, and Quantity seeds the on-hand inventory record.
           </p>
         </div>
         <div className="relative z-10 flex flex-wrap gap-2">
@@ -260,14 +263,14 @@ export default function ItemsBulkImportPage() {
                 <input checked={hasHeader} onChange={(event) => setHasHeader(event.target.checked)} type="checkbox" />
                 CSV includes a header row
               </label>
-              <p className="mt-3 text-xs">Recommended format: header row with canonical fields.</p>
+              <p className="mt-3 text-xs">Recommended format: use the Glenrock header row exactly as exported.</p>
             </div>
 
             <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
               <p className="font-medium text-foreground">Run sequence</p>
               <p className="mt-3 text-xs">1. Validate CSV.</p>
               <p className="mt-2 text-xs">2. Import items after resolving errors.</p>
-              <p className="mt-2 text-xs">3. Review created and updated item records.</p>
+              <p className="mt-2 text-xs">3. Review created and updated monument records.</p>
             </div>
           </div>
 
@@ -279,7 +282,7 @@ export default function ItemsBulkImportPage() {
               setPreview(null);
               setSuccess("");
             }}
-            placeholder="Paste item CSV here"
+            placeholder="Paste Glenrock inventory CSV here"
           />
         </div>
 
@@ -377,26 +380,35 @@ export default function ItemsBulkImportPage() {
               <thead className="bg-surface text-left text-xs uppercase tracking-[0.18em] text-muted">
                 <tr>
                   <th className="px-3 py-3">Row</th>
+                  <th className="px-3 py-3">Item Code</th>
                   <th className="px-3 py-3">Name</th>
-                  <th className="px-3 py-3">SKU</th>
-                  <th className="px-3 py-3">Unit Price</th>
+                  <th className="px-3 py-3">Quantity</th>
+                  <th className="px-3 py-3">Sell Price</th>
                   <th className="px-3 py-3">Action</th>
                   <th className="px-3 py-3">Validation</th>
                   <th className="px-3 py-3">Messages</th>
                 </tr>
               </thead>
               <tbody>
-                {previewRows.map((row) => (
+                {errorRows.map((row) => (
                   <tr key={`${row.row_number}-${row.name || "row"}`} className="border-t border-border/70 align-top">
                     <td className="px-3 py-3 font-mono text-xs text-muted">{row.row_number}</td>
+                    <td className="px-3 py-3 font-mono text-xs">{row.item_code || row.sku || "-"}</td>
                     <td className="px-3 py-3">{row.name || "-"}</td>
-                    <td className="px-3 py-3 font-mono text-xs">{row.sku || "-"}</td>
+                    <td className="px-3 py-3">{row.quantity ?? "-"}</td>
                     <td className="px-3 py-3">{row.unit_price ?? "-"}</td>
                     <td className="px-3 py-3">{row.action}</td>
                     <td className="px-3 py-3"><span className={`app-badge ${statusTone(row.status)}`}>{row.status}</span></td>
                     <td className="px-3 py-3 text-xs text-muted">{row.messages.length ? row.messages.join(" ") : "No issues detected."}</td>
                   </tr>
                 ))}
+                {errorRows.length === 0 ? (
+                  <tr className="border-t border-border/70">
+                    <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted">
+                      No validation errors. All rows are ready to import.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -412,7 +424,7 @@ export default function ItemsBulkImportPage() {
                   <div key={`${item.action}-${item.id}`} className="rounded-xl border border-emerald-300/40 bg-white/70 px-3 py-2 text-sm text-emerald-900">
                     <span className="font-mono text-xs text-emerald-700">#{item.id}</span>
                     <p className="font-medium">{item.name}</p>
-                    <p className="text-xs">{item.sku || "No SKU"}</p>
+                    <p className="text-xs">{item.sku || "No item code"}</p>
                     <p className="text-xs uppercase tracking-[0.18em] text-emerald-700">{item.action}</p>
                   </div>
                 ))}

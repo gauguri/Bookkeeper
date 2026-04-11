@@ -13,6 +13,7 @@ import InventoryGauge from "../components/items/InventoryGauge";
 import ItemTopCustomersTable from "../components/items/ItemTopCustomersTable";
 import ItemSupplierTable from "../components/items/ItemSupplierTable";
 import ItemMovementTimeline from "../components/items/ItemMovementTimeline";
+import MonumentPreviewCard from "../components/items/MonumentPreviewCard";
 
 type Tab = "overview" | "sales" | "inventory" | "suppliers";
 
@@ -29,7 +30,7 @@ export default function ItemProfilePage() {
   const id = itemId ? parseInt(itemId, 10) : undefined;
   const { data, isLoading, error } = useItem360(id);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-  const [showDetails, setShowDetails] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
 
   if (isLoading) {
     return (
@@ -61,6 +62,35 @@ export default function ItemProfilePage() {
   }
 
   const { item, kpis, sales_trend, top_customers, suppliers, recent_movements } = data;
+  const monumentAttributes = [
+    { label: "Item Code", value: item.item_code || item.sku || "-" },
+    { label: "Color", value: item.color || "-" },
+    { label: "Type", value: item.monument_type || "-" },
+    { label: "LR (ft)", value: item.lr_feet != null ? Number(item.lr_feet).toLocaleString() : "-" },
+    { label: "LR (in.)", value: item.lr_inches != null ? Number(item.lr_inches).toLocaleString() : "-" },
+    { label: "FB (ft)", value: item.fb_feet != null ? Number(item.fb_feet).toLocaleString() : "-" },
+    { label: "FB (in.)", value: item.fb_inches != null ? Number(item.fb_inches).toLocaleString() : "-" },
+    { label: "TB (ft)", value: item.tb_feet != null ? Number(item.tb_feet).toLocaleString() : "-" },
+    { label: "TB (in.)", value: item.tb_inches != null ? Number(item.tb_inches).toLocaleString() : "-" },
+    { label: "Shape", value: item.shape || "-" },
+    { label: "Finish", value: item.finish || "-" },
+    { label: "Category", value: item.category || "-" },
+    { label: "Quantity", value: Number(kpis.on_hand_qty).toLocaleString() },
+    { label: "Sell Price", value: formatCurrency(Number(item.unit_price), true) },
+    { label: "Item Description", value: item.description || "-" },
+    { label: "Sales Description", value: item.sales_description || "-" },
+    { label: "Purchase Description", value: item.purchase_description || "-" },
+    { label: "Cost Price", value: item.cost_price != null ? formatCurrency(Number(item.cost_price), true) : "-" },
+    { label: "Weight (lbs)", value: item.weight_lbs != null ? Number(item.weight_lbs).toLocaleString() : "-" },
+    { label: "Location", value: item.location || "-" },
+    { label: "PeachID", value: item.peach_id || "-" },
+    { label: "NewCode", value: item.new_code || "-" },
+    { label: "ReOrder Qty", value: item.reorder_point != null ? Number(item.reorder_point).toLocaleString() : "-" },
+    { label: "Exclude From Price List", value: item.exclude_from_price_list ? "Yes" : "No" },
+    { label: "UploadtoPeach", value: item.upload_to_peach ? "Yes" : "No" },
+    { label: "ItemType", value: item.item_type || "-" },
+    { label: "InventoryCheck", value: item.inventory_check ? "Yes" : "No" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -96,6 +126,11 @@ export default function ItemProfilePage() {
                     <Tag className="h-3 w-3" /> SKU: {item.sku}
                   </span>
                 )}
+                {item.item_code && item.item_code !== item.sku && (
+                  <span className="flex items-center gap-1">
+                    <Tag className="h-3 w-3" /> Code: {item.item_code}
+                  </span>
+                )}
                 <span className="flex items-center gap-1">
                   <DollarSign className="h-3 w-3" /> List: {formatCurrency(Number(item.unit_price), true)}
                 </span>
@@ -121,29 +156,31 @@ export default function ItemProfilePage() {
           </div>
         </div>
 
+        <MonumentPreviewCard item={item} />
+
         {/* Expandable details */}
         {showDetails && (
-          <div className="mt-4 grid gap-3 rounded-xl border p-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="text-sm">
-              <span className="text-xs text-muted">Description</span>
-              <p>{item.description || "No description"}</p>
+          <div className="mt-4 rounded-xl border p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm font-semibold">Monument Attributes</p>
+              <p className="text-xs text-muted">Imported from the Glenrock inventory master file.</p>
             </div>
-            <div className="text-sm">
-              <span className="text-xs text-muted">List Price</span>
-              <p className="font-semibold">{formatCurrency(Number(item.unit_price), true)}</p>
-            </div>
-            <div className="text-sm">
-              <span className="text-xs text-muted">Reorder Point</span>
-              <p>{item.reorder_point != null ? Number(item.reorder_point).toLocaleString() : "Not set"}</p>
-            </div>
-            <div className="text-sm">
-              <span className="text-xs text-muted">Gross Margin</span>
-              <p className={`font-semibold ${
-                kpis.gross_margin_percent != null && kpis.gross_margin_percent < 20
-                  ? "text-red-600" : "text-emerald-600"
-              }`}>
-                {kpis.gross_margin_percent != null ? formatPercent(kpis.gross_margin_percent) : "N/A"}
-              </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {monumentAttributes.map((attribute) => (
+                <div key={attribute.label} className="rounded-xl border border-border/60 bg-background px-3 py-3 text-sm">
+                  <span className="text-xs text-muted">{attribute.label}</span>
+                  <p className="mt-1 whitespace-pre-wrap break-words font-medium">{attribute.value}</p>
+                </div>
+              ))}
+              <div className="rounded-xl border border-border/60 bg-background px-3 py-3 text-sm">
+                <span className="text-xs text-muted">Gross Margin</span>
+                <p className={`mt-1 font-medium ${
+                  kpis.gross_margin_percent != null && kpis.gross_margin_percent < 20
+                    ? "text-red-600" : "text-emerald-600"
+                }`}>
+                  {kpis.gross_margin_percent != null ? formatPercent(kpis.gross_margin_percent) : "N/A"}
+                </p>
+              </div>
             </div>
           </div>
         )}

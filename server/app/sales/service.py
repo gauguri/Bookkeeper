@@ -1206,10 +1206,33 @@ def get_item_360(db: Session, item_id: int) -> dict:
     # ── Item detail response ───────────────────────────────
     item_detail = {
         "id": item.id,
+        "item_code": item.item_code,
         "sku": item.sku,
         "name": item.name,
+        "color": item.color,
+        "monument_type": item.monument_type,
+        "lr_feet": item.lr_feet,
+        "lr_inches": item.lr_inches,
+        "fb_feet": item.fb_feet,
+        "fb_inches": item.fb_inches,
+        "tb_feet": item.tb_feet,
+        "tb_inches": item.tb_inches,
+        "shape": item.shape,
+        "finish": item.finish,
+        "category": item.category,
         "description": item.description,
+        "sales_description": item.sales_description,
+        "purchase_description": item.purchase_description,
         "unit_price": Decimal(item.unit_price or 0),
+        "cost_price": Decimal(item.cost_price or 0) if item.cost_price is not None else None,
+        "weight_lbs": Decimal(item.weight_lbs or 0) if item.weight_lbs is not None else None,
+        "location": item.location,
+        "peach_id": item.peach_id,
+        "new_code": item.new_code,
+        "exclude_from_price_list": item.exclude_from_price_list,
+        "upload_to_peach": item.upload_to_peach,
+        "item_type": item.item_type,
+        "inventory_check": item.inventory_check,
         "income_account_id": item.income_account_id,
         "is_active": item.is_active,
         "created_at": item.created_at,
@@ -1239,7 +1262,9 @@ def get_items_enriched(
     stock_status: Optional[str] = None,
     sort_by: str = "name",
     sort_dir: str = "asc",
-) -> List[dict]:
+    page: int = 0,
+    page_size: int = 50,
+) -> dict:
     """Return enriched item list with inventory, revenue, margin data."""
     from app.models import Inventory, SupplierItem, Supplier
 
@@ -1370,7 +1395,18 @@ def get_items_enriched(
     key_fn = sort_key_map.get(sort_by, sort_key_map["name"])
     result.sort(key=key_fn, reverse=(sort_dir == "desc"))
 
-    return result
+    total_count = len(result)
+    safe_page = max(page, 0)
+    safe_page_size = max(1, min(page_size, 200))
+    start = safe_page * safe_page_size
+    end = start + safe_page_size
+
+    return {
+        "items": result[start:end],
+        "total_count": total_count,
+        "page": safe_page,
+        "page_size": safe_page_size,
+    }
 
 
 def get_items_summary(db: Session) -> dict:

@@ -31,12 +31,14 @@ const emptyForm = {
 };
 
 export default function ItemsPage() {
+  const PAGE_SIZE = 100;
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [stockFilter, setStockFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -51,13 +53,20 @@ export default function ItemsPage() {
     stock_status: stockFilter || undefined,
     sort_by: sortBy,
     sort_dir: sortDir,
-  }), [search, stockFilter, statusFilter, sortBy, sortDir]);
+    page,
+    page_size: PAGE_SIZE,
+  }), [search, stockFilter, statusFilter, sortBy, sortDir, page]);
 
   const { data: summary } = useItemsSummary();
-  const { data: items, isLoading } = useItemsEnriched(filters);
+  const { data: itemsPage, isLoading } = useItemsEnriched(filters);
   const createMutation = useCreateItem();
   const archiveMutation = useArchiveItem();
 
+  const items = itemsPage?.items ?? [];
+  const totalCount = itemsPage?.total_count ?? 0;
+  const pageSize = itemsPage?.page_size ?? PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const currentPage = itemsPage?.page ?? page;
   const visibleIds = items?.map((item) => item.id) ?? [];
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
   const someVisibleSelected = visibleIds.some((id) => selectedIds.includes(id));
@@ -65,6 +74,10 @@ export default function ItemsPage() {
   useEffect(() => {
     setSelectedIds((prev) => prev.filter((id) => visibleIds.includes(id)));
   }, [items]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [search, stockFilter, statusFilter, sortBy, sortDir]);
 
   const handleSort = (col: string) => {
     if (sortBy === col) {
@@ -458,6 +471,31 @@ export default function ItemsPage() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+          <p className="text-muted">
+            Showing {totalCount === 0 ? 0 : currentPage * pageSize + 1}-
+            {Math.min((currentPage + 1) * pageSize, totalCount)} of {totalCount} items
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              className="app-button-ghost"
+              onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
+              disabled={currentPage <= 0}
+            >
+              Previous
+            </button>
+            <span className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted">
+              Page {currentPage + 1} of {totalPages}
+            </span>
+            <button
+              className="app-button-ghost"
+              onClick={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
+              disabled={currentPage >= totalPages - 1}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

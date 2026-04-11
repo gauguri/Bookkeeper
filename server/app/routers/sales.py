@@ -207,19 +207,21 @@ def get_items_summary_endpoint(
     return get_items_summary(db)
 
 
-@router.get("/items-enriched", response_model=List[schemas.ItemListEnriched])
+@router.get("/items-enriched", response_model=schemas.ItemListPageResponse)
 def get_items_enriched_endpoint(
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
     stock_status: Optional[str] = None,
     sort_by: str = "name",
     sort_dir: str = "asc",
+    page: int = 0,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     _=Depends(require_module(ModuleKey.ITEMS.value)),
 ):
     return get_items_enriched(
         db, search=search, is_active=is_active, stock_status=stock_status,
-        sort_by=sort_by, sort_dir=sort_dir,
+        sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size,
     )
 
 

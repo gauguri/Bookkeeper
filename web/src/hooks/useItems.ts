@@ -26,6 +26,13 @@ export type ItemListEnriched = {
   unique_customers: number;
 };
 
+export type ItemListPage = {
+  items: ItemListEnriched[];
+  total_count: number;
+  page: number;
+  page_size: number;
+};
+
 export type ItemsSummary = {
   total_items: number;
   active_items: number;
@@ -87,10 +94,33 @@ export type ItemMovement = {
 
 export type ItemDetail = {
   id: number;
+  item_code?: string | null;
   sku?: string | null;
   name: string;
+  color?: string | null;
+  monument_type?: string | null;
+  lr_feet?: number | null;
+  lr_inches?: number | null;
+  fb_feet?: number | null;
+  fb_inches?: number | null;
+  tb_feet?: number | null;
+  tb_inches?: number | null;
+  shape?: string | null;
+  finish?: string | null;
+  category?: string | null;
   description?: string | null;
+  sales_description?: string | null;
+  purchase_description?: string | null;
   unit_price: number;
+  cost_price?: number | null;
+  weight_lbs?: number | null;
+  location?: string | null;
+  peach_id?: string | null;
+  new_code?: string | null;
+  exclude_from_price_list?: boolean;
+  upload_to_peach?: boolean;
+  item_type?: string | null;
+  inventory_check?: boolean;
   income_account_id?: number | null;
   is_active: boolean;
   created_at: string;
@@ -117,6 +147,8 @@ export type ItemFilters = {
   stock_status?: string;
   sort_by?: string;
   sort_dir?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
 };
 
 // ── Hooks ────────────────────────────────────────────────
@@ -144,10 +176,12 @@ export function useItemsEnriched(filters: ItemFilters = {}) {
     stock_status: filters.stock_status,
     sort_by: filters.sort_by,
     sort_dir: filters.sort_dir,
+    page: filters.page !== undefined ? String(filters.page) : undefined,
+    page_size: filters.page_size !== undefined ? String(filters.page_size) : undefined,
   });
   return useQuery({
     queryKey: ["items", "enriched", filters],
-    queryFn: () => apiFetch<ItemListEnriched[]>(`/items-enriched${qs}`),
+    queryFn: () => apiFetch<ItemListPage>(`/items-enriched${qs}`),
     staleTime: 30_000,
   });
 }

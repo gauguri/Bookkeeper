@@ -1,5 +1,8 @@
+import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,6 +31,7 @@ from app.models import (
 
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"], dependencies=[Depends(require_module(ModuleKey.INVENTORY.value))])
+GLENROCK_INVENTORY_SNAPSHOT_PATH = Path(__file__).resolve().parent.parent / "data" / "glenrock_inventory_snapshot.csv"
 
 
 def _get_default_company_id(db: Session) -> int:
@@ -58,6 +62,26 @@ def _resolve_inventory_unit_cost(item: Item, inventory: Inventory | None) -> Dec
     return Decimal("0.00")
 
 
+@lru_cache(maxsize=1)
+def _load_glenrock_inventory_snapshot() -> dict[str, dict[str, Decimal | str]]:
+    if not GLENROCK_INVENTORY_SNAPSHOT_PATH.exists():
+        return {}
+
+    snapshot: dict[str, dict[str, Decimal | str]] = {}
+    with GLENROCK_INVENTORY_SNAPSHOT_PATH.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            code = str(row.get("item_code") or "").strip()
+            if not code:
+                continue
+            snapshot[code] = {
+                "quantity": _q2(row.get("quantity") or 0),
+                "cost_price": _q2(row.get("cost_price") or 0),
+                "description": str(row.get("description") or "").strip(),
+            }
+    return snapshot
+
+
 def _avg_usage_by_item(db: Session, item_ids: list[int], usage_days: int) -> dict[int, Decimal]:
     if not item_ids:
         return {}
@@ -86,6 +110,7 @@ def _build_inventory_rows(
         .order_by(Item.name.asc())
         .all()
     )
+    inventory_snapshot = _load_glenrock_inventory_snapshot()
     item_ids = [item.id for item in items]
 
     inv_by_id = {row.item_id: row for row in db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()}
@@ -149,9 +174,18 @@ def _build_inventory_rows(
     now = datetime.utcnow()
     rows: list[schemas.InventoryItemRow] = []
     for item in items:
+        snapshot_code = (item.item_code or item.sku or "").strip()
+        snapshot_row = inventory_snapshot.get(snapshot_code)
+        if inventory_snapshot and snapshot_row is None:
+            continue
+
         inv = inv_by_id.get(item.id)
-        on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
-        landed_cost = _resolve_inventory_unit_cost(item, inv)
+        if snapshot_row is not None:
+            on_hand = _q2(snapshot_row["quantity"])
+            landed_cost = _q2(snapshot_row["cost_price"])
+        else:
+            on_hand = _q2(inv.quantity_on_hand if inv else item.on_hand_qty)
+            landed_cost = _resolve_inventory_unit_cost(item, inv)
         reserved = _q2(reserved_by_id.get(item.id, Decimal("0")))
         available = on_hand - reserved
         avg_daily_usage = _q2(avg_usage_by_id.get(item.id, Decimal("0")))

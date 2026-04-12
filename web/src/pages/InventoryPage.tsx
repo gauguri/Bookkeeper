@@ -472,13 +472,23 @@ export default function InventoryPage() {
   };
 
   const handleCompositionClick = (itemId: number, segment: "available" | "reserved", event?: MouseEvent) => {
-    setBreakdown(segment);
-    setAbcItemFilter(itemId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("queue", "all");
+      next.set("abc_item", String(itemId));
+      next.delete("abc_class");
+      if (segment === "available" || segment === "reserved") {
+        next.set("breakdown", segment);
+      } else {
+        next.delete("breakdown");
+      }
+      return next;
+    }, { replace: false });
     setHighlightedItemId(itemId);
     setTimeout(() => {
       gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       rowRefs.current[itemId]?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 20);
+    }, 80);
     if (segment === "reserved" && event) void openReservations(itemId, event);
   };
 

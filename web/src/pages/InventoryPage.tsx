@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -80,6 +81,27 @@ type PlanningPayload = {
   target_days_supply: number;
 };
 
+const toNumber = (value: unknown) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const normalizeItemRow = (row: ItemRow): ItemRow => ({
+  ...row,
+  on_hand: toNumber(row.on_hand),
+  reserved: toNumber(row.reserved),
+  available: toNumber(row.available),
+  reorder_point: toNumber(row.reorder_point),
+  safety_stock: toNumber(row.safety_stock),
+  lead_time_days: toNumber(row.lead_time_days),
+  avg_daily_usage: toNumber(row.avg_daily_usage),
+  days_of_supply: toNumber(row.days_of_supply),
+  suggested_reorder_qty: toNumber(row.suggested_reorder_qty),
+  total_value: toNumber(row.total_value),
+  landed_unit_cost: row.landed_unit_cost == null ? null : toNumber(row.landed_unit_cost),
+  inbound_qty: toNumber(row.inbound_qty),
+});
+
 const formatNumber = (value: number) => (Number.isFinite(value) ? formatCompact(value) : "0");
 const healthPillMap: Record<string, string> = {
   healthy: "bg-success/10 text-success",
@@ -94,17 +116,15 @@ export default function InventoryPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState("ytd");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [sort, setSort] = useState("total_value:desc");
   const [usageDays, setUsageDays] = useState(90);
-  const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
-  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
   const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(5);
   const [overviewDensity, setOverviewDensity] = useState<OverviewDensity>("compact");
   const [overviewShowZeroQty, setOverviewShowZeroQty] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
-  const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -137,18 +157,32 @@ export default function InventoryPage() {
   const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
   const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
   const overview = useInventoryOverview(compositionLimit, adjustmentRefreshToken);
+  const analyticsQuery = useQuery({
+    queryKey: ["inventory", "analytics"],
+    queryFn: () => apiFetch<AnalyticsResponse>("/inventory/analytics"),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+  const itemsQuery = useQuery({
+    queryKey: ["inventory", "items", queue, appliedSearch, sort, usageDays, adjustmentRefreshToken],
+    queryFn: async () => {
+      const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(appliedSearch)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
+      return {
+        ...itemsRes,
+        items: (itemsRes.items ?? []).map((row) => normalizeItemRow(row)),
+      };
+    },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    placeholderData: (previous) => previous,
+  });
+  const analytics = analyticsQuery.data ?? null;
+  const itemsData = itemsQuery.data ?? null;
+  const tableLoading = itemsQuery.isLoading || itemsQuery.isFetching;
 
   const mismatchLogged = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDetailOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
 
   const setQueue = (nextQueue: string) => {
     setSearchParams((current) => {
@@ -201,41 +235,20 @@ export default function InventoryPage() {
     }, { replace: false });
   };
 
-  const loadOverview = async () => {
-    setError("");
-    try {
-      const analyticsRes = await apiFetch<AnalyticsResponse>("/inventory/analytics");
-      setAnalytics(analyticsRes);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const loadTable = async () => {
-    setTableLoading(true);
-    setError("");
-    try {
-      const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
-      setItemsData(itemsRes);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTableLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadOverview();
-  }, [usageDays]);
-
-
-  useEffect(() => {
-    void loadTable();
-  }, [queue, sort, usageDays]);
-
   useEffect(() => {
     if (overview.error) setError(overview.error);
   }, [overview.error]);
+
+  useEffect(() => {
+    if (analyticsQuery.error instanceof Error) {
+      setError(analyticsQuery.error.message);
+      return;
+    }
+    if (itemsQuery.error instanceof Error) {
+      setError(itemsQuery.error.message);
+      return;
+    }
+  }, [analyticsQuery.error, itemsQuery.error]);
 
   const queueCounts = useMemo(() => Object.fromEntries(overview.queues.map((entry) => [entry.key, entry.count])), [overview.queues]);
 
@@ -319,11 +332,28 @@ export default function InventoryPage() {
     });
   };
 
+  const handleSearchSubmit = () => {
+    setError("");
+    if (appliedSearch === searchInput) {
+      void itemsQuery.refetch();
+      return;
+    }
+    setAppliedSearch(searchInput);
+  };
+
+  const openItemPage = (itemId: number) => {
+    navigate(`/sales/items/${itemId}`, {
+      state: {
+        backTo: "/inventory",
+        backLabel: "Back to Inventory",
+      },
+    });
+  };
+
   const openAdjustmentModal = (itemId?: number | null) => {
     const fallbackItemId = itemId
       ?? (selectedIds.length === 1 ? selectedIds[0] : null)
       ?? highlightedItemId
-      ?? detail?.item.id
       ?? displayedItems[0]?.id
       ?? null;
     setAdjustmentItemId(fallbackItemId);
@@ -346,12 +376,29 @@ export default function InventoryPage() {
     setDetailError("");
     try {
       const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
-      setDetail(payload);
+      setDetail({
+        ...payload,
+        item: normalizeItemRow(payload.item),
+        projected_available: toNumber(payload.projected_available),
+        target_stock: toNumber(payload.target_stock),
+        movements: (payload.movements ?? []).map((movement) => ({
+          ...movement,
+          qty_delta: toNumber(movement.qty_delta),
+        })),
+        reservations: (payload.reservations ?? []).map((reservation) => ({
+          ...reservation,
+          qty_reserved: toNumber(reservation.qty_reserved),
+        })),
+        consumption_trend: (payload.consumption_trend ?? []).map((point) => ({
+          ...point,
+          consumption: toNumber(point.consumption),
+        })),
+      });
       setEditingPlanning(false);
       setPlanningForm({
-        reorder_point_qty: Number(payload.item.reorder_point ?? 0),
-        safety_stock_qty: Number(payload.item.safety_stock ?? 0),
-        lead_time_days: Number(payload.item.lead_time_days ?? 14),
+        reorder_point_qty: toNumber(payload.item.reorder_point ?? 0),
+        safety_stock_qty: toNumber(payload.item.safety_stock ?? 0),
+        lead_time_days: toNumber(payload.item.lead_time_days ?? 14),
         target_days_supply: 30,
       });
     } catch (err) {
@@ -372,7 +419,7 @@ export default function InventoryPage() {
         body: JSON.stringify(planningForm),
       });
       await openDetail(detail.item.id);
-      void loadTable();
+      await itemsQuery.refetch();
     } catch (err) {
       setDetailError((err as Error).message);
     } finally {
@@ -403,10 +450,6 @@ export default function InventoryPage() {
         }),
       });
       setAdjustmentRefreshToken((value) => value + 1);
-      await loadTable();
-      if (detailOpen && detail?.item.id === adjustmentItemId) {
-        await openDetail(adjustmentItemId);
-      }
       setAdjustmentOpen(false);
       setAdjustmentItemId(null);
       setAdjustmentError("");
@@ -476,7 +519,7 @@ export default function InventoryPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 app-card p-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void loadTable()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
           <select className="app-select h-9" value={usageDays} onChange={(e) => setUsageDays(Number(e.target.value))}>
             <option value={30}>Demand 30D</option><option value={60}>Demand 60D</option><option value={90}>Demand 90D</option>
           </select>
@@ -585,9 +628,9 @@ export default function InventoryPage() {
               <thead className="sticky top-0 bg-surface text-xs uppercase text-muted"><tr><th className="px-3 py-2"><input type="checkbox" onChange={(e) => setSelectedIds(e.target.checked ? displayedItems.map((x) => x.id) : [])} /></th><th className="px-3 py-2">Item</th><th className="px-3 py-2">On Hand</th><th className="px-3 py-2">Reserved</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">ROP</th>{visibleCols.safety_stock && <th className="px-3 py-2">Safety</th>}{visibleCols.lead_time_days && <th className="px-3 py-2">Lead Time</th>}{visibleCols.avg_daily_usage && <th className="px-3 py-2">Avg Usage</th>}<th className="px-3 py-2">DOS</th><th className="px-3 py-2">ROQ</th><th className="px-3 py-2">Supplier</th>{visibleCols.last_receipt && <th className="px-3 py-2">Last Receipt</th>}{visibleCols.last_issue && <th className="px-3 py-2">Last Issue</th>}<th className="px-3 py-2">Total Value</th><th className="px-3 py-2">Actions</th></tr></thead>
               <tbody>
                 {displayedItems.map((row) => (
-                  <tr key={row.id} ref={(node) => { rowRefs.current[row.id] = node; }} className={`cursor-pointer border-t border-muted/20 ${compact ? "text-xs" : ""} ${highlightedItemId === row.id ? "bg-primary/10" : ""}`} onClick={() => { setHighlightedItemId(row.id); void openDetail(row.id); }}>
+                  <tr key={row.id} ref={(node) => { rowRefs.current[row.id] = node; }} className={`cursor-pointer border-t border-muted/20 ${compact ? "text-xs" : ""} ${highlightedItemId === row.id ? "bg-primary/10" : ""}`} onClick={() => { setHighlightedItemId(row.id); openItemPage(row.id); }}>
                     <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={(e) => setSelectedIds((prev) => e.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id))} /></td>
-                    <td className="px-3 py-2"><button className="font-medium hover:underline" onClick={(e) => { e.stopPropagation(); void openDetail(row.id); }}>{row.item}</button><p className="text-xs text-muted">{row.sku ?? "—"}</p></td>
+                    <td className="px-3 py-2"><button className="font-medium hover:underline" onClick={(e) => { e.stopPropagation(); openItemPage(row.id); }}>{row.item}</button><p className="text-xs text-muted">{row.sku ?? "—"}</p></td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.on_hand)}</td>
                     <td className="px-3 py-2 tabular-nums"><button className="text-primary underline" onClick={(e) => { e.stopPropagation(); void openReservations(row.id, e); }}>{formatNumber(row.reserved)}</button></td>
                     <td className="px-3 py-2 tabular-nums">{formatNumber(row.available)}</td>
@@ -601,7 +644,7 @@ export default function InventoryPage() {
                     {visibleCols.last_receipt && <td className="px-3 py-2">{row.last_receipt ? new Date(row.last_receipt).toLocaleDateString() : "—"}</td>}
                     {visibleCols.last_issue && <td className="px-3 py-2">{row.last_issue ? new Date(row.last_issue).toLocaleDateString() : "—"}</td>}
                     <td className="px-3 py-2 tabular-nums">{formatCurrency(row.total_value)}</td>
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><button className="app-button-ghost" onClick={() => void openDetail(row.id)}>View</button><button className="app-button-ghost" onClick={() => openAdjustmentModal(row.id)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><div className="flex gap-1"><button className="app-button-ghost" onClick={() => openItemPage(row.id)}>View</button><button className="app-button-ghost" onClick={() => openAdjustmentModal(row.id)}>Adjust</button><button className="app-button-ghost" onClick={() => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: row.id, quantity: Number(row.suggested_reorder_qty.toFixed(2)) }] } })}>Create PO</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -619,7 +662,8 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {detailOpen && (
+
+      {false && detailOpen && (
         <div className="fixed inset-0 z-40 flex justify-end bg-black/25" onClick={() => setDetailOpen(false)}>
           <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-surface p-5" onClick={(event) => event.stopPropagation()}>
             {detailLoading && <div className="space-y-3">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="h-16 animate-pulse rounded-xl bg-secondary" />)}</div>}

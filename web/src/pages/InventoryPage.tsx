@@ -60,6 +60,8 @@ type AnalyticsResponse = {
 type CompositionMetric = "value" | "quantity";
 type CompositionLimit = 5 | 10 | 25 | "all";
 type OverviewDensity = "compact" | "comfortable";
+type OverviewSortField = "available" | "value";
+type OverviewSortDirection = "asc" | "desc";
 
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
@@ -124,6 +126,8 @@ export default function InventoryPage() {
   const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(5);
   const [overviewDensity, setOverviewDensity] = useState<OverviewDensity>("compact");
   const [overviewShowZeroQty, setOverviewShowZeroQty] = useState(false);
+  const [overviewSortField, setOverviewSortField] = useState<OverviewSortField>("value");
+  const [overviewSortDirection, setOverviewSortDirection] = useState<OverviewSortDirection>("desc");
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -489,6 +493,15 @@ export default function InventoryPage() {
     gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const handleOverviewSortChange = (field: OverviewSortField) => {
+    if (overviewSortField === field) {
+      setOverviewSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setOverviewSortField(field);
+    setOverviewSortDirection("desc");
+  };
+
   if (overview.loading && !overview.totals) {
     return (
       <section className="space-y-6">
@@ -551,12 +564,15 @@ export default function InventoryPage() {
           limit={compositionLimit}
           density={overviewDensity}
           showZeroQty={overviewShowZeroQty}
+          sortField={overviewSortField}
+          sortDirection={overviewSortDirection}
           loading={overview.loading}
           missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
           onMetricChange={setCompositionMetric}
           onLimitChange={setCompositionLimit}
           onDensityChange={setOverviewDensity}
           onShowZeroQtyChange={setOverviewShowZeroQty}
+          onSortChange={handleOverviewSortChange}
           onViewAll={handleCompositionViewAll}
           onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
           onSegmentClick={handleCompositionClick}

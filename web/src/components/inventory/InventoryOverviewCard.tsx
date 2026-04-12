@@ -5,6 +5,8 @@ import { formatCompact, formatCurrency } from "../../utils/formatters";
 type Metric = "value" | "quantity";
 type Limit = 5 | 10 | 25 | "all";
 type Density = "compact" | "comfortable";
+type SortField = "available" | "value";
+type SortDirection = "asc" | "desc";
 
 type Totals = {
   total_inventory_value?: number | null;
@@ -38,8 +40,11 @@ type Props = {
   onLimitChange: (limit: Limit) => void;
   density: Density;
   showZeroQty: boolean;
+  sortField: SortField;
+  sortDirection: SortDirection;
   onDensityChange: (density: Density) => void;
   onShowZeroQtyChange: (showZeroQty: boolean) => void;
+  onSortChange: (field: SortField) => void;
   onViewAll: () => void;
   onItemClick: (itemId: number) => void;
   onSegmentClick: (itemId: number, segment: "available" | "reserved", event: MouseEvent<HTMLButtonElement>) => void;
@@ -64,8 +69,11 @@ export default function InventoryOverviewCard({
   onLimitChange,
   density,
   showZeroQty,
+  sortField,
+  sortDirection,
   onDensityChange,
   onShowZeroQtyChange,
+  onSortChange,
   onViewAll,
   onItemClick,
   onSegmentClick,
@@ -87,9 +95,17 @@ export default function InventoryOverviewCard({
     };
 
   const filteredItems = showZeroQty ? items : items.filter((item) => safeNumber(item.on_hand_qty) > 0);
-  const sorted = [...filteredItems].sort((a, b) => (metric === "value" ? b.total_value - a.total_value : b.on_hand_qty - a.on_hand_qty));
+  const sorted = [...filteredItems].sort((a, b) => {
+    const left = sortField === "available" ? safeNumber(a.available_qty) : safeNumber(a.total_value);
+    const right = sortField === "available" ? safeNumber(b.available_qty) : safeNumber(b.total_value);
+    return sortDirection === "asc" ? left - right : right - left;
+  });
   const limited = limit === "all" ? sorted : sorted.slice(0, limit);
   const shouldShowEmptyState = filteredItems.length === 0 && safeNumber(totals?.total_on_hand_qty) === 0;
+  const sortIndicator = (field: SortField) => {
+    if (sortField !== field) return "";
+    return sortDirection === "asc" ? " ↑" : " ↓";
+  };
 
   const kpis = [
     { label: "Total Inventory Value", value: formatCurrency(safeNumber(totals?.total_inventory_value)), missing: totals?.total_inventory_value == null },
@@ -158,9 +174,9 @@ export default function InventoryOverviewCard({
           <div className="overflow-hidden rounded-xl border border-border">
             <div className="grid grid-cols-[minmax(220px,1.8fr)_0.7fr_0.7fr_1fr_190px] gap-2 border-b border-border bg-secondary/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
               <p>Item</p>
-              <p className="text-right">Avail</p>
+              <button className="text-right hover:text-foreground" onClick={() => onSortChange("available")}>Avail{sortIndicator("available")}</button>
               <p className="text-right">Reserved</p>
-              <p className="text-right">Value</p>
+              <button className="text-right hover:text-foreground" onClick={() => onSortChange("value")}>Value{sortIndicator("value")}</button>
               <p>Composition</p>
             </div>
 

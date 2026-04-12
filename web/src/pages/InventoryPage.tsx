@@ -80,6 +80,27 @@ type PlanningPayload = {
   target_days_supply: number;
 };
 
+const toNumber = (value: unknown) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const normalizeItemRow = (row: ItemRow): ItemRow => ({
+  ...row,
+  on_hand: toNumber(row.on_hand),
+  reserved: toNumber(row.reserved),
+  available: toNumber(row.available),
+  reorder_point: toNumber(row.reorder_point),
+  safety_stock: toNumber(row.safety_stock),
+  lead_time_days: toNumber(row.lead_time_days),
+  avg_daily_usage: toNumber(row.avg_daily_usage),
+  days_of_supply: toNumber(row.days_of_supply),
+  suggested_reorder_qty: toNumber(row.suggested_reorder_qty),
+  total_value: toNumber(row.total_value),
+  landed_unit_cost: row.landed_unit_cost == null ? null : toNumber(row.landed_unit_cost),
+  inbound_qty: toNumber(row.inbound_qty),
+});
+
 const formatNumber = (value: number) => (Number.isFinite(value) ? formatCompact(value) : "0");
 const healthPillMap: Record<string, string> = {
   healthy: "bg-success/10 text-success",
@@ -216,7 +237,10 @@ export default function InventoryPage() {
     setError("");
     try {
       const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
-      setItemsData(itemsRes);
+      setItemsData({
+        ...itemsRes,
+        items: (itemsRes.items ?? []).map((row) => normalizeItemRow(row)),
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -346,12 +370,29 @@ export default function InventoryPage() {
     setDetailError("");
     try {
       const payload = await apiFetch<Detail>(`/inventory/items/${itemId}/detail`);
-      setDetail(payload);
+      setDetail({
+        ...payload,
+        item: normalizeItemRow(payload.item),
+        projected_available: toNumber(payload.projected_available),
+        target_stock: toNumber(payload.target_stock),
+        movements: (payload.movements ?? []).map((movement) => ({
+          ...movement,
+          qty_delta: toNumber(movement.qty_delta),
+        })),
+        reservations: (payload.reservations ?? []).map((reservation) => ({
+          ...reservation,
+          qty_reserved: toNumber(reservation.qty_reserved),
+        })),
+        consumption_trend: (payload.consumption_trend ?? []).map((point) => ({
+          ...point,
+          consumption: toNumber(point.consumption),
+        })),
+      });
       setEditingPlanning(false);
       setPlanningForm({
-        reorder_point_qty: Number(payload.item.reorder_point ?? 0),
-        safety_stock_qty: Number(payload.item.safety_stock ?? 0),
-        lead_time_days: Number(payload.item.lead_time_days ?? 14),
+        reorder_point_qty: toNumber(payload.item.reorder_point ?? 0),
+        safety_stock_qty: toNumber(payload.item.safety_stock ?? 0),
+        lead_time_days: toNumber(payload.item.lead_time_days ?? 14),
         target_days_supply: 30,
       });
     } catch (err) {

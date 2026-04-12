@@ -60,6 +60,8 @@ type AnalyticsResponse = {
 type CompositionMetric = "value" | "quantity";
 type CompositionLimit = 5 | 10 | 25 | "all";
 type OverviewDensity = "compact" | "comfortable";
+type OverviewSortField = "available" | "value";
+type OverviewSortDirection = "asc" | "desc";
 
 
 type Reservation = { source_type: string; source_id: number; source_label: string; qty_reserved: number };
@@ -124,6 +126,8 @@ export default function InventoryPage() {
   const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(5);
   const [overviewDensity, setOverviewDensity] = useState<OverviewDensity>("compact");
   const [overviewShowZeroQty, setOverviewShowZeroQty] = useState(false);
+  const [overviewSortField, setOverviewSortField] = useState<OverviewSortField>("value");
+  const [overviewSortDirection, setOverviewSortDirection] = useState<OverviewSortDirection>("desc");
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -468,13 +472,23 @@ export default function InventoryPage() {
   };
 
   const handleCompositionClick = (itemId: number, segment: "available" | "reserved", event?: MouseEvent) => {
-    setBreakdown(segment);
-    setAbcItemFilter(itemId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("queue", "all");
+      next.set("abc_item", String(itemId));
+      next.delete("abc_class");
+      if (segment === "available" || segment === "reserved") {
+        next.set("breakdown", segment);
+      } else {
+        next.delete("breakdown");
+      }
+      return next;
+    }, { replace: false });
     setHighlightedItemId(itemId);
     setTimeout(() => {
       gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       rowRefs.current[itemId]?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 20);
+    }, 80);
     if (segment === "reserved" && event) void openReservations(itemId, event);
   };
 
@@ -487,6 +501,15 @@ export default function InventoryPage() {
     clearAbcFilters();
     setHighlightedItemId(null);
     gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleOverviewSortChange = (field: OverviewSortField) => {
+    if (overviewSortField === field) {
+      setOverviewSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setOverviewSortField(field);
+    setOverviewSortDirection("desc");
   };
 
   if (overview.loading && !overview.totals) {
@@ -551,12 +574,15 @@ export default function InventoryPage() {
           limit={compositionLimit}
           density={overviewDensity}
           showZeroQty={overviewShowZeroQty}
+          sortField={overviewSortField}
+          sortDirection={overviewSortDirection}
           loading={overview.loading}
           missingLandedCostCount={Number(overview.data_quality.missing_landed_cost_count ?? 0)}
           onMetricChange={setCompositionMetric}
           onLimitChange={setCompositionLimit}
           onDensityChange={setOverviewDensity}
           onShowZeroQtyChange={setOverviewShowZeroQty}
+          onSortChange={handleOverviewSortChange}
           onViewAll={handleCompositionViewAll}
           onItemClick={(itemId) => handleCompositionClick(itemId, "available")}
           onSegmentClick={handleCompositionClick}

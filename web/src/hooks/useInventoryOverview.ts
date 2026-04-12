@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api";
 import type { OverviewItem } from "../components/inventory/InventoryOverviewCard";
 
@@ -68,34 +68,26 @@ const normalizeOverviewResponse = (payload: unknown): InventoryOverviewResponse 
 };
 
 export function useInventoryOverview(limit: number | "all", refreshToken = 0) {
-  const [data, setData] = useState<InventoryOverviewResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const queryLimit = limit === "all" ? 0 : limit;
+  const query = useQuery({
+    queryKey: ["inventory", "analytics", "overview", queryLimit, refreshToken],
+    queryFn: async () => {
+      const response = await apiFetch<unknown>(`/inventory/analytics/overview?limit=${queryLimit}`);
+      return normalizeOverviewResponse(response);
+    },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const queryLimit = limit === "all" ? 0 : limit;
-        const response = await apiFetch<unknown>(`/inventory/analytics/overview?limit=${queryLimit}`);
-        setData(normalizeOverviewResponse(response));
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void load();
-  }, [limit, refreshToken]);
+  const data = query.data ?? null;
 
   return {
     totals: data?.totals ?? null,
     items: data?.items ?? [],
     queues: data?.queues ?? [],
     data_quality: data?.data_quality ?? { missing_landed_cost_count: 0 },
-    loading,
-    error,
+    loading: query.isLoading || query.isFetching,
+    error: query.error instanceof Error ? query.error.message : "",
+    refetch: query.refetch,
   };
 }

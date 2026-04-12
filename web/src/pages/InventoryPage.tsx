@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -115,17 +116,15 @@ export default function InventoryPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState("ytd");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [sort, setSort] = useState("total_value:desc");
   const [usageDays, setUsageDays] = useState(90);
-  const [itemsData, setItemsData] = useState<InventoryItemsResponse | null>(null);
-  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [compositionMetric, setCompositionMetric] = useState<CompositionMetric>("value");
   const [compositionLimit, setCompositionLimit] = useState<CompositionLimit>(5);
   const [overviewDensity, setOverviewDensity] = useState<OverviewDensity>("compact");
   const [overviewShowZeroQty, setOverviewShowZeroQty] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
-  const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -158,6 +157,28 @@ export default function InventoryPage() {
   const abcItemFilter = Number(searchParams.get("abc_item") ?? "");
   const abcClassFilter = (searchParams.get("abc_class") ?? "").toUpperCase();
   const overview = useInventoryOverview(compositionLimit, adjustmentRefreshToken);
+  const analyticsQuery = useQuery({
+    queryKey: ["inventory", "analytics"],
+    queryFn: () => apiFetch<AnalyticsResponse>("/inventory/analytics"),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
+  const itemsQuery = useQuery({
+    queryKey: ["inventory", "items", queue, appliedSearch, sort, usageDays, adjustmentRefreshToken],
+    queryFn: async () => {
+      const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(appliedSearch)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
+      return {
+        ...itemsRes,
+        items: (itemsRes.items ?? []).map((row) => normalizeItemRow(row)),
+      };
+    },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    placeholderData: (previous) => previous,
+  });
+  const analytics = analyticsQuery.data ?? null;
+  const itemsData = itemsQuery.data ?? null;
+  const tableLoading = itemsQuery.isLoading || itemsQuery.isFetching;
 
   const mismatchLogged = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -214,44 +235,20 @@ export default function InventoryPage() {
     }, { replace: false });
   };
 
-  const loadOverview = async () => {
-    setError("");
-    try {
-      const analyticsRes = await apiFetch<AnalyticsResponse>("/inventory/analytics");
-      setAnalytics(analyticsRes);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const loadTable = async () => {
-    setTableLoading(true);
-    setError("");
-    try {
-      const itemsRes = await apiFetch<InventoryItemsResponse>(`/inventory/items?queue=${queue}&search=${encodeURIComponent(search)}&sort=${sort}&page=1&page_size=50&usage_days=${usageDays}`);
-      setItemsData({
-        ...itemsRes,
-        items: (itemsRes.items ?? []).map((row) => normalizeItemRow(row)),
-      });
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTableLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadOverview();
-  }, [usageDays]);
-
-
-  useEffect(() => {
-    void loadTable();
-  }, [queue, sort, usageDays]);
-
   useEffect(() => {
     if (overview.error) setError(overview.error);
   }, [overview.error]);
+
+  useEffect(() => {
+    if (analyticsQuery.error instanceof Error) {
+      setError(analyticsQuery.error.message);
+      return;
+    }
+    if (itemsQuery.error instanceof Error) {
+      setError(itemsQuery.error.message);
+      return;
+    }
+  }, [analyticsQuery.error, itemsQuery.error]);
 
   const queueCounts = useMemo(() => Object.fromEntries(overview.queues.map((entry) => [entry.key, entry.count])), [overview.queues]);
 
@@ -335,6 +332,15 @@ export default function InventoryPage() {
     });
   };
 
+  const handleSearchSubmit = () => {
+    setError("");
+    if (appliedSearch === searchInput) {
+      void itemsQuery.refetch();
+      return;
+    }
+    setAppliedSearch(searchInput);
+  };
+
   const openItemPage = (itemId: number) => {
     navigate(`/sales/items/${itemId}`, {
       state: {
@@ -413,7 +419,7 @@ export default function InventoryPage() {
         body: JSON.stringify(planningForm),
       });
       await openDetail(detail.item.id);
-      void loadTable();
+      await itemsQuery.refetch();
     } catch (err) {
       setDetailError((err as Error).message);
     } finally {
@@ -444,7 +450,6 @@ export default function InventoryPage() {
         }),
       });
       setAdjustmentRefreshToken((value) => value + 1);
-      await loadTable();
       setAdjustmentOpen(false);
       setAdjustmentItemId(null);
       setAdjustmentError("");
@@ -514,7 +519,7 @@ export default function InventoryPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 app-card p-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void loadTable()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()} placeholder="Search item or SKU" className="app-input h-9 w-64" />
           <select className="app-select h-9" value={usageDays} onChange={(e) => setUsageDays(Number(e.target.value))}>
             <option value={30}>Demand 30D</option><option value={60}>Demand 60D</option><option value={90}>Demand 90D</option>
           </select>

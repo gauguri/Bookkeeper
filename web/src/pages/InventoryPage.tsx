@@ -14,6 +14,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, Res
 import { apiFetch } from "../api";
 import DashboardFilter from "../components/analytics/DashboardFilter";
 import InventoryOverviewCard from "../components/inventory/InventoryOverviewCard";
+import InventoryItemDetailModal from "../components/inventory/InventoryItemDetailModal";
 import InventoryValueCompositionCard from "../components/inventory/InventoryValueCompositionCard";
 import { AXIS_STYLE, GRID_STYLE, TOOLTIP_STYLE } from "../utils/chartHelpers";
 import { CHART_COLORS } from "../utils/colorScales";
@@ -660,7 +661,27 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {detailOpen && (
+      <InventoryItemDetailModal
+        isOpen={detailOpen}
+        itemId={detail?.item.id ?? highlightedItemId}
+        usageDays={usageDays}
+        detail={detail}
+        detailLoading={detailLoading}
+        detailError={detailError}
+        planningForm={planningForm}
+        editingPlanning={editingPlanning}
+        planningSaving={planningSaving}
+        onClose={() => setDetailOpen(false)}
+        onOpenAdjustment={(itemId) => openAdjustmentModal(itemId)}
+        onCreatePO={(itemId, reorderQty) => navigate("/purchasing/purchase-orders/new", { state: { prefillLines: [{ item_id: itemId, quantity: reorderQty }] } })}
+        onReceive={() => navigate("/purchasing/purchase-orders")}
+        onTogglePlanning={() => setEditingPlanning((value) => !value)}
+        onPlanningChange={(payload) => setPlanningForm(payload)}
+        onSavePlanning={() => void savePlanning()}
+        onOpenReservations={(itemId, event) => void openReservations(itemId, event)}
+      />
+
+      {false && detailOpen && (
         <div className="fixed inset-0 z-40 flex justify-end bg-black/25" onClick={() => setDetailOpen(false)}>
           <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-surface p-5" onClick={(event) => event.stopPropagation()}>
             {detailLoading && <div className="space-y-3">{Array.from({ length: 8 }).map((_, index) => <div key={index} className="h-16 animate-pulse rounded-xl bg-secondary" />)}</div>}

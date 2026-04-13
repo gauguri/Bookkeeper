@@ -282,7 +282,10 @@ export default function InvoicesPage() {
       source = source.filter((inv) => inv.invoice_number.toLowerCase().includes(needle) || inv.customer_name.toLowerCase().includes(needle));
     }
 
-    return source.sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+    return [...source].sort((a, b) => {
+      if (a.issue_date !== b.issue_date) return b.issue_date.localeCompare(a.issue_date);
+      return b.id - a.id;
+    });
   }, [queue, queueBuckets, q, statusFilter]);
 
   const trendData = useMemo(() => {

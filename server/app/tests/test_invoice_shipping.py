@@ -192,6 +192,48 @@ def test_ship_invoice_rejects_when_on_hand_is_insufficient(client: TestClient):
         db_gen.close()
 
 
+def test_ship_direct_invoice_without_reservation_uses_on_hand_only(client: TestClient):
+    db_gen = app.dependency_overrides[get_db]()
+    db = next(db_gen)
+    try:
+        customer = db.query(Customer).filter(Customer.id == 1).first()
+        item = db.query(Item).filter(Item.id == 1).first()
+        direct_invoice = Invoice(
+            customer_id=customer.id,
+            invoice_number="INV-DIRECT-001",
+            status="SENT",
+            issue_date=date(2026, 2, 1),
+            due_date=date(2026, 2, 15),
+            subtotal=Decimal("20.00"),
+            tax_total=Decimal("0.00"),
+            total=Decimal("20.00"),
+            amount_due=Decimal("20.00"),
+            sales_request_id=None,
+        )
+        db.add(direct_invoice)
+        db.flush()
+        db.add(
+            InvoiceLine(
+                invoice_id=direct_invoice.id,
+                item_id=item.id,
+                description="Widget",
+                quantity=Decimal("2.00"),
+                unit_price=Decimal("10.00"),
+                discount=Decimal("0.00"),
+                tax_rate=Decimal("0.00"),
+                line_total=Decimal("20.00"),
+            )
+        )
+        db.commit()
+        direct_invoice_id = direct_invoice.id
+    finally:
+        db_gen.close()
+
+    response = client.post(f"/api/invoices/{direct_invoice_id}/ship")
+    assert response.status_code == 200
+    assert response.json()["status"] == "SHIPPED"
+
+
 def test_send_invoice_posts_to_gl_and_exposes_gl_status(client: TestClient):
     db_gen = app.dependency_overrides[get_db]()
     db = next(db_gen)

@@ -557,16 +557,22 @@ def ship_invoice(invoice_id: int, db: Session = Depends(get_db), _=Depends(requi
     for line in invoice.lines:
         if line.item_id is None:
             continue
+        item_code = None
+        item_name = line.description or "item"
+        if line.item is not None:
+            item_code = line.item.item_code or line.item.sku
+            item_name = line.item.name or item_name
+        item_label = f"{item_code or line.item_id} ({item_name})"
         inventory = db.query(Inventory).filter(Inventory.item_id == line.item_id).with_for_update().first()
         if inventory is None:
-            raise HTTPException(status_code=400, detail=f"No inventory record for item_id {line.item_id}.")
+            raise HTTPException(status_code=400, detail=f"No inventory record for item {item_label}.")
 
         qty_shipped = Decimal(line.quantity or 0)
         if Decimal(inventory.quantity_on_hand or 0) < qty_shipped:
-            raise HTTPException(status_code=409, detail=f"Insufficient inventory for item_id {line.item_id}.")
+            raise HTTPException(status_code=409, detail=f"Insufficient inventory for item {item_label}.")
 
-        if reserved_by_item.get(line.item_id, Decimal("0")) < qty_shipped:
-            raise HTTPException(status_code=409, detail=f"Insufficient reserved inventory for item_id {line.item_id}.")
+        if invoice.sales_request_id is not None and reserved_by_item.get(line.item_id, Decimal("0")) < qty_shipped:
+            raise HTTPException(status_code=409, detail=f"Insufficient reserved inventory for item {item_label}.")
 
         inventory.quantity_on_hand = Decimal(inventory.quantity_on_hand or 0) - qty_shipped
         inventory.total_value = Decimal(inventory.quantity_on_hand or 0) * Decimal(inventory.landed_unit_cost or 0)

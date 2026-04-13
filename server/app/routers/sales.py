@@ -371,7 +371,24 @@ def get_invoice(invoice_id: str, db: Session = Depends(get_db), _=Depends(requir
         created_at=invoice.created_at,
         updated_at=invoice.updated_at,
         customer=invoice.customer,
-        line_items=invoice.lines,
+        line_items=[
+            schemas.InvoiceLineResponse(
+                id=line.id,
+                item_id=line.item_id,
+                item_code=((line.item.item_code or line.item.sku) if line.item else None),
+                item_name=(line.item.name if line.item else None),
+                description=line.description,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                unit_cost=line.unit_cost,
+                landed_unit_cost=line.landed_unit_cost,
+                supplier_id=line.supplier_id,
+                discount=line.discount,
+                tax_rate=line.tax_rate,
+                line_total=line.line_total,
+            )
+            for line in invoice.lines
+        ],
         payments=get_invoice_payments(db, invoice.id),
     )
 

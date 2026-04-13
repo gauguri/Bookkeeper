@@ -161,6 +161,8 @@ class InvoiceLineCreate(InvoiceLineBase):
 
 class InvoiceLineResponse(InvoiceLineBase):
     id: int
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
     line_total: DecimalValue
 
     model_config = ConfigDict(from_attributes=True)

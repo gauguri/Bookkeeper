@@ -373,13 +373,22 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
             if customer.customer_number:
                 customers[str(customer.customer_number)] = customer
     items = {}
+    ambiguous_item_codes: set[str] = set()
     item_code_list = list(item_codes)
     for chunk in _chunked_values(item_code_list):
         for item in db.query(Item).filter((Item.item_code.in_(chunk)) | (Item.sku.in_(chunk))).all():
             if item.item_code:
-                items[str(item.item_code)] = item
+                key = str(item.item_code).strip().upper()
+                if key in items and items[key].id != item.id:
+                    ambiguous_item_codes.add(key)
+                else:
+                    items[key] = item
             if item.sku:
-                items.setdefault(str(item.sku), item)
+                key = str(item.sku).strip().upper()
+                if key in items and items[key].id != item.id:
+                    ambiguous_item_codes.add(key)
+                else:
+                    items.setdefault(key, item)
 
     existing_invoices: set[str] = set()
     invoice_number_values = [
@@ -461,9 +470,14 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
             line_messages: list[str] = []
             line_info_messages: list[str] = []
             item_code = _normalize_nullable_string(line.get("item_code"))
-            item = items.get(item_code or "")
-            if not item:
-                line_messages.append("Item Code does not match an existing item.")
+            item_key = item_code.upper() if item_code else ""
+            if item_key in ambiguous_item_codes:
+                line_messages.append("Multiple items share this Item Code/SKU. Resolve item duplicates before importing sales.")
+                item = None
+            else:
+                item = items.get(item_key or "")
+                if not item:
+                    line_messages.append("Item Code does not match an existing item.")
 
             quantity = _parse_decimal(_normalize_nullable_string(line.get("quantity")))
             unit_price = _parse_decimal(_normalize_nullable_string(line.get("sell_price")))

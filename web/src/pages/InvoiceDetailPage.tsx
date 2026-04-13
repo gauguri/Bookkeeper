@@ -601,10 +601,10 @@ export default function InvoiceDetailPage() {
                     invoice.line_items.map((line) => (
                       <tr key={line.id} className="border-t">
                         <td className="px-4 py-3">
-                          {typeof line.item_id === "number" ? (
+                          {(line.item_code || typeof line.item_id === "number") ? (
                             <Link
                               className="inline-flex flex-col gap-1 hover:text-primary"
-                              to={`/items/${line.item_id}`}
+                              to={`/sales/items/${line.item_code || line.item_id}`}
                               state={{ backTo: location.pathname, backLabel: `Invoice ${invoice.invoice_number}` }}
                             >
                               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">

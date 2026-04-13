@@ -73,8 +73,9 @@ export default function ItemProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = (location.state as { backTo?: string; backLabel?: string } | null) ?? null;
-  const id = itemId ? parseInt(itemId, 10) : undefined;
-  const { data, isLoading, error } = useItem360(id);
+  const itemRef = itemId?.trim() || undefined;
+  const numericItemId = itemRef && /^\d+$/.test(itemRef) ? parseInt(itemRef, 10) : undefined;
+  const { data, isLoading, error } = useItem360(itemRef);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [showDetails, setShowDetails] = useState(true);
   const [inventoryDetail, setInventoryDetail] = useState<InventoryDetail | null>(null);
@@ -97,13 +98,13 @@ export default function ItemProfilePage() {
   const inventoryContext = locationState?.backTo === "/inventory";
 
   useEffect(() => {
-    if (!id || !inventoryContext) return;
+    if (!numericItemId || !inventoryContext) return;
     let cancelled = false;
     const loadInventoryDetail = async () => {
       setInventoryLoading(true);
       setInventoryError("");
       try {
-        const payload = await apiFetch<InventoryDetail>(`/inventory/items/${id}/detail`);
+        const payload = await apiFetch<InventoryDetail>(`/inventory/items/${numericItemId}/detail`);
         if (cancelled) return;
         const normalized: InventoryDetail = {
           ...payload,
@@ -158,7 +159,7 @@ export default function ItemProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [id, inventoryContext]);
+  }, [numericItemId, inventoryContext]);
 
   if (isLoading) {
     return (
@@ -204,8 +205,8 @@ export default function ItemProfilePage() {
   };
   const handleReceive = () => navigate("/purchasing/purchase-orders");
   const refreshInventoryDetail = async () => {
-    if (!id || !inventoryContext) return;
-    const payload = await apiFetch<InventoryDetail>(`/inventory/items/${id}/detail`);
+    if (!numericItemId || !inventoryContext) return;
+    const payload = await apiFetch<InventoryDetail>(`/inventory/items/${numericItemId}/detail`);
     const normalized: InventoryDetail = {
       ...payload,
       item: {
@@ -240,11 +241,11 @@ export default function ItemProfilePage() {
     setInventoryDetail(normalized);
   };
   const handleSavePlanning = async () => {
-    if (!id) return;
+    if (!numericItemId) return;
     setPlanningSaving(true);
     setInventoryError("");
     try {
-      await apiFetch(`/inventory/items/${id}/planning`, {
+      await apiFetch(`/inventory/items/${numericItemId}/planning`, {
         method: "PUT",
         body: JSON.stringify(planningForm),
       });
@@ -257,7 +258,7 @@ export default function ItemProfilePage() {
     }
   };
   const handleSaveAdjustment = async () => {
-    if (!id) return;
+    if (!numericItemId) return;
     const qtyDelta = Number(adjustmentQty);
     if (!Number.isFinite(qtyDelta) || qtyDelta === 0) {
       setAdjustmentError("Enter a positive or negative quantity.");
@@ -269,7 +270,7 @@ export default function ItemProfilePage() {
       await apiFetch("/inventory/adjustments", {
         method: "POST",
         body: JSON.stringify({
-          item_id: id,
+          item_id: numericItemId,
           qty_delta: qtyDelta,
           reason: adjustmentReason.trim() || null,
         }),

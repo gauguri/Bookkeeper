@@ -225,14 +225,14 @@ def get_items_enriched_endpoint(
     )
 
 
-@router.get("/items/{item_id}/360", response_model=schemas.Item360Response)
+@router.get("/items/{item_ref}/360", response_model=schemas.Item360Response)
 def get_item_360_endpoint(
-    item_id: int,
+    item_ref: str,
     db: Session = Depends(get_db),
     _=Depends(require_module(ModuleKey.ITEMS.value)),
 ):
     try:
-        return get_item_360(db, item_id)
+        return get_item_360(db, item_ref)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

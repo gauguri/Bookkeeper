@@ -233,6 +233,14 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
     return None
 
 
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+def _chunked_values(values: list[str], size: int = 900) -> list[list[str]]:
+    return [values[index:index + size] for index in range(0, len(values), size)]
+
+
 def _parse_csv_rows(
     csv_data: str,
     has_header: bool,
@@ -335,7 +343,11 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
         "Sales Inventory",
     )
 
-    sales_by_order = {str(row["sales_order_number"]).strip(): row for row in sales_rows if _normalize_nullable_string(row.get("sales_order_number"))}
+    sales_by_order = {
+        str(row["sales_order_number"]).strip(): row
+        for row in sales_rows
+        if _normalize_nullable_string(row.get("sales_order_number"))
+    }
     lines_by_order: dict[str, list[dict[str, Any]]] = {}
     for row in line_rows:
         order_number = _normalize_nullable_string(row.get("sales_order_number"))
@@ -343,27 +355,41 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
             continue
         lines_by_order.setdefault(order_number, []).append(row)
 
-    customer_numbers = {str(row["customer_number"]).strip() for row in sales_rows if _normalize_nullable_string(row.get("customer_number"))}
-    item_codes = {str(row["item_code"]).strip() for row in line_rows if _normalize_nullable_string(row.get("item_code"))}
-
-    customers = {
-        str(customer.customer_number): customer
-        for customer in db.query(Customer).filter(Customer.customer_number.in_(customer_numbers)).all()
-        if customer.customer_number
+    customer_numbers = {
+        str(row["customer_number"]).strip()
+        for row in sales_rows
+        if _normalize_nullable_string(row.get("customer_number"))
     }
+    item_codes = {
+        str(row["item_code"]).strip()
+        for row in line_rows
+        if _normalize_nullable_string(row.get("item_code"))
+    }
+
+    customers = {}
+    customer_number_list = list(customer_numbers)
+    for chunk in _chunked_values(customer_number_list):
+        for customer in db.query(Customer).filter(Customer.customer_number.in_(chunk)).all():
+            if customer.customer_number:
+                customers[str(customer.customer_number)] = customer
     items = {}
-    for item in db.query(Item).filter((Item.item_code.in_(item_codes)) | (Item.sku.in_(item_codes))).all():
-        if item.item_code:
-            items[str(item.item_code)] = item
-        if item.sku:
-            items.setdefault(str(item.sku), item)
+    item_code_list = list(item_codes)
+    for chunk in _chunked_values(item_code_list):
+        for item in db.query(Item).filter((Item.item_code.in_(chunk)) | (Item.sku.in_(chunk))).all():
+            if item.item_code:
+                items[str(item.item_code)] = item
+            if item.sku:
+                items.setdefault(str(item.sku), item)
 
-    existing_invoices = {
-        invoice.invoice_number
-        for invoice in db.query(Invoice).filter(Invoice.invoice_number.in_([
-            str(row["invoice_number"]).strip() for row in sales_rows if _normalize_nullable_string(row.get("invoice_number"))
-        ])).all()
-    }
+    existing_invoices: set[str] = set()
+    invoice_number_values = [
+        str(row["invoice_number"]).strip()
+        for row in sales_rows
+        if _normalize_nullable_string(row.get("invoice_number"))
+    ]
+    for chunk in _chunked_values(invoice_number_values):
+        for invoice in db.query(Invoice).filter(Invoice.invoice_number.in_(chunk)).all():
+            existing_invoices.add(invoice.invoice_number)
 
     sales_order_counts: dict[str, int] = {}
     for row in sales_rows:
@@ -373,16 +399,19 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
 
     rows: list[SalesImportRowResult] = []
     create_count = 0
+    skip_count = 0
     seen_invoices: set[str] = set()
     prepared_documents: list[dict[str, Any]] = []
     valid_sales_orders: set[str] = set()
+    skipped_sales_orders: set[str] = set()
 
     for row in sales_rows:
         row_number = row["row_number"]
         order_number = _normalize_nullable_string(row.get("sales_order_number"))
-        invoice_number = _normalize_nullable_string(row.get("invoice_number"))
         customer_number = _normalize_nullable_string(row.get("customer_number"))
         messages: list[str] = []
+        skip_messages: list[str] = []
+        normalized_line_rows: list[SalesImportRowResult] = []
 
         customer = customers.get(customer_number or "")
         if not customer:
@@ -393,133 +422,280 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
         elif sales_order_counts.get(order_number, 0) > 1:
             messages.append("Sales Order Number is duplicated in the upload.")
 
+        associated_lines = lines_by_order.get(order_number or "", [])
+        line_invoice_numbers = sorted(
+            {
+                value
+                for line in associated_lines
+                if (value := _normalize_nullable_string(line.get("invoice_number"))) and value != "0"
+            }
+        )
+        invoice_number = _normalize_nullable_string(row.get("invoice_number")) or (
+            line_invoice_numbers[0] if len(line_invoice_numbers) == 1 else None
+        )
         if not invoice_number:
-            messages.append("Invoice Number is required.")
+            skip_messages.append("Skipped because no invoice number is available for this sales order.")
         elif invoice_number in existing_invoices:
             messages.append("Invoice Number already exists in Bedrock.")
         elif invoice_number in seen_invoices:
             messages.append("Invoice Number is duplicated in the upload.")
 
-        invoice_date = _parse_date(_normalize_nullable_string(row.get("invoice_date")))
         order_date = _parse_date(_normalize_nullable_string(row.get("order_date")))
-        due_date = _parse_date(_normalize_nullable_string(row.get("pay_by_date"))) or invoice_date or order_date
         if not order_date:
             messages.append("Order Date is invalid.")
+
+        invoice_date = _parse_date(_normalize_nullable_string(row.get("invoice_date"))) or order_date
         if not invoice_date:
-            messages.append("Invoice Date is invalid.")
+            skip_messages.append("Skipped because no invoice date is available for this sales order.")
+
+        due_date = _parse_date(_normalize_nullable_string(row.get("pay_by_date"))) or invoice_date or order_date
         if not due_date:
             messages.append("Pay By Date is invalid.")
 
-        invoice_total = _parse_decimal(_normalize_nullable_string(row.get("invoice_total")))
-        if invoice_total is None or invoice_total < 0:
-            messages.append("InvoiceTotal must be zero or greater.")
-
-        associated_lines = lines_by_order.get(order_number or "", [])
         if not associated_lines:
-            messages.append("No sales lines were found for this Sales Order Number.")
+            skip_messages.append("Skipped because no sales lines were found for this Sales Order Number.")
 
         prepared_lines: list[dict[str, Any]] = []
         computed_total = Decimal("0.00")
         for line in associated_lines:
             line_messages: list[str] = []
+            line_info_messages: list[str] = []
             item_code = _normalize_nullable_string(line.get("item_code"))
             item = items.get(item_code or "")
             if not item:
                 line_messages.append("Item Code does not match an existing item.")
+
             quantity = _parse_decimal(_normalize_nullable_string(line.get("quantity")))
-            if quantity is None or quantity <= 0:
-                line_messages.append("Quantity must be greater than zero.")
             unit_price = _parse_decimal(_normalize_nullable_string(line.get("sell_price")))
-            if unit_price is None or unit_price < 0:
-                line_messages.append("Sell Price must be zero or greater.")
             line_amount = _parse_decimal(_normalize_nullable_string(line.get("line_amount")))
-            computed_line_total = (quantity or Decimal("0")) * (unit_price or Decimal("0"))
-            if line_amount is not None and abs(line_amount - computed_line_total) > Decimal("0.01"):
-                line_messages.append("SInvAmount does not match Quantity × Sell Price.")
+
+            if quantity is not None and quantity < 0:
+                quantity = abs(quantity)
+                line_info_messages.append("Quantity normalized from a negative legacy value.")
+
+            if quantity is None or quantity == 0:
+                if line_amount and line_amount > 0:
+                    quantity = Decimal("1")
+                    line_info_messages.append("Quantity defaulted to 1 from legacy sales amount.")
+                elif unit_price and unit_price > 0:
+                    quantity = Decimal("1")
+                    line_info_messages.append("Quantity defaulted to 1 from legacy unit price.")
+                else:
+                    normalized_line_rows.append(
+                        SalesImportRowResult(
+                            source="LINE",
+                            row_number=line["row_number"],
+                            sales_order_number=order_number,
+                            invoice_number=_normalize_nullable_string(line.get("invoice_number")),
+                            item_code=item_code,
+                            quantity=quantity,
+                            unit_price=unit_price,
+                            action="SKIP",
+                            status="VALID",
+                            messages=["Skipped because the line has no usable quantity or amount."],
+                        )
+                    )
+                    continue
+
+            if line_amount is not None and line_amount < 0:
+                line_amount = abs(line_amount)
+                line_info_messages.append("Line amount normalized from a negative legacy value.")
+
+            if unit_price is not None and unit_price < 0:
+                unit_price = abs(unit_price)
+                line_info_messages.append("Sell Price normalized from a negative legacy value.")
+
+            if (unit_price is None or unit_price == 0) and line_amount is not None and quantity and quantity > 0:
+                unit_price = _quantize_money(line_amount / quantity)
+                line_info_messages.append("Sell Price inferred from legacy sales amount.")
+
+            if unit_price is None or unit_price < 0:
+                normalized_line_rows.append(
+                    SalesImportRowResult(
+                        source="LINE",
+                        row_number=line["row_number"],
+                        sales_order_number=order_number,
+                        invoice_number=_normalize_nullable_string(line.get("invoice_number")),
+                        item_code=item_code,
+                        quantity=quantity,
+                        unit_price=unit_price,
+                        action="SKIP",
+                        status="VALID",
+                        messages=["Skipped because the line has no usable sell price or amount."],
+                    )
+                )
+                continue
+
+            if line_amount is None:
+                line_amount = _quantize_money((quantity or Decimal("0")) * unit_price)
+
             line_invoice_number = _normalize_nullable_string(line.get("invoice_number"))
             if line_invoice_number and invoice_number and line_invoice_number != invoice_number:
-                line_messages.append("Line invoice number does not match the sales header invoice number.")
+                line_info_messages.append("Line invoice number differed from the sales header and the header value was used.")
+
             if line_messages:
                 messages.extend([f"Line {line['row_number']}: {message}" for message in line_messages])
-            else:
-                computed_total += line_amount if line_amount is not None else computed_line_total
-                prepared_lines.append({
+                continue
+
+            computed_total += line_amount
+            prepared_lines.append(
+                {
                     "row_number": line["row_number"],
                     "item": item,
                     "item_code": item_code,
                     "quantity": quantity,
                     "unit_price": unit_price,
+                    "line_total": line_amount,
                     "description": _normalize_nullable_string(line.get("family_name")) or (item.name if item else item_code),
-                })
+                }
+            )
+            normalized_line_rows.append(
+                SalesImportRowResult(
+                    source="LINE",
+                    row_number=line["row_number"],
+                    sales_order_number=order_number,
+                    invoice_number=line_invoice_number or invoice_number,
+                    item_code=item_code,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    action="CREATE",
+                    status="VALID",
+                    messages=line_info_messages or ["Ready to attach to invoice."],
+                )
+            )
 
-        if invoice_total is not None and associated_lines and abs(invoice_total - computed_total) > Decimal("0.01"):
-            messages.append("InvoiceTotal does not match the summed sales line amount.")
+        invoice_total = _parse_decimal(_normalize_nullable_string(row.get("invoice_total")))
+        if invoice_total is None:
+            invoice_total = _quantize_money(computed_total) if computed_total > 0 else None
+        if invoice_total is None:
+            skip_messages.append("Skipped because no invoice total or usable sales lines are available.")
+        elif invoice_total < 0:
+            invoice_total = abs(invoice_total)
+
+        if not prepared_lines:
+            skip_messages.append("Skipped because no usable sales lines remain after legacy normalization.")
+
+        variance_note = None
+        if invoice_total is not None and prepared_lines and abs(invoice_total - computed_total) > Decimal("0.01"):
+            variance_note = f"Legacy header total differed from summed lines by {invoice_total - computed_total:+.2f}."
 
         if messages:
-            rows.append(SalesImportRowResult(
-                source="SALES",
-                row_number=row_number,
-                sales_order_number=order_number,
-                invoice_number=invoice_number,
-                customer_number=customer_number,
-                action="ERROR",
-                status="ERROR",
-                messages=messages,
-            ))
+            rows.append(
+                SalesImportRowResult(
+                    source="SALES",
+                    row_number=row_number,
+                    sales_order_number=order_number,
+                    invoice_number=invoice_number,
+                    customer_number=customer_number,
+                    action="ERROR",
+                    status="ERROR",
+                    messages=messages,
+                )
+            )
+            continue
+
+        if skip_messages:
+            skipped_sales_orders.add(order_number or "")
+            skip_count += 1
+            rows.append(
+                SalesImportRowResult(
+                    source="SALES",
+                    row_number=row_number,
+                    sales_order_number=order_number,
+                    invoice_number=invoice_number,
+                    customer_number=customer_number,
+                    action="SKIP",
+                    status="VALID",
+                    messages=skip_messages,
+                )
+            )
+            rows.extend(normalized_line_rows)
             continue
 
         seen_invoices.add(invoice_number or "")
         valid_sales_orders.add(order_number or "")
         create_count += 1
-        rows.append(SalesImportRowResult(
-            source="SALES",
-            row_number=row_number,
-            sales_order_number=order_number,
-            invoice_number=invoice_number,
-            customer_number=customer_number,
-            action="CREATE",
-            status="VALID",
-            messages=["Ready to create invoice and invoice lines."],
-        ))
-        prepared_documents.append({
-            "header": row,
-            "customer": customer,
-            "invoice_number": invoice_number,
-            "issue_date": invoice_date,
-            "due_date": due_date,
-            "invoice_total": invoice_total,
-            "prepared_lines": prepared_lines,
-        })
+        rows.append(
+            SalesImportRowResult(
+                source="SALES",
+                row_number=row_number,
+                sales_order_number=order_number,
+                invoice_number=invoice_number,
+                customer_number=customer_number,
+                action="CREATE",
+                status="VALID",
+                messages=[variance_note] if variance_note else ["Ready to create invoice and invoice lines."],
+            )
+        )
+        rows.extend(normalized_line_rows)
+        prepared_documents.append(
+            {
+                "header": row,
+                "customer": customer,
+                "invoice_number": invoice_number,
+                "issue_date": invoice_date,
+                "due_date": due_date,
+                "invoice_total": invoice_total,
+                "line_subtotal": _quantize_money(computed_total),
+                "variance_note": variance_note,
+                "prepared_lines": prepared_lines,
+            }
+        )
 
+    handled_line_rows = {row.row_number for row in rows if row.source == "LINE"}
     for line in line_rows:
+        if line["row_number"] in handled_line_rows:
+            continue
         order_number = _normalize_nullable_string(line.get("sales_order_number"))
         invoice_number = _normalize_nullable_string(line.get("invoice_number"))
         item_code = _normalize_nullable_string(line.get("item_code"))
         quantity = _parse_decimal(_normalize_nullable_string(line.get("quantity")))
         unit_price = _parse_decimal(_normalize_nullable_string(line.get("sell_price")))
-        messages: list[str] = []
         if not order_number or order_number not in sales_by_order:
-            messages.append("Sales Order Number does not match a row in Sales2.csv.")
+            rows.append(
+                SalesImportRowResult(
+                    source="LINE",
+                    row_number=line["row_number"],
+                    sales_order_number=order_number,
+                    invoice_number=invoice_number,
+                    item_code=item_code,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    action="ERROR",
+                    status="ERROR",
+                    messages=["Sales Order Number does not match a row in Sales2.csv."],
+                )
+            )
+        elif order_number in skipped_sales_orders:
+            rows.append(
+                SalesImportRowResult(
+                    source="LINE",
+                    row_number=line["row_number"],
+                    sales_order_number=order_number,
+                    invoice_number=invoice_number,
+                    item_code=item_code,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    action="SKIP",
+                    status="VALID",
+                    messages=["Skipped because the related sales header was not importable as an invoice."],
+                )
+            )
         elif order_number not in valid_sales_orders:
-            messages.append("Sales header row for this Sales Order Number has validation errors.")
-        if item_code and item_code not in items:
-            messages.append("Item Code does not match an existing item.")
-        if quantity is None or quantity <= 0:
-            messages.append("Quantity must be greater than zero.")
-        if unit_price is None or unit_price < 0:
-            messages.append("Sell Price must be zero or greater.")
-        rows.append(SalesImportRowResult(
-            source="LINE",
-            row_number=line["row_number"],
-            sales_order_number=order_number,
-            invoice_number=invoice_number,
-            item_code=item_code,
-            quantity=quantity,
-            unit_price=unit_price,
-            action="ERROR" if messages else "CREATE",
-            status="ERROR" if messages else "VALID",
-            messages=messages or ["Ready to attach to invoice."],
-        ))
+            rows.append(
+                SalesImportRowResult(
+                    source="LINE",
+                    row_number=line["row_number"],
+                    sales_order_number=order_number,
+                    invoice_number=invoice_number,
+                    item_code=item_code,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    action="ERROR",
+                    status="ERROR",
+                    messages=["Sales header row for this Sales Order Number has validation errors."],
+                )
+            )
 
     summary = SalesImportSummary(
         total_rows=len(sales_rows) + len(line_rows),
@@ -527,7 +703,7 @@ def _analyze_sales_import(payload: SalesImportRequest, db: Session) -> dict[str,
         error_rows=sum(1 for row in rows if row.status == "ERROR"),
         create_count=create_count,
         update_count=0,
-        skip_count=0,
+        skip_count=skip_count + sum(1 for row in rows if row.source == "LINE" and row.action == "SKIP"),
         sales_rows=len(sales_rows),
         line_rows=len(line_rows),
     )
@@ -559,25 +735,31 @@ def execute_sales_import(payload: SalesImportRequest, db: Session = Depends(get_
 
     imported_records: list[SalesImportRecord] = []
     for document in analysis["prepared_documents"]:
+        subtotal = document["line_subtotal"]
+        invoice_total = document["invoice_total"]
+        tax_total = invoice_total - subtotal if invoice_total >= subtotal else Decimal("0.00")
+        notes = _build_invoice_notes(document["header"])
+        if document.get("variance_note"):
+            notes = f"{notes}\n{document['variance_note']}" if notes else document["variance_note"]
         invoice = Invoice(
             customer_id=document["customer"].id,
             invoice_number=document["invoice_number"],
             status="DRAFT",
             issue_date=document["issue_date"],
             due_date=document["due_date"],
-            notes=_build_invoice_notes(document["header"]),
+            notes=notes,
             terms=None,
-            subtotal=document["invoice_total"],
-            tax_total=Decimal("0.00"),
-            total=document["invoice_total"],
-            amount_due=document["invoice_total"],
+            subtotal=subtotal if invoice_total >= subtotal else invoice_total,
+            tax_total=tax_total,
+            total=invoice_total,
+            amount_due=invoice_total,
         )
         db.add(invoice)
         db.flush()
 
         for prepared_line in document["prepared_lines"]:
             item = prepared_line["item"]
-            line_total = (prepared_line["quantity"] or Decimal("0")) * (prepared_line["unit_price"] or Decimal("0"))
+            line_total = prepared_line["line_total"]
             db.add(InvoiceLine(
                 invoice_id=invoice.id,
                 item_id=item.id if item else None,

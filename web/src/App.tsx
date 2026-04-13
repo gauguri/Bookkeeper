@@ -18,6 +18,7 @@ import ReplenishmentWorkbenchPage from "./pages/ReplenishmentWorkbenchPage";
 import BacklogPage from "./pages/BacklogPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
+import InvoicesBulkImportPage from "./pages/InvoicesBulkImportPage";
 import ItemsPage from "./pages/ItemsPage";
 import ItemsBulkImportPage from "./pages/ItemsBulkImportPage";
 import LoginPage from "./pages/LoginPage";
@@ -240,8 +241,10 @@ export default function App() {
             <Route path="/sales-requests/:id" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestDetailPage /></ProtectedRoute>} />
             <Route path="/sales-requests/:id/edit" element={<ProtectedRoute moduleKey={MODULES.SALES_REQUESTS}><SalesRequestEditPage /></ProtectedRoute>} />
             <Route path="/sales/invoices" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/sales/invoices/import" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesBulkImportPage /></ProtectedRoute>} />
             <Route path="/sales/invoices/:invoiceId" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoiceDetailPage /></ProtectedRoute>} />
             <Route path="/invoices" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/invoices/import" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoicesBulkImportPage /></ProtectedRoute>} />
             <Route path="/invoices/:invoiceId" element={<ProtectedRoute moduleKey={MODULES.INVOICES}><InvoiceDetailPage /></ProtectedRoute>} />
             <Route path="/sales/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute moduleKey={MODULES.PAYMENTS}><PaymentsPage /></ProtectedRoute>} />

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Download,
   ExternalLink,
+  FileSpreadsheet,
   MoreHorizontal,
   Plus,
   Search,
@@ -522,6 +523,7 @@ export default function InvoicesPage() {
           <p className="text-muted">Create, send, and manage the invoice lifecycle.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/invoices/import" className="app-button-ghost"><FileSpreadsheet className="h-4 w-4" /> Import</Link>
           <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
           <button className="app-button" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Invoice</button>
         </div>

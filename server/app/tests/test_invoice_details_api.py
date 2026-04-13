@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
-from app.models import Customer, Invoice, InvoiceLine
+from app.models import Customer, Inventory, Invoice, InvoiceLine, Item
 
 
 @pytest.fixture()
@@ -35,6 +35,30 @@ def client():
             customer = Customer(name="Acme Corp", email="billing@acme.test")
             db.add(customer)
             db.flush()
+            item_by_id = Item(
+                name="Item Chosen By Numeric Id",
+                item_code="3689",
+                sku="3689",
+                unit_price=Decimal("280.00"),
+                is_active=True,
+            )
+            db.add(item_by_id)
+            db.flush()
+
+            item_by_code = Item(
+                name="Item Chosen By Glenrock Code",
+                item_code="3103",
+                sku="3103",
+                unit_price=Decimal("320.00"),
+                is_active=True,
+            )
+            db.add(item_by_code)
+            db.flush()
+
+            db.add_all([
+                Inventory(item_id=item_by_id.id, quantity_on_hand=Decimal("1"), landed_unit_cost=Decimal("100.00"), total_value=Decimal("100.00")),
+                Inventory(item_id=item_by_code.id, quantity_on_hand=Decimal("1"), landed_unit_cost=Decimal("120.00"), total_value=Decimal("120.00")),
+            ])
             invoice = Invoice(
                 customer_id=customer.id,
                 invoice_number="INV-000007",
@@ -51,6 +75,7 @@ def client():
             db.add(
                 InvoiceLine(
                     invoice_id=invoice.id,
+                    item_id=item_by_code.id,
                     description="Consulting",
                     quantity=Decimal("2.00"),
                     unit_price=Decimal("100.00"),
@@ -92,3 +117,11 @@ def test_get_invoice_detail_by_invoice_number(client: TestClient):
     assert data["invoice_number"] == "INV-000007"
     assert data["customer"]["email"] == "billing@acme.test"
     assert data["lines"][0]["description"] == "Consulting"
+
+
+def test_numeric_item_code_prefers_item_code_over_internal_id(client: TestClient):
+    response = client.get("/api/items/3103/360")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["item"]["item_code"] == "3103"
+    assert data["item"]["name"] == "Item Chosen By Glenrock Code"

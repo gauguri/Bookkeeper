@@ -1023,10 +1023,7 @@ def get_item_360(db: Session, item_ref: int | str) -> dict:
 
     item_query = db.query(Item).options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
     item = None
-    if isinstance(item_ref, int) or (isinstance(item_ref, str) and item_ref.isdigit()):
-        numeric_id = int(item_ref)
-        item = item_query.filter(Item.id == numeric_id).first()
-    if not item and isinstance(item_ref, str):
+    if isinstance(item_ref, str):
         item_code = item_ref.strip()
         if item_code:
             exact_code_matches = item_query.filter(Item.item_code == item_code).all()
@@ -1040,6 +1037,11 @@ def get_item_360(db: Session, item_ref: int | str) -> dict:
                     item = exact_sku_matches[0]
                 elif len(exact_sku_matches) > 1:
                     raise ValueError("Multiple items share this SKU.")
+        if not item and item_ref.isdigit():
+            numeric_id = int(item_ref)
+            item = item_query.filter(Item.id == numeric_id).first()
+    elif isinstance(item_ref, int):
+        item = item_query.filter(Item.id == item_ref).first()
     if not item:
         raise ValueError("Item not found.")
     item_id = item.id

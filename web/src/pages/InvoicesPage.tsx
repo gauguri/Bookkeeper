@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
   Download,
   ExternalLink,
+  FileSpreadsheet,
   MoreHorizontal,
   Plus,
   Search,
@@ -163,6 +164,7 @@ const fmtMonth = (date: Date) => date.toLocaleDateString("en-US", { month: "shor
 const queueKeys: QueueKey[] = ["needs-attention", "drafts", "overdue", "outstanding", "sent-unpaid", "paid", "void", "all"];
 
 export default function InvoicesPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queueParam = searchParams.get("queue");
   const view = searchParams.get("view");
@@ -195,6 +197,7 @@ export default function InvoicesPage() {
   const [form, setForm] = useState({ customer_id: "", issue_date: todayISO, due_date: "", notes: "", terms: "" });
   const [dueDateWasAuto, setDueDateWasAuto] = useState(false);
   const [lines, setLines] = useState<LineItemForm[]>([{ ...emptyLine }]);
+  const ytdStartISO = `${new Date().getFullYear()}-01-01`;
 
   const setParam = (next: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams);
@@ -210,7 +213,7 @@ export default function InvoicesPage() {
       setLoading(true);
       setError("");
       const [invoiceData, customerData, itemData] = await Promise.all([
-        apiFetch<Invoice[]>("/invoices"),
+        apiFetch<Invoice[]>(`/invoices?start_date=${ytdStartISO}&end_date=${todayISO}`),
         apiFetch<Customer[]>("/customers"),
         apiFetch<Item[]>("/items")
       ]);
@@ -279,7 +282,10 @@ export default function InvoicesPage() {
       source = source.filter((inv) => inv.invoice_number.toLowerCase().includes(needle) || inv.customer_name.toLowerCase().includes(needle));
     }
 
-    return source.sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+    return [...source].sort((a, b) => {
+      if (a.issue_date !== b.issue_date) return b.issue_date.localeCompare(a.issue_date);
+      return b.id - a.id;
+    });
   }, [queue, queueBuckets, q, statusFilter]);
 
   const trendData = useMemo(() => {
@@ -331,18 +337,6 @@ export default function InvoicesPage() {
     { key: "void", label: "Void", count: queueBuckets.voidInvoices.length },
     { key: "all", label: "All Invoices", count: queueBuckets.all.length }
   ] as const;
-
-  const openDetail = async (invoiceId: number) => {
-    try {
-      setDetailLoading(true);
-      const data = await apiFetch<InvoiceDetail>(`/invoices/${invoiceId}`);
-      setDetail(data);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
 
   const exportSelectionCsv = () => {
     const targets = invoices.filter((inv) => selected.includes(inv.id));
@@ -480,7 +474,7 @@ export default function InvoicesPage() {
       setDueDateWasAuto(false);
       setParam({ queue: "drafts", q: created.invoice_number });
       await loadData();
-      await openDetail(created.id);
+      navigate(`/invoices/${created.id}`);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -522,6 +516,7 @@ export default function InvoicesPage() {
           <p className="text-muted">Create, send, and manage the invoice lifecycle.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/invoices/import" className="app-button-ghost"><FileSpreadsheet className="h-4 w-4" /> Import</Link>
           <button className="app-button-ghost"><Download className="h-4 w-4" /> Export</button>
           <button className="app-button" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Invoice</button>
         </div>
@@ -651,7 +646,7 @@ export default function InvoicesPage() {
                 {filtered.map((invoice) => (
                   <tr key={invoice.id} className={`border-t ${density === "compact" ? "h-10" : "h-14"} hover:bg-secondary/40`}>
                     <td><input type="checkbox" checked={selected.includes(invoice.id)} onChange={(e) => setSelected((prev) => e.target.checked ? [...new Set([...prev, invoice.id])] : prev.filter((id) => id !== invoice.id))} /></td>
-                    {visibleColumns.includes("invoice_number") && <td className="font-medium"><button className="hover:underline" onClick={() => openDetail(invoice.id)}>{invoice.invoice_number}</button></td>}
+                    {visibleColumns.includes("invoice_number") && <td className="font-medium"><Link className="hover:underline" to={`/invoices/${invoice.id}`}>{invoice.invoice_number}</Link></td>}
                     {visibleColumns.includes("customer") && <td>{invoice.customer_name}</td>}
                     {visibleColumns.includes("status") && <td><span className={`app-badge ${statusStyles[invoice.status] ?? "border-border bg-secondary"}`}>{invoice.status.replace(/_/g, " ")}</span></td>}
                     {visibleColumns.includes("issue_date") && <td>{formatDate(invoice.issue_date)}</td>}
@@ -661,7 +656,7 @@ export default function InvoicesPage() {
                     {visibleColumns.includes("updated") && <td className="text-muted">{formatDate(invoice.issue_date)}</td>}
                     <td className="text-right">
                       <div className="inline-flex items-center gap-1">
-                        <button className="app-button-ghost" onClick={() => openDetail(invoice.id)}>View</button>
+                        <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>View</Link>
                         <Link className="app-button-ghost" to={`/invoices/${invoice.id}`}>Edit</Link>
                         <button className="app-button-ghost" onClick={() => setInfoBanner("Duplicate action will be wired in next iteration.")}>Duplicate</button>
                         {canRecordPayment(invoice) ? (

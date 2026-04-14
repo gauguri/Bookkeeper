@@ -76,6 +76,8 @@ export type ActivityItem = {
 };
 
 export type TopItem = {
+  item_id?: number | null;
+  item_code?: string | null;
   item_name: string;
   quantity: number;
   revenue: number;

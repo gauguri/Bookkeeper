@@ -1,9 +1,12 @@
+import { Link, useLocation } from "react-router-dom";
 import type { TopItem } from "../../hooks/useCustomers";
 import { formatCurrency } from "../../utils/formatters";
 
 type Props = { items: TopItem[] };
 
 export default function TopItemsTable({ items }: Props) {
+  const location = useLocation();
+
   if (items.length === 0) {
     return (
       <div className="app-card p-4">
@@ -31,7 +34,24 @@ export default function TopItemsTable({ items }: Props) {
                 <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-blue-100 text-xs font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-400">
                   {i + 1}
                 </span>
-                <span className="text-sm font-medium truncate">{item.item_name}</span>
+                {item.item_id || item.item_code ? (
+                  <Link
+                    className="min-w-0 hover:text-primary"
+                    to={`/sales/items/${item.item_code || item.item_id}`}
+                    state={{ backTo: location.pathname, backLabel: "Customer Detail" }}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+                        {item.item_code || "Item"}
+                      </div>
+                      <div className="truncate text-sm font-medium hover:underline">{item.item_name}</div>
+                    </div>
+                  </Link>
+                ) : (
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{item.item_name}</div>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-4 flex-shrink-0">
                 <span className="text-xs text-muted tabular-nums">{item.quantity.toFixed(0)} units</span>

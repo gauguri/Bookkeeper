@@ -16,6 +16,7 @@ from .routers import (
     gl,
     health,
     inventory,
+    invoices_import,
     items_import,
     inv_management,
     journal_entries,
@@ -48,6 +49,7 @@ app.include_router(backlog.router)
 app.include_router(banking.router)
 app.include_router(customers_import.router)
 app.include_router(items_import.router)
+app.include_router(invoices_import.router)
 app.include_router(sales.router)
 app.include_router(sales_management.router)
 app.include_router(dashboard.router)

@@ -186,11 +186,11 @@ export function useItemsEnriched(filters: ItemFilters = {}) {
   });
 }
 
-export function useItem360(itemId: number | undefined) {
+export function useItem360(itemId: number | string | undefined) {
   return useQuery({
     queryKey: ["items", "360", itemId],
     queryFn: () => apiFetch<Item360Data>(`/items/${itemId}/360`),
-    enabled: !!itemId,
+    enabled: itemId !== undefined && itemId !== null && String(itemId).trim().length > 0,
     staleTime: 30_000,
   });
 }

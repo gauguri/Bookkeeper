@@ -33,6 +33,28 @@ DEFAULT_MARKUP_BY_TIER = {
 }
 
 
+def _resolve_inventory_unit_cost(item: Item, inventory: Inventory | None) -> Decimal:
+    inventory_cost = quantize_money(Decimal(inventory.landed_unit_cost)) if inventory and inventory.landed_unit_cost is not None else Decimal("0.00")
+    if inventory_cost > 0:
+        return inventory_cost
+
+    cost_price = quantize_money(Decimal(item.cost_price)) if item.cost_price is not None else Decimal("0.00")
+    if cost_price > 0:
+        return cost_price
+
+    preferred_cost = quantize_money(Decimal(item.preferred_landed_cost)) if item.preferred_landed_cost is not None else Decimal("0.00")
+    if preferred_cost > 0:
+        return preferred_cost
+
+    return Decimal("0.00")
+
+
+def _resolve_inventory_value(item: Item, inventory: Inventory | None, on_hand: Decimal) -> Decimal:
+    if on_hand <= 0:
+        return Decimal("0.00")
+    return quantize_money(on_hand * _resolve_inventory_unit_cost(item, inventory))
+
+
 def get_customer_insights(db: Session, customer_id: int) -> dict:
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
@@ -864,19 +886,29 @@ def get_customer_360(db: Session, customer_id: int) -> dict:
     # ── Top items purchased ─────────────────────────────────
     top_items_rows = (
         db.query(
+            InvoiceLine.item_id,
+            func.max(Item.item_code).label("item_code"),
+            func.max(Item.sku).label("sku"),
             InvoiceLine.description,
             func.sum(InvoiceLine.quantity).label("qty"),
             func.sum(InvoiceLine.line_total).label("revenue"),
         )
         .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .outerjoin(Item, Item.id == InvoiceLine.item_id)
         .filter(*active_filter)
-        .group_by(InvoiceLine.description)
+        .group_by(InvoiceLine.item_id, InvoiceLine.description)
         .order_by(func.sum(InvoiceLine.line_total).desc())
         .limit(10)
         .all()
     )
     top_items = [
-        {"item_name": row.description or "Untitled", "quantity": float(row.qty or 0), "revenue": float(row.revenue or 0)}
+        {
+            "item_id": row.item_id,
+            "item_code": row.item_code or row.sku,
+            "item_name": row.description or "Untitled",
+            "quantity": float(row.qty or 0),
+            "revenue": float(row.revenue or 0),
+        }
         for row in top_items_rows
     ]
 
@@ -1017,18 +1049,34 @@ def _stock_status(on_hand: Decimal, reserved: Decimal, reorder: Decimal | None) 
 # ── Item 360 ────────────────────────────────────────────────
 
 
-def get_item_360(db: Session, item_id: int) -> dict:
+def get_item_360(db: Session, item_ref: int | str) -> dict:
     """Full Item-360 payload: detail, KPIs, sales trend, top customers, suppliers, movements."""
     from app.models import Inventory, InventoryMovement, SupplierItem, Supplier
 
-    item = (
-        db.query(Item)
-        .options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
-        .filter(Item.id == item_id)
-        .first()
-    )
+    item_query = db.query(Item).options(selectinload(Item.supplier_items).selectinload(SupplierItem.supplier))
+    item = None
+    if isinstance(item_ref, str):
+        item_code = item_ref.strip()
+        if item_code:
+            exact_code_matches = item_query.filter(Item.item_code == item_code).all()
+            if len(exact_code_matches) == 1:
+                item = exact_code_matches[0]
+            elif len(exact_code_matches) > 1:
+                raise ValueError("Multiple items share this item code.")
+            else:
+                exact_sku_matches = item_query.filter(Item.sku == item_code).all()
+                if len(exact_sku_matches) == 1:
+                    item = exact_sku_matches[0]
+                elif len(exact_sku_matches) > 1:
+                    raise ValueError("Multiple items share this SKU.")
+        if not item and item_ref.isdigit():
+            numeric_id = int(item_ref)
+            item = item_query.filter(Item.id == numeric_id).first()
+    elif isinstance(item_ref, int):
+        item = item_query.filter(Item.id == item_ref).first()
     if not item:
         raise ValueError("Item not found.")
+    item_id = item.id
 
     today = date.today()
     ytd_start = date(today.year, 1, 1)
@@ -1039,7 +1087,7 @@ def get_item_360(db: Session, item_id: int) -> dict:
     on_hand = Decimal(inventory.quantity_on_hand or 0) if inventory else Decimal(item.on_hand_qty or 0)
     reserved = Decimal(item.reserved_qty or 0)
     available = on_hand - reserved
-    inv_value = Decimal(inventory.total_value or 0) if inventory else Decimal(0)
+    inv_value = _resolve_inventory_value(item, inventory, on_hand)
     reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
 
     # ── Sales KPIs ─────────────────────────────────────────
@@ -1347,7 +1395,7 @@ def get_items_enriched(
         on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
         reserved = Decimal(item.reserved_qty or 0)
         available = on_hand - reserved
-        inv_value = Decimal(inv.total_value or 0) if inv else Decimal(0)
+        inv_value = _resolve_inventory_value(item, inv, on_hand)
         reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
         status = _stock_status(on_hand, reserved, reorder)
 
@@ -1419,9 +1467,6 @@ def get_items_summary(db: Session) -> dict:
     total = db.query(func.count(Item.id)).scalar() or 0
     active = db.query(func.count(Item.id)).filter(Item.is_active == True).scalar() or 0
 
-    total_inv_value = Decimal(
-        db.query(func.coalesce(func.sum(Inventory.total_value), 0)).scalar() or 0
-    )
     rev_ytd = Decimal(
         db.query(func.coalesce(func.sum(InvoiceLine.line_total), 0))
         .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
@@ -1437,6 +1482,7 @@ def get_items_summary(db: Session) -> dict:
         rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
         inv_map = {r.item_id: r for r in rows}
 
+    total_inv_value = Decimal("0.00")
     low_stock = 0
     out_of_stock = 0
     for item in all_items:
@@ -1444,6 +1490,7 @@ def get_items_summary(db: Session) -> dict:
         on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
         reserved = Decimal(item.reserved_qty or 0)
         reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
+        total_inv_value += _resolve_inventory_value(item, inv, on_hand)
         status = _stock_status(on_hand, reserved, reorder)
         if status == "low_stock":
             low_stock += 1

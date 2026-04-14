@@ -161,6 +161,8 @@ class InvoiceLineCreate(InvoiceLineBase):
 
 class InvoiceLineResponse(InvoiceLineBase):
     id: int
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
     line_total: DecimalValue
 
     model_config = ConfigDict(from_attributes=True)
@@ -441,7 +443,7 @@ class Customer360Response(BaseModel):
     aging: CustomerAgingBuckets
     revenue_trend: List[CustomerRevenueTrendPoint]
     recent_activity: List[CustomerActivityItem]
-    top_items: List[dict]  # {item_name, quantity, revenue}
+    top_items: List[dict]  # {item_id, item_code, item_name, quantity, revenue}
 
 
 class CustomerListItem(BaseModel):

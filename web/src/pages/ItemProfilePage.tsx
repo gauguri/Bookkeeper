@@ -73,8 +73,9 @@ export default function ItemProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = (location.state as { backTo?: string; backLabel?: string } | null) ?? null;
-  const id = itemId ? parseInt(itemId, 10) : undefined;
-  const { data, isLoading, error } = useItem360(id);
+  const itemRef = itemId?.trim() || undefined;
+  const numericItemId = itemRef && /^\d+$/.test(itemRef) ? parseInt(itemRef, 10) : undefined;
+  const { data, isLoading, error } = useItem360(itemRef);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [showDetails, setShowDetails] = useState(true);
   const [inventoryDetail, setInventoryDetail] = useState<InventoryDetail | null>(null);
@@ -97,13 +98,13 @@ export default function ItemProfilePage() {
   const inventoryContext = locationState?.backTo === "/inventory";
 
   useEffect(() => {
-    if (!id || !inventoryContext) return;
+    if (!numericItemId || !inventoryContext) return;
     let cancelled = false;
     const loadInventoryDetail = async () => {
       setInventoryLoading(true);
       setInventoryError("");
       try {
-        const payload = await apiFetch<InventoryDetail>(`/inventory/items/${id}/detail`);
+        const payload = await apiFetch<InventoryDetail>(`/inventory/items/${numericItemId}/detail`);
         if (cancelled) return;
         const normalized: InventoryDetail = {
           ...payload,
@@ -158,7 +159,7 @@ export default function ItemProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [id, inventoryContext]);
+  }, [numericItemId, inventoryContext]);
 
   if (isLoading) {
     return (
@@ -204,8 +205,8 @@ export default function ItemProfilePage() {
   };
   const handleReceive = () => navigate("/purchasing/purchase-orders");
   const refreshInventoryDetail = async () => {
-    if (!id || !inventoryContext) return;
-    const payload = await apiFetch<InventoryDetail>(`/inventory/items/${id}/detail`);
+    if (!numericItemId || !inventoryContext) return;
+    const payload = await apiFetch<InventoryDetail>(`/inventory/items/${numericItemId}/detail`);
     const normalized: InventoryDetail = {
       ...payload,
       item: {
@@ -240,11 +241,11 @@ export default function ItemProfilePage() {
     setInventoryDetail(normalized);
   };
   const handleSavePlanning = async () => {
-    if (!id) return;
+    if (!numericItemId) return;
     setPlanningSaving(true);
     setInventoryError("");
     try {
-      await apiFetch(`/inventory/items/${id}/planning`, {
+      await apiFetch(`/inventory/items/${numericItemId}/planning`, {
         method: "PUT",
         body: JSON.stringify(planningForm),
       });
@@ -257,7 +258,7 @@ export default function ItemProfilePage() {
     }
   };
   const handleSaveAdjustment = async () => {
-    if (!id) return;
+    if (!numericItemId) return;
     const qtyDelta = Number(adjustmentQty);
     if (!Number.isFinite(qtyDelta) || qtyDelta === 0) {
       setAdjustmentError("Enter a positive or negative quantity.");
@@ -269,7 +270,7 @@ export default function ItemProfilePage() {
       await apiFetch("/inventory/adjustments", {
         method: "POST",
         body: JSON.stringify({
-          item_id: id,
+          item_id: numericItemId,
           qty_delta: qtyDelta,
           reason: adjustmentReason.trim() || null,
         }),
@@ -298,7 +299,7 @@ export default function ItemProfilePage() {
     { label: "Finish", value: item.finish || "-" },
     { label: "Category", value: item.category || "-" },
     { label: "Quantity", value: Number(kpis.on_hand_qty).toLocaleString() },
-    { label: "Sell Price", value: formatCurrency(Number(item.unit_price), true) },
+    { label: "Sales Price / Unit", value: formatCurrency(Number(item.unit_price), true) },
     { label: "Item Description", value: item.description || "-" },
     { label: "Sales Description", value: item.sales_description || "-" },
     { label: "Purchase Description", value: item.purchase_description || "-" },
@@ -472,7 +473,7 @@ export default function ItemProfilePage() {
                     <p className="mt-1 font-medium tabular-nums">{inventoryDetail.target_stock.toLocaleString()}</p>
                   </div>
                   <div className="rounded-xl border border-border/60 bg-background px-4 py-4 text-sm">
-                    <span className="text-xs text-muted">Inventory Value</span>
+                    <span className="text-xs text-muted">Inventory Value (Cost Basis)</span>
                     <p className="mt-1 font-medium tabular-nums">{formatCurrency(inventoryDetail.item.total_value, true)}</p>
                   </div>
                 </div>
@@ -599,7 +600,7 @@ export default function ItemProfilePage() {
                   { label: "On Hand Quantity", value: Number(kpis.on_hand_qty).toLocaleString() },
                   { label: "Reserved Quantity", value: Number(kpis.reserved_qty).toLocaleString() },
                   { label: "Available Quantity", value: Number(kpis.available_qty).toLocaleString() },
-                  { label: "Inventory Value", value: formatCurrency(Number(kpis.inventory_value), true) },
+                  { label: "Inventory Value (Cost Basis)", value: formatCurrency(Number(kpis.inventory_value), true) },
                   { label: "Avg Selling Price", value: kpis.avg_selling_price != null ? formatCurrency(Number(kpis.avg_selling_price), true) : "—" },
                   { label: "Reorder Point", value: item.reorder_point != null ? Number(item.reorder_point).toLocaleString() : "Not set" },
                 ].map((row) => (

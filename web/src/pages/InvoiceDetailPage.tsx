@@ -16,6 +16,9 @@ import { canRecordPayment, shouldAutoOpenRecordPayment } from "./invoicePaymentN
 
 type InvoiceLine = {
   id: number;
+  item_id?: number | null;
+  item_code?: string | null;
+  item_name?: string | null;
   description?: string;
   quantity: number;
   unit_price: number;
@@ -597,7 +600,29 @@ export default function InvoiceDetailPage() {
                   ) : (
                     invoice.line_items.map((line) => (
                       <tr key={line.id} className="border-t">
-                        <td className="px-4 py-3">{line.description ?? "Item"}</td>
+                        <td className="px-4 py-3">
+                          {(line.item_code || typeof line.item_id === "number") ? (
+                            <Link
+                              className="inline-flex flex-col gap-1 hover:text-primary"
+                              to={`/sales/items/${line.item_code || line.item_id}`}
+                              state={{ backTo: location.pathname, backLabel: `Invoice ${invoice.invoice_number}` }}
+                            >
+                              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                                {line.item_code || "Item"}
+                              </span>
+                              <span className="hover:underline">{line.description || line.item_name || "Item"}</span>
+                            </Link>
+                          ) : (
+                            <div className="inline-flex flex-col gap-1">
+                              {line.item_code && (
+                                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                                  {line.item_code}
+                                </span>
+                              )}
+                              <span>{line.description || line.item_name || "Item"}</span>
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3">{line.quantity}</td>
                         <td className="px-4 py-3 tabular-nums">{currency(line.unit_price)}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{currency(line.line_total)}</td>

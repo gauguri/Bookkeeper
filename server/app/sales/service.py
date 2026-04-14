@@ -864,19 +864,29 @@ def get_customer_360(db: Session, customer_id: int) -> dict:
     # ── Top items purchased ─────────────────────────────────
     top_items_rows = (
         db.query(
+            InvoiceLine.item_id,
+            func.max(Item.item_code).label("item_code"),
+            func.max(Item.sku).label("sku"),
             InvoiceLine.description,
             func.sum(InvoiceLine.quantity).label("qty"),
             func.sum(InvoiceLine.line_total).label("revenue"),
         )
         .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .outerjoin(Item, Item.id == InvoiceLine.item_id)
         .filter(*active_filter)
-        .group_by(InvoiceLine.description)
+        .group_by(InvoiceLine.item_id, InvoiceLine.description)
         .order_by(func.sum(InvoiceLine.line_total).desc())
         .limit(10)
         .all()
     )
     top_items = [
-        {"item_name": row.description or "Untitled", "quantity": float(row.qty or 0), "revenue": float(row.revenue or 0)}
+        {
+            "item_id": row.item_id,
+            "item_code": row.item_code or row.sku,
+            "item_name": row.description or "Untitled",
+            "quantity": float(row.qty or 0),
+            "revenue": float(row.revenue or 0),
+        }
         for row in top_items_rows
     ]
 

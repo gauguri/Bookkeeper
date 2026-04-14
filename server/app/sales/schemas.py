@@ -443,7 +443,7 @@ class Customer360Response(BaseModel):
     aging: CustomerAgingBuckets
     revenue_trend: List[CustomerRevenueTrendPoint]
     recent_activity: List[CustomerActivityItem]
-    top_items: List[dict]  # {item_name, quantity, revenue}
+    top_items: List[dict]  # {item_id, item_code, item_name, quantity, revenue}
 
 
 class CustomerListItem(BaseModel):

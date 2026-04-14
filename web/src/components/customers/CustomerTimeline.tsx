@@ -1,3 +1,4 @@
+import { Link, useLocation } from "react-router-dom";
 import { FileText, CreditCard, MessageSquare, Bell, Truck } from "lucide-react";
 import type { ActivityItem } from "../../hooks/useCustomers";
 import { formatCurrency } from "../../utils/formatters";
@@ -36,6 +37,7 @@ function RelativeTime({ date: dateStr }: { date: string }) {
 type Props = { activities: ActivityItem[]; maxItems?: number };
 
 export default function CustomerTimeline({ activities, maxItems = 20 }: Props) {
+  const location = useLocation();
   const items = activities.slice(0, maxItems);
 
   if (items.length === 0) {
@@ -65,7 +67,17 @@ export default function CustomerTimeline({ activities, maxItems = 20 }: Props) {
             {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium truncate">{item.title}</p>
+                {item.reference && item.type.startsWith("invoice_") ? (
+                  <Link
+                    className="truncate text-sm font-medium hover:text-primary hover:underline"
+                    to={`/invoices/${item.reference}`}
+                    state={{ backTo: location.pathname, backLabel: "Customer Detail" }}
+                  >
+                    {item.title}
+                  </Link>
+                ) : (
+                  <p className="text-sm font-medium truncate">{item.title}</p>
+                )}
                 <span className="flex-shrink-0 text-xs text-muted">
                   <RelativeTime date={item.date} />
                 </span>

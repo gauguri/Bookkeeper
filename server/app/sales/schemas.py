@@ -474,6 +474,46 @@ class CustomersSummaryResponse(BaseModel):
     customers_at_risk: int = 0
 
 
+class CustomerIntelligenceSpotlight(BaseModel):
+    customer_id: int
+    customer_number: Optional[str] = None
+    customer_name: str
+    revenue: Decimal = Decimal("0")
+    outstanding_ar: Decimal = Decimal("0")
+    overdue_amount: Decimal = Decimal("0")
+    invoice_count: int = 0
+    last_invoice_date: Optional[date] = None
+    payment_score: str = "good"
+    change_percent: Optional[float] = None
+
+
+class CustomerRevenueTrendSeriesPoint(BaseModel):
+    period: str
+    customer_id: int
+    customer_name: str
+    customer_number: Optional[str] = None
+    revenue: Decimal = Decimal("0")
+
+
+class CustomerRevenueConcentration(BaseModel):
+    top_customer_share_percent: float = 0
+    top_5_share_percent: float = 0
+    top_10_share_percent: float = 0
+
+
+class CustomerIntelligenceResponse(BaseModel):
+    period: str
+    dormant_count: int = 0
+    collections_priority_count: int = 0
+    fastest_growing: List[CustomerIntelligenceSpotlight]
+    biggest_declines: List[CustomerIntelligenceSpotlight]
+    largest_overdue: List[CustomerIntelligenceSpotlight]
+    dormant_customers: List[CustomerIntelligenceSpotlight]
+    collections_priority: List[CustomerIntelligenceSpotlight]
+    concentration: CustomerRevenueConcentration
+    trend: List[CustomerRevenueTrendSeriesPoint]
+
+
 # ── Item 360 ────────────────────────────────────────────────
 
 

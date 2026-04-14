@@ -37,6 +37,7 @@ from app.sales.service import (
     get_customer_insights,
     get_customer_360,
     get_customers_enriched,
+    get_customers_intelligence,
     get_customers_summary,
     get_item_360,
     get_items_enriched,
@@ -170,6 +171,16 @@ def get_customers_summary_endpoint(
     _=Depends(require_module(ModuleKey.CUSTOMERS.value)),
 ):
     return get_customers_summary(db)
+
+
+@router.get("/customers-intelligence", response_model=schemas.CustomerIntelligenceResponse)
+def get_customers_intelligence_endpoint(
+    period: str = Query("ytd", pattern="^(mtd|qtd|ytd|ltm)$"),
+    top_n: int = Query(5, ge=3, le=10),
+    db: Session = Depends(get_db),
+    _=Depends(require_module(ModuleKey.CUSTOMERS.value)),
+):
+    return get_customers_intelligence(db, period=period, top_n=top_n)
 
 
 @router.get("/customers-enriched", response_model=List[schemas.CustomerListItem])

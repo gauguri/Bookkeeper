@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
+  Activity,
   ArrowUpDown,
+  BarChart3,
+  Boxes,
   ChevronDown,
   ChevronUp,
   DollarSign,
@@ -10,19 +13,23 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  TrendingDown,
+  TrendingUp,
   Users,
   X,
 } from "lucide-react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   useArchiveCustomer,
   useCreateCustomer,
   useCustomersEnriched,
+  useCustomersIntelligence,
   type CustomerFilters,
   type CustomerListItem,
 } from "../hooks/useCustomers";
 import TierBadge from "../components/customers/TierBadge";
 import PaymentScoreBadge from "../components/customers/PaymentScoreBadge";
-import { formatCompact, formatCurrency } from "../utils/formatters";
+import { formatCompact, formatCurrency, formatPercent } from "../utils/formatters";
 
 const TIERS = ["ALL", "PLATINUM", "GOLD", "SILVER", "BRONZE", "STANDARD"];
 const STATUS_OPTIONS = [
@@ -30,6 +37,15 @@ const STATUS_OPTIONS = [
   { label: "Active", value: "true" },
   { label: "Archived", value: "false" },
 ];
+
+const PERIOD_OPTIONS = [
+  { label: "MTD", value: "mtd" },
+  { label: "QTD", value: "qtd" },
+  { label: "YTD", value: "ytd" },
+  { label: "Last 12M", value: "ltm" },
+] as const;
+
+const CHART_COLORS = ["#2563eb", "#059669", "#f59e0b", "#ef4444", "#7c3aed"];
 
 const emptyForm = {
   customer_number: "",
@@ -100,6 +116,7 @@ export default function CustomersPage() {
   const [formError, setFormError] = useState("");
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [toast, setToast] = useState("");
+  const [intelligencePeriod, setIntelligencePeriod] = useState<"mtd" | "qtd" | "ytd" | "ltm">("ytd");
   const selectAllRef = useRef<HTMLInputElement>(null);
 
   const filters: CustomerFilters = useMemo(
@@ -114,6 +131,7 @@ export default function CustomersPage() {
   );
 
   const { data: customers, isLoading } = useCustomersEnriched(filters);
+  const { data: intelligence, isLoading: intelligenceLoading } = useCustomersIntelligence(intelligencePeriod, 5);
   const createMutation = useCreateCustomer();
   const archiveCustomerMutation = useArchiveCustomer();
 
@@ -134,6 +152,76 @@ export default function CustomersPage() {
   const visibleCustomerIds = useMemo(() => normalizedCustomers.map((customer) => customer.id), [normalizedCustomers]);
   const allVisibleSelected = visibleCustomerIds.length > 0 && visibleCustomerIds.every((id) => selectedRows.includes(id));
   const someVisibleSelected = visibleCustomerIds.some((id) => selectedRows.includes(id));
+  const selectedPeriodLabel = PERIOD_OPTIONS.find((option) => option.value === intelligencePeriod)?.label ?? "YTD";
+
+  const trendChartData = useMemo(() => {
+    if (!intelligence?.trend?.length) return [];
+    const grouped = new Map<string, Record<string, string | number>>();
+    intelligence.trend.forEach((point) => {
+      const bucket = grouped.get(point.period) ?? { period: point.period };
+      bucket[point.customer_name] = Number(point.revenue ?? 0);
+      grouped.set(point.period, bucket);
+    });
+    return Array.from(grouped.values()).map((row) => ({
+      ...row,
+      label: new Date(`${String(row.period)}-01`).toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
+    }));
+  }, [intelligence]);
+
+  const growthLeader = intelligence?.fastest_growing?.[0] ?? null;
+  const declineLeader = intelligence?.biggest_declines?.[0] ?? null;
+  const overdueLeader = intelligence?.largest_overdue?.[0] ?? null;
+
+  const intelligenceCards = [
+    {
+      label: `Fastest Growing ${selectedPeriodLabel}`,
+      icon: TrendingUp,
+      tint: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20",
+      row: growthLeader,
+      value: growthLeader?.change_percent != null ? `${growthLeader.change_percent > 0 ? "+" : ""}${growthLeader.change_percent.toFixed(0)}%` : "—",
+      meta: growthLeader ? formatCurrency(growthLeader.revenue) : "No growth signal yet",
+    },
+    {
+      label: "Biggest Decline",
+      icon: TrendingDown,
+      tint: "bg-amber-50 text-amber-700 dark:bg-amber-900/20",
+      row: declineLeader,
+      value: declineLeader?.change_percent != null ? `${declineLeader.change_percent.toFixed(0)}%` : "—",
+      meta: declineLeader ? formatCurrency(declineLeader.revenue) : "No decline signal yet",
+    },
+    {
+      label: "Largest Overdue",
+      icon: AlertTriangle,
+      tint: "bg-red-50 text-red-700 dark:bg-red-900/20",
+      row: overdueLeader,
+      value: overdueLeader ? formatCurrency(overdueLeader.overdue_amount) : "—",
+      meta: overdueLeader ? `${formatCurrency(overdueLeader.outstanding_ar)} total open` : "Nothing overdue",
+    },
+    {
+      label: "Dormant Customers",
+      icon: Boxes,
+      tint: "bg-violet-50 text-violet-700 dark:bg-violet-900/20",
+      row: intelligence?.dormant_customers?.[0] ?? null,
+      value: String(intelligence?.dormant_count ?? 0),
+      meta: intelligence?.dormant_customers?.length ? "Top dormant accounts by value" : "No dormant accounts surfaced",
+    },
+    {
+      label: "Top 10 Concentration",
+      icon: BarChart3,
+      tint: "bg-blue-50 text-blue-700 dark:bg-blue-900/20",
+      row: null,
+      value: intelligence ? formatPercent(intelligence.concentration.top_10_share_percent, 0) : "—",
+      meta: intelligence ? `Top customer ${formatPercent(intelligence.concentration.top_customer_share_percent, 0)}` : "No concentration data",
+    },
+    {
+      label: "Collections Priority",
+      icon: Activity,
+      tint: "bg-orange-50 text-orange-700 dark:bg-orange-900/20",
+      row: intelligence?.collections_priority?.[0] ?? null,
+      value: String(intelligence?.collections_priority_count ?? 0),
+      meta: intelligence?.collections_priority?.length ? "Highest overdue revenue accounts" : "No priority collections accounts",
+    },
+  ];
 
   useEffect(() => {
     if (!selectAllRef.current) return;
@@ -310,6 +398,199 @@ export default function CustomersPage() {
           </div>
         </div>
       )}
+
+      <div className="app-card space-y-4 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted">Customer Intelligence</p>
+            <h2 className="text-lg font-semibold">Growth, collections, dormancy, and concentration</h2>
+            <p className="text-sm text-muted">See who is accelerating, who is slipping, and where collections or concentration risk needs attention.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  intelligencePeriod === option.value
+                    ? "border-primary/30 bg-primary text-primary-foreground"
+                    : "border-border bg-background text-muted hover:bg-secondary"
+                }`}
+                onClick={() => setIntelligencePeriod(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {intelligenceCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <button
+                key={card.label}
+                type="button"
+                className="app-card flex items-start gap-3 p-4 text-left transition hover:border-primary/30 hover:shadow-sm disabled:cursor-default"
+                onClick={() => card.row && navigate(`/sales/customers/${card.row.customer_id}`)}
+                disabled={!card.row}
+              >
+                <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${card.tint}`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted">{card.label}</p>
+                  <p className="mt-1 text-xl font-bold">{card.value}</p>
+                  <p className="mt-1 truncate text-sm font-medium">{card.row?.customer_name ?? "Overview metric"}</p>
+                  <p className="mt-1 text-xs text-muted">{card.row?.customer_number ? `#${card.row.customer_number} · ` : ""}{card.meta}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+          <div className="app-card p-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold">Top Customer Revenue Trend</p>
+              <p className="text-xs text-muted">Monthly revenue trend for the current leading customers.</p>
+            </div>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(value) => `$${Math.round(Number(value) / 1000)}k`} />
+                  <Tooltip formatter={(value: number) => formatCurrency(value, true)} />
+                  {intelligence?.trend
+                    ? Array.from(new Set(intelligence.trend.map((point) => point.customer_name))).slice(0, 5).map((customerName, index) => (
+                      <Line
+                        key={customerName}
+                        type="monotone"
+                        dataKey={customerName}
+                        stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    ))
+                    : null}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="app-card p-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold">Revenue Concentration</p>
+              <p className="text-xs text-muted">How dependent the book is on a handful of customers.</p>
+            </div>
+            <div className="space-y-3">
+              {[
+                { label: "Top Customer Share", value: intelligence ? formatPercent(intelligence.concentration.top_customer_share_percent, 1) : "—" },
+                { label: "Top 5 Share", value: intelligence ? formatPercent(intelligence.concentration.top_5_share_percent, 1) : "—" },
+                { label: "Top 10 Share", value: intelligence ? formatPercent(intelligence.concentration.top_10_share_percent, 1) : "—" },
+              ].map((metric) => (
+                <div key={metric.label} className="rounded-xl border border-border px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">{metric.label}</p>
+                  <p className="mt-2 text-2xl font-bold">{metric.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="app-card p-4">
+            <div className="mb-3">
+              <p className="font-semibold">Growth and Decline Watchlist</p>
+              <p className="text-xs text-muted">Customers to expand, protect, or re-engage.</p>
+            </div>
+            <div className="space-y-3">
+              {[
+                { title: "Fastest Growing Customers", rows: intelligence?.fastest_growing ?? [], positive: true },
+                { title: "Biggest Revenue Declines", rows: intelligence?.biggest_declines ?? [], positive: false },
+              ].map((section) => (
+                <div key={section.title}>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-muted">{section.title}</p>
+                  <div className="space-y-2">
+                    {section.rows.length ? section.rows.map((row) => (
+                      <button
+                        key={`${section.title}-${row.customer_id}`}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition hover:border-primary/30 hover:bg-secondary/40"
+                        onClick={() => navigate(`/sales/customers/${row.customer_id}`)}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{row.customer_name}</p>
+                          <p className="text-xs text-muted">{row.customer_number ? `#${row.customer_number}` : "No customer number"} · {formatCurrency(row.revenue)}</p>
+                        </div>
+                        <span className={`text-sm font-semibold ${section.positive ? "text-emerald-600" : "text-rose-600"}`}>
+                          {row.change_percent != null ? `${row.change_percent > 0 ? "+" : ""}${row.change_percent.toFixed(0)}%` : "—"}
+                        </span>
+                      </button>
+                    )) : (
+                      <p className="rounded-xl border border-dashed border-border px-3 py-4 text-sm text-muted">No movement signal yet for this period.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="app-card p-4">
+            <div className="mb-3">
+              <p className="font-semibold">Collections and Re-Engagement</p>
+              <p className="text-xs text-muted">Who needs collection action now, and who has gone quiet.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {[
+                {
+                  title: "Collections Priority",
+                  subtitle: "Overdue customers with current-period revenue and open exposure",
+                  rows: intelligence?.collections_priority ?? [],
+                  showOverdue: true,
+                },
+                {
+                  title: "Dormant Customers",
+                  subtitle: "Previously active accounts with no invoice in the last 180 days",
+                  rows: intelligence?.dormant_customers ?? [],
+                  showOverdue: false,
+                },
+              ].map((section) => (
+                <div key={section.title}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">{section.title}</p>
+                  <p className="mb-2 mt-1 text-xs text-muted">{section.subtitle}</p>
+                  <div className="space-y-2">
+                    {section.rows.length ? section.rows.map((row) => (
+                      <button
+                        key={`${section.title}-${row.customer_id}`}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition hover:border-primary/30 hover:bg-secondary/40"
+                        onClick={() => navigate(`/sales/customers/${row.customer_id}`)}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{row.customer_name}</p>
+                          <p className="text-xs text-muted">{row.customer_number ? `#${row.customer_number}` : "No customer number"} · {row.last_invoice_date ? new Date(row.last_invoice_date).toLocaleDateString() : "No invoice date"}</p>
+                        </div>
+                        <span className="text-sm font-semibold">
+                          {section.showOverdue ? formatCurrency(row.overdue_amount) : formatCurrency(row.revenue)}
+                        </span>
+                      </button>
+                    )) : (
+                      <p className="rounded-xl border border-dashed border-border px-3 py-4 text-sm text-muted">Nothing surfaced here for the current data set.</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {intelligenceLoading ? (
+          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted">
+            Loading customer intelligence...
+          </div>
+        ) : null}
+      </div>
 
       <div className="app-card space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">

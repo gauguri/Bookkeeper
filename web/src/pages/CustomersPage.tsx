@@ -396,10 +396,10 @@ export default function CustomersPage() {
 
       <div className="app-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed text-sm">
             <thead>
               <tr className="border-b bg-gray-50/80 dark:bg-gray-800/50">
-                <th className="px-4 py-3 text-left">
+                <th className="w-10 px-4 py-3 text-left">
                   <input
                     ref={selectAllRef}
                     type="checkbox"
@@ -408,28 +408,28 @@ export default function CustomersPage() {
                     aria-label="Select all visible customers"
                   />
                 </th>
-                <th className="px-4 py-3 text-left">
+                <th className="w-[46%] px-4 py-3 text-left">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("name")}>
                     Customer <SortIcon col="name" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right">
+                <th className="w-24 px-4 py-3 text-right">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("total_revenue")}>
                     YTD Revenue <SortIcon col="total_revenue" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right">
+                <th className="w-28 px-4 py-3 text-right">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("outstanding_ar")}>
                     Outstanding <SortIcon col="outstanding_ar" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right">
+                <th className="w-20 px-4 py-3 text-right">
                   <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted hover:text-foreground" onClick={() => handleSort("invoice_count")}>
                     Invoices <SortIcon col="invoice_count" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted">Payment</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted">Last Invoice</th>
+                <th className="w-24 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted">Payment</th>
+                <th className="w-28 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-muted">Last Invoice</th>
               </tr>
             </thead>
             <tbody>
@@ -460,7 +460,7 @@ export default function CustomersPage() {
                       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
                         {customer.name.charAt(0).toUpperCase()}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 max-w-full">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-medium">{customer.name}</span>
                           <TierBadge tier={customer.tier} />
@@ -491,7 +491,7 @@ export default function CustomersPage() {
                   <td className="px-4 py-3 text-center">
                     <PaymentScoreBadge score={customer.payment_score} />
                   </td>
-                  <td className="px-4 py-3 text-center text-xs text-muted tabular-nums">
+                  <td className="whitespace-nowrap px-4 py-3 text-center text-xs text-muted tabular-nums">
                     {customer.last_invoice_date ? new Date(customer.last_invoice_date).toLocaleDateString() : "-"}
                   </td>
                 </tr>

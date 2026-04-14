@@ -299,7 +299,7 @@ export default function ItemProfilePage() {
     { label: "Finish", value: item.finish || "-" },
     { label: "Category", value: item.category || "-" },
     { label: "Quantity", value: Number(kpis.on_hand_qty).toLocaleString() },
-    { label: "Sell Price", value: formatCurrency(Number(item.unit_price), true) },
+    { label: "Sales Price / Unit", value: formatCurrency(Number(item.unit_price), true) },
     { label: "Item Description", value: item.description || "-" },
     { label: "Sales Description", value: item.sales_description || "-" },
     { label: "Purchase Description", value: item.purchase_description || "-" },

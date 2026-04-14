@@ -473,7 +473,7 @@ export default function ItemProfilePage() {
                     <p className="mt-1 font-medium tabular-nums">{inventoryDetail.target_stock.toLocaleString()}</p>
                   </div>
                   <div className="rounded-xl border border-border/60 bg-background px-4 py-4 text-sm">
-                    <span className="text-xs text-muted">Inventory Value</span>
+                    <span className="text-xs text-muted">Inventory Value (Cost Basis)</span>
                     <p className="mt-1 font-medium tabular-nums">{formatCurrency(inventoryDetail.item.total_value, true)}</p>
                   </div>
                 </div>
@@ -600,7 +600,7 @@ export default function ItemProfilePage() {
                   { label: "On Hand Quantity", value: Number(kpis.on_hand_qty).toLocaleString() },
                   { label: "Reserved Quantity", value: Number(kpis.reserved_qty).toLocaleString() },
                   { label: "Available Quantity", value: Number(kpis.available_qty).toLocaleString() },
-                  { label: "Inventory Value", value: formatCurrency(Number(kpis.inventory_value), true) },
+                  { label: "Inventory Value (Cost Basis)", value: formatCurrency(Number(kpis.inventory_value), true) },
                   { label: "Avg Selling Price", value: kpis.avg_selling_price != null ? formatCurrency(Number(kpis.avg_selling_price), true) : "—" },
                   { label: "Reorder Point", value: item.reorder_point != null ? Number(item.reorder_point).toLocaleString() : "Not set" },
                 ].map((row) => (

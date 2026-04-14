@@ -576,3 +576,37 @@ class ItemsSummaryResponse(BaseModel):
     total_revenue_ytd: Decimal = Decimal("0")
     low_stock_items: int = 0
     out_of_stock_items: int = 0
+
+
+class ItemCatalogSpotlight(BaseModel):
+    item_id: int
+    item_code: Optional[str] = None
+    item_name: str
+    revenue: Decimal = Decimal("0")
+    units: Decimal = Decimal("0")
+    change_percent: Optional[float] = None
+    stock_status: str = "in_stock"
+    on_hand_qty: Decimal = Decimal("0")
+    inventory_value: Decimal = Decimal("0")
+
+
+class ItemCatalogTrendPoint(BaseModel):
+    period: str
+    item_id: int
+    item_code: Optional[str] = None
+    item_name: str
+    revenue: Decimal = Decimal("0")
+    units: Decimal = Decimal("0")
+
+
+class ItemCatalogIntelligenceResponse(BaseModel):
+    period: str
+    dead_stock_count: int = 0
+    low_stock_high_demand_count: int = 0
+    top_sellers: List[ItemCatalogSpotlight]
+    top_sellers_ytd: List[ItemCatalogSpotlight]
+    rising_items: List[ItemCatalogSpotlight]
+    declining_items: List[ItemCatalogSpotlight]
+    dead_stock: List[ItemCatalogSpotlight]
+    low_stock_high_demand: List[ItemCatalogSpotlight]
+    trend: List[ItemCatalogTrendPoint]

@@ -97,6 +97,25 @@ const emptyCatalogLinkForm: SupplierItemLinkForm = {
   is_preferred: false,
 };
 
+const supplierToForm = (supplier: Supplier) => ({
+  vendor_number: supplier.vendor_number ?? "",
+  name: supplier.name,
+  legal_name: supplier.legal_name ?? "",
+  website: supplier.website ?? "",
+  tax_id: supplier.tax_id ?? "",
+  status: supplier.status,
+  contact_name: supplier.contact_name ?? "",
+  email: supplier.email ?? "",
+  phone: supplier.phone ?? "",
+  remit_to_address: supplier.remit_to_address ?? "",
+  ship_from_address: supplier.ship_from_address ?? "",
+  default_lead_time_days: supplier.default_lead_time_days?.toString() ?? "",
+  payment_terms: supplier.payment_terms ?? "Net 30",
+  currency: supplier.currency ?? "USD",
+  shipping_terms: supplier.shipping_terms ?? "",
+  notes: supplier.notes ?? "",
+});
+
 export default function SuppliersPage() {
   const navigate = useNavigate();
   const { id: supplierRouteId } = useParams<{ id?: string }>();
@@ -193,25 +212,26 @@ export default function SuppliersPage() {
       return;
     }
 
-    const supplierId = Number(supplierRouteId);
-    if (!Number.isFinite(supplierId)) {
-      routeSupplierHandledRef.current = supplierRouteId;
+    if (!routeSupplier) {
       return;
     }
 
-    const routeSupplier =
-      supplierUniverse.find((supplier) => supplier.id === supplierId) ??
-      suppliers.find((supplier) => supplier.id === supplierId);
-
-    if (!routeSupplier) {
+    if (!Number.isFinite(Number(supplierRouteId))) {
+      routeSupplierHandledRef.current = supplierRouteId;
       return;
     }
 
     routeSupplierHandledRef.current = supplierRouteId;
     setSelected(routeSupplier);
     void loadCatalog(routeSupplier.id);
-    openEditModal(routeSupplier);
-  }, [supplierRouteId, supplierUniverse, suppliers]);
+    const nextForm = supplierToForm(routeSupplier);
+    setEditingId(routeSupplier.id);
+    setForm(nextForm);
+    setInitialForm(nextForm);
+    setFormErrors({});
+    setFormSubmitError("");
+    setShowForm(false);
+  }, [supplierRouteId, routeSupplier]);
 
   const loadCatalog = async (supplierId: number) => {
     try {
@@ -243,6 +263,13 @@ export default function SuppliersPage() {
   const visibleSupplierIds = useMemo(() => suppliers.map((supplier) => supplier.id), [suppliers]);
   const allVisibleSelected = visibleSupplierIds.length > 0 && visibleSupplierIds.every((id) => selectedRows.includes(id));
   const someVisibleSelected = visibleSupplierIds.some((id) => selectedRows.includes(id));
+  const routeSupplier = useMemo(() => {
+    if (!supplierRouteId) return null;
+    const supplierId = Number(supplierRouteId);
+    if (!Number.isFinite(supplierId)) return null;
+    return supplierUniverse.find((supplier) => supplier.id === supplierId) ?? suppliers.find((supplier) => supplier.id === supplierId) ?? null;
+  }, [supplierRouteId, supplierUniverse, suppliers]);
+  const isSupplierDetailPage = Boolean(supplierRouteId);
 
   useEffect(() => {
     if (!selectAllRef.current) return;
@@ -412,24 +439,7 @@ export default function SuppliersPage() {
   };
 
   const openEditModal = (supplier: Supplier) => {
-    const nextForm = {
-      vendor_number: supplier.vendor_number ?? "",
-      name: supplier.name,
-      legal_name: supplier.legal_name ?? "",
-      website: supplier.website ?? "",
-      tax_id: supplier.tax_id ?? "",
-      status: supplier.status,
-      contact_name: supplier.contact_name ?? "",
-      email: supplier.email ?? "",
-      phone: supplier.phone ?? "",
-      remit_to_address: supplier.remit_to_address ?? "",
-      ship_from_address: supplier.ship_from_address ?? "",
-      default_lead_time_days: supplier.default_lead_time_days?.toString() ?? "",
-      payment_terms: supplier.payment_terms ?? "Net 30",
-      currency: supplier.currency ?? "USD",
-      shipping_terms: supplier.shipping_terms ?? "",
-      notes: supplier.notes ?? "",
-    };
+    const nextForm = supplierToForm(supplier);
     setEditingId(supplier.id);
     setForm(nextForm);
     setInitialForm(nextForm);
@@ -513,6 +523,95 @@ export default function SuppliersPage() {
       {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
       {toast ? <div className="rounded-xl border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">{toast}</div> : null}
 
+      {isSupplierDetailPage ? (
+        loading && !routeSupplier ? (
+          <div className="h-52 animate-pulse rounded-xl bg-secondary" />
+        ) : routeSupplier ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <button className="app-button-ghost" onClick={() => navigate("/procurement/suppliers")}>Back to Suppliers</button>
+              <div className="flex flex-wrap gap-2">
+                <button className="app-button-secondary" onClick={() => void saveSupplier(false)} disabled={savingSupplier}>Save Draft</button>
+                <button className="app-button" onClick={() => void saveSupplier(false)} disabled={savingSupplier}>{savingSupplier ? "Saving..." : "Save"}</button>
+                <button className="app-button-secondary" onClick={() => void saveSupplier(true)} disabled={savingSupplier}>Save & Add Catalog Items</button>
+              </div>
+            </div>
+
+            <div className="app-card p-6">
+              <div className="mb-6">
+                <h2 className="text-2xl font-semibold">{routeSupplier.name}</h2>
+                <p className="text-sm text-muted">Supplier detail and procurement master data.</p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {formSubmitError ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger md:col-span-2">{formSubmitError}</div> : null}
+                <label className="text-sm">Vendor Number<input className="app-input mt-1 w-full" value={form.vendor_number} onChange={(e) => setForm((p) => ({ ...p, vendor_number: e.target.value }))} /></label>
+                <label className="text-sm">Status<select className="app-input mt-1 w-full" value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as "active" | "inactive" }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+                <label className="text-sm md:col-span-2">Supplier name *<input className="app-input mt-1 w-full" value={form.name} onChange={(e) => { setForm((p) => ({ ...p, name: e.target.value })); setFormErrors((prev) => ({ ...prev, name: undefined })); }} />{formErrors.name ? <span className="mt-1 block text-xs text-danger">{formErrors.name}</span> : null}</label>
+                <label className="text-sm">Legal name<input className="app-input mt-1 w-full" value={form.legal_name} onChange={(e) => setForm((p) => ({ ...p, legal_name: e.target.value }))} /></label>
+                <label className="text-sm">Website<input className="app-input mt-1 w-full" value={form.website} onChange={(e) => { setForm((p) => ({ ...p, website: e.target.value })); setFormErrors((prev) => ({ ...prev, website: undefined })); }} placeholder="https://" />{formErrors.website ? <span className="mt-1 block text-xs text-danger">{formErrors.website}</span> : null}</label>
+                <label className="text-sm">Contact name<input className="app-input mt-1 w-full" value={form.contact_name} onChange={(e) => setForm((p) => ({ ...p, contact_name: e.target.value }))} /></label>
+                <label className="text-sm">Email<input className="app-input mt-1 w-full" value={form.email} onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFormErrors((prev) => ({ ...prev, email: undefined })); }} />{formErrors.email ? <span className="mt-1 block text-xs text-danger">{formErrors.email}</span> : null}</label>
+                <label className="text-sm">Phone<input className="app-input mt-1 w-full" value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} /></label>
+                <label className="text-sm">Tax ID<input className="app-input mt-1 w-full" value={form.tax_id} onChange={(e) => setForm((p) => ({ ...p, tax_id: e.target.value }))} /></label>
+                <label className="text-sm md:col-span-2">Remit-to address<textarea className="app-input mt-1 w-full" value={form.remit_to_address} onChange={(e) => setForm((p) => ({ ...p, remit_to_address: e.target.value }))} /></label>
+                <label className="text-sm md:col-span-2">Ship-from address<textarea className="app-input mt-1 w-full" value={form.ship_from_address} onChange={(e) => setForm((p) => ({ ...p, ship_from_address: e.target.value }))} /></label>
+                <label className="text-sm">Lead time days<input className="app-input mt-1 w-full" type="number" min={0} value={form.default_lead_time_days} onChange={(e) => setForm((p) => ({ ...p, default_lead_time_days: e.target.value }))} /></label>
+                <label className="text-sm">Payment terms<input className="app-input mt-1 w-full" value={form.payment_terms} onChange={(e) => setForm((p) => ({ ...p, payment_terms: e.target.value }))} /></label>
+                <label className="text-sm">Currency<input className="app-input mt-1 w-full" value={form.currency} onChange={(e) => setForm((p) => ({ ...p, currency: e.target.value }))} /></label>
+                <label className="text-sm">Shipping terms<input className="app-input mt-1 w-full" value={form.shipping_terms} onChange={(e) => setForm((p) => ({ ...p, shipping_terms: e.target.value }))} /></label>
+                <label className="text-sm md:col-span-2">Notes<textarea className="app-input mt-1 w-full" value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} /></label>
+              </div>
+            </div>
+
+            <div className="app-card p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">Supplier Catalog</h3>
+                  <p className="text-sm text-muted">Items currently linked to this supplier.</p>
+                </div>
+                <button className="app-button-secondary" onClick={openCatalogPicker}>Link Item</button>
+              </div>
+              <div className="overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-xs uppercase tracking-wider text-muted">
+                    <tr>
+                      <th>Item</th>
+                      <th>SKU</th>
+                      <th>Supplier SKU</th>
+                      <th>Cost</th>
+                      <th>Landed</th>
+                      <th>Lead Time</th>
+                      <th>MOQ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catalog.length === 0 ? (
+                      <tr><td colSpan={7} className="border-t py-6 text-center text-muted">No catalog items linked yet.</td></tr>
+                    ) : catalog.map((row) => (
+                      <tr key={row.id} className="border-t">
+                        <td className="py-3">{row.item_name}</td>
+                        <td>{row.item_sku ?? "-"}</td>
+                        <td>{row.supplier_sku ?? "-"}</td>
+                        <td>{formatCurrency(row.default_unit_cost)}</td>
+                        <td>{formatCurrency(Number(row.default_unit_cost ?? 0))}</td>
+                        <td>{row.lead_time_days ?? "-"}</td>
+                        <td>{row.min_order_qty ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="app-card p-6">
+            <h2 className="text-xl font-semibold">Supplier not found</h2>
+            <p className="mt-2 text-sm text-muted">The requested supplier could not be found.</p>
+            <button className="app-button mt-4" onClick={() => navigate("/procurement/suppliers")}>Back to Suppliers</button>
+          </div>
+        )
+      ) : (
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
         {[
           { label: "Active Suppliers", value: summary?.active_suppliers ?? 0, onClick: () => setQueue("active") },
@@ -563,8 +662,9 @@ export default function SuppliersPage() {
           </div>
         </div>
       </div>
+      )}
 
-      {showForm ? (
+      {showForm && !isSupplierDetailPage ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50" onClick={requestCloseModal}>
           <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title" className="app-card flex max-h-[88vh] w-[min(95vw,1000px)] flex-col overflow-hidden p-0" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between border-b px-6 py-4">

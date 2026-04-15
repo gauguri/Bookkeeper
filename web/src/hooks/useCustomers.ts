@@ -38,6 +38,46 @@ export type CustomersSummary = {
   customers_at_risk: number;
 };
 
+export type CustomerIntelligenceSpotlight = {
+  customer_id: number;
+  customer_number?: string | null;
+  customer_name: string;
+  revenue: number;
+  outstanding_ar: number;
+  overdue_amount: number;
+  invoice_count: number;
+  last_invoice_date: string | null;
+  payment_score: "good" | "average" | "slow" | "at-risk";
+  change_percent: number | null;
+};
+
+export type CustomerRevenueTrendSeriesPoint = {
+  period: string;
+  customer_id: number;
+  customer_name: string;
+  customer_number?: string | null;
+  revenue: number;
+};
+
+export type CustomerRevenueConcentration = {
+  top_customer_share_percent: number;
+  top_5_share_percent: number;
+  top_10_share_percent: number;
+};
+
+export type CustomerIntelligence = {
+  period: "mtd" | "qtd" | "ytd" | "ltm";
+  dormant_count: number;
+  collections_priority_count: number;
+  fastest_growing: CustomerIntelligenceSpotlight[];
+  biggest_declines: CustomerIntelligenceSpotlight[];
+  largest_overdue: CustomerIntelligenceSpotlight[];
+  dormant_customers: CustomerIntelligenceSpotlight[];
+  collections_priority: CustomerIntelligenceSpotlight[];
+  concentration: CustomerRevenueConcentration;
+  trend: CustomerRevenueTrendSeriesPoint[];
+};
+
 export type CustomerKpis = {
   lifetime_revenue: number;
   ytd_revenue: number;
@@ -139,6 +179,14 @@ export function useCustomersSummary() {
   return useQuery({
     queryKey: ["customers", "summary"],
     queryFn: () => apiFetch<CustomersSummary>("/customers-summary"),
+    staleTime: 30_000,
+  });
+}
+
+export function useCustomersIntelligence(period: "mtd" | "qtd" | "ytd" | "ltm" = "ytd", topN = 5) {
+  return useQuery({
+    queryKey: ["customers", "intelligence", period, topN],
+    queryFn: () => apiFetch<CustomerIntelligence>(`/customers-intelligence?period=${period}&top_n=${topN}`),
     staleTime: 30_000,
   });
 }

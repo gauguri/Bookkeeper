@@ -42,6 +42,40 @@ export type ItemsSummary = {
   out_of_stock_items: number;
 };
 
+export type ItemCatalogSpotlight = {
+  item_id: number;
+  item_code?: string | null;
+  item_name: string;
+  revenue: number;
+  units: number;
+  change_percent: number | null;
+  stock_status: "in_stock" | "low_stock" | "out_of_stock" | "overstocked";
+  on_hand_qty: number;
+  inventory_value: number;
+};
+
+export type ItemCatalogTrendPoint = {
+  period: string;
+  item_id: number;
+  item_code?: string | null;
+  item_name: string;
+  revenue: number;
+  units: number;
+};
+
+export type ItemCatalogIntelligence = {
+  period: "mtd" | "qtd" | "ytd" | "ltm";
+  dead_stock_count: number;
+  low_stock_high_demand_count: number;
+  top_sellers: ItemCatalogSpotlight[];
+  top_sellers_ytd: ItemCatalogSpotlight[];
+  rising_items: ItemCatalogSpotlight[];
+  declining_items: ItemCatalogSpotlight[];
+  dead_stock: ItemCatalogSpotlight[];
+  low_stock_high_demand: ItemCatalogSpotlight[];
+  trend: ItemCatalogTrendPoint[];
+};
+
 export type ItemKpis = {
   total_revenue: number;
   ytd_revenue: number;
@@ -165,6 +199,14 @@ export function useItemsSummary() {
   return useQuery({
     queryKey: ["items", "summary"],
     queryFn: () => apiFetch<ItemsSummary>("/items-summary"),
+    staleTime: 30_000,
+  });
+}
+
+export function useItemsCatalogIntelligence(period: "mtd" | "qtd" | "ytd" | "ltm" = "ytd", topN = 5) {
+  return useQuery({
+    queryKey: ["items", "catalog-intelligence", period, topN],
+    queryFn: () => apiFetch<ItemCatalogIntelligence>(`/items-catalog-intelligence?period=${period}&top_n=${topN}`),
     staleTime: 30_000,
   });
 }

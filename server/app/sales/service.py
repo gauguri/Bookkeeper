@@ -3,7 +3,7 @@ from decimal import Decimal
 import logging
 from typing import Iterable, List, Optional, Sequence
 
-from sqlalchemy import func, text
+from sqlalchemy import case, func, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.accounting.gl_engine import postJournalEntries
@@ -53,6 +53,366 @@ def _resolve_inventory_value(item: Item, inventory: Inventory | None, on_hand: D
     if on_hand <= 0:
         return Decimal("0.00")
     return quantize_money(on_hand * _resolve_inventory_unit_cost(item, inventory))
+
+
+def _quarter_start(value: date) -> date:
+    quarter_month = ((value.month - 1) // 3) * 3 + 1
+    return date(value.year, quarter_month, 1)
+
+
+def _period_start(today: date, period: str) -> date:
+    normalized = period.lower()
+    if normalized == "mtd":
+        return date(today.year, today.month, 1)
+    if normalized == "qtd":
+        return _quarter_start(today)
+    if normalized == "ytd":
+        return date(today.year, 1, 1)
+    if normalized == "ltm":
+        return today - timedelta(days=365)
+    return date(today.year, 1, 1)
+
+
+def _month_floor(value: date) -> date:
+    return date(value.year, value.month, 1)
+
+
+def _add_months(value: date, months: int) -> date:
+    month_index = (value.month - 1) + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, 1)
+
+
+def get_items_catalog_intelligence(db: Session, *, period: str = "ytd", top_n: int = 5) -> dict:
+    from app.models import Inventory
+
+    today = date.today()
+    active_period = period.lower()
+    current_start = _period_start(today, active_period)
+    current_month_start = date(today.year, today.month, 1)
+    previous_month_start = _add_months(current_month_start, -1)
+    sales_90d_start = today - timedelta(days=90)
+    dead_stock_cutoff = today - timedelta(days=180)
+    trend_start = _add_months(current_month_start, -11)
+    ytd_start = date(today.year, 1, 1)
+
+    item_rows = (
+        db.query(Item)
+        .options(selectinload(Item.supplier_items))
+        .filter(Item.is_active == True)
+        .all()
+    )
+    item_map = {item.id: item for item in item_rows}
+    item_ids = list(item_map.keys())
+    if not item_ids:
+        return {
+            "period": active_period,
+            "dead_stock_count": 0,
+            "low_stock_high_demand_count": 0,
+            "top_sellers": [],
+            "top_sellers_ytd": [],
+            "rising_items": [],
+            "declining_items": [],
+            "dead_stock": [],
+            "low_stock_high_demand": [],
+            "trend": [],
+        }
+
+    inventory_rows = db.query(Inventory).filter(Inventory.item_id.in_(item_ids)).all()
+    inventory_map = {row.item_id: row for row in inventory_rows}
+
+    def item_state(item_id: int) -> dict:
+        item = item_map[item_id]
+        inv = inventory_map.get(item_id)
+        on_hand = Decimal(inv.quantity_on_hand or 0) if inv else Decimal(item.on_hand_qty or 0)
+        reserved = Decimal(item.reserved_qty or 0)
+        reorder = Decimal(item.reorder_point or 0) if item.reorder_point else None
+        return {
+            "on_hand": on_hand,
+            "inventory_value": _resolve_inventory_value(item, inv, on_hand),
+            "stock_status": _stock_status(on_hand, reserved, reorder),
+        }
+
+    current_rows = (
+        db.query(
+            InvoiceLine.item_id.label("item_id"),
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.quantity), 0).label("units"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= current_start,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .group_by(InvoiceLine.item_id)
+        .all()
+    )
+    current_map = {
+        row.item_id: {
+            "revenue": Decimal(row.revenue or 0),
+            "units": Decimal(row.units or 0),
+        }
+        for row in current_rows
+    }
+
+    ytd_rows = (
+        db.query(
+            InvoiceLine.item_id.label("item_id"),
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.quantity), 0).label("units"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= ytd_start,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .group_by(InvoiceLine.item_id)
+        .all()
+    )
+    ytd_map = {
+        row.item_id: {
+            "revenue": Decimal(row.revenue or 0),
+            "units": Decimal(row.units or 0),
+        }
+        for row in ytd_rows
+    }
+
+    monthly_compare_rows = (
+        db.query(
+            InvoiceLine.item_id.label("item_id"),
+            func.coalesce(
+                func.sum(
+                    InvoiceLine.line_total
+                    * case((Invoice.issue_date >= current_month_start, 1), else_=0)
+                ),
+                0,
+            ).label("current_revenue"),
+            func.coalesce(
+                func.sum(
+                    InvoiceLine.line_total
+                    * case(
+                        (
+                            (Invoice.issue_date >= previous_month_start) & (Invoice.issue_date < current_month_start),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("previous_revenue"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= previous_month_start,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .group_by(InvoiceLine.item_id)
+        .all()
+    )
+    compare_map = {
+        row.item_id: {
+            "current": Decimal(row.current_revenue or 0),
+            "previous": Decimal(row.previous_revenue or 0),
+        }
+        for row in monthly_compare_rows
+    }
+
+    sold_90d_rows = (
+        db.query(
+            InvoiceLine.item_id.label("item_id"),
+            func.coalesce(func.sum(InvoiceLine.quantity), 0).label("units"),
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= sales_90d_start,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .group_by(InvoiceLine.item_id)
+        .all()
+    )
+    sold_90d_map = {
+        row.item_id: {
+            "units": Decimal(row.units or 0),
+            "revenue": Decimal(row.revenue or 0),
+        }
+        for row in sold_90d_rows
+    }
+
+    recently_sold_ids = {
+        row.item_id
+        for row in db.query(InvoiceLine.item_id)
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= dead_stock_cutoff,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .distinct()
+        .all()
+    }
+
+    trend_rows = (
+        db.query(
+            InvoiceLine.item_id.label("item_id"),
+            Invoice.issue_date.label("issue_date"),
+            func.coalesce(func.sum(InvoiceLine.line_total), 0).label("revenue"),
+            func.coalesce(func.sum(InvoiceLine.quantity), 0).label("units"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.status != "VOID",
+            Invoice.issue_date >= trend_start,
+            InvoiceLine.item_id.isnot(None),
+            InvoiceLine.item_id.in_(item_ids),
+        )
+        .group_by(InvoiceLine.item_id, Invoice.issue_date)
+        .all()
+    )
+
+    def build_spotlight(item_id: int, revenue: Decimal, units: Decimal, change_percent: float | None = None) -> dict:
+        item = item_map[item_id]
+        state = item_state(item_id)
+        return {
+            "item_id": item.id,
+            "item_code": item.item_code or item.sku,
+            "item_name": item.name,
+            "revenue": quantize_money(revenue),
+            "units": units,
+            "change_percent": change_percent,
+            "stock_status": state["stock_status"],
+            "on_hand_qty": state["on_hand"],
+            "inventory_value": state["inventory_value"],
+        }
+
+    top_sellers = [
+        build_spotlight(item_id, data["revenue"], data["units"])
+        for item_id, data in sorted(
+            current_map.items(),
+            key=lambda entry: (entry[1]["revenue"], entry[1]["units"]),
+            reverse=True,
+        )[:top_n]
+    ]
+
+    top_sellers_ytd = [
+        build_spotlight(item_id, data["revenue"], data["units"])
+        for item_id, data in sorted(
+            ytd_map.items(),
+            key=lambda entry: (entry[1]["revenue"], entry[1]["units"]),
+            reverse=True,
+        )[:top_n]
+    ]
+
+    rising_candidates: list[dict] = []
+    declining_candidates: list[dict] = []
+    for item_id, data in compare_map.items():
+        current_revenue = data["current"]
+        previous_revenue = data["previous"]
+        if current_revenue <= 0 and previous_revenue <= 0:
+            continue
+        change = current_revenue - previous_revenue
+        baseline = previous_revenue if previous_revenue > 0 else Decimal("1.00")
+        change_percent = float((change / baseline) * Decimal("100"))
+        spotlight = build_spotlight(
+            item_id,
+            current_revenue,
+            current_map.get(item_id, {}).get("units", Decimal("0")),
+            change_percent=change_percent,
+        )
+        spotlight["_change_value"] = change
+        if change > 0:
+            rising_candidates.append(spotlight)
+        elif change < 0:
+            declining_candidates.append(spotlight)
+
+    rising_items = sorted(
+        rising_candidates,
+        key=lambda row: (row["_change_value"], row["revenue"]),
+        reverse=True,
+    )[:top_n]
+    declining_items = sorted(
+        declining_candidates,
+        key=lambda row: (row["_change_value"], -row["revenue"]),
+    )[:top_n]
+    for row in rising_items + declining_items:
+        row.pop("_change_value", None)
+
+    dead_stock: list[dict] = []
+    low_stock_high_demand: list[dict] = []
+    for item_id, item in item_map.items():
+        state = item_state(item_id)
+        on_hand = state["on_hand"]
+        if on_hand >= 1 and item_id not in recently_sold_ids:
+            dead_stock.append(
+                build_spotlight(item_id, Decimal("0"), Decimal("0"))
+            )
+        recent = sold_90d_map.get(item_id)
+        if not recent or recent["units"] <= 0:
+            continue
+        reorder = Decimal(item.reorder_point or 0) if item.reorder_point else Decimal("0")
+        if state["stock_status"] == "low_stock" or (reorder > 0 and on_hand <= reorder):
+            low_stock_high_demand.append(
+                build_spotlight(item_id, recent["revenue"], recent["units"])
+            )
+
+    dead_stock_count = len(dead_stock)
+    low_stock_high_demand_count = len(low_stock_high_demand)
+
+    dead_stock = sorted(dead_stock, key=lambda row: row["inventory_value"], reverse=True)[:top_n]
+    low_stock_high_demand = sorted(
+        low_stock_high_demand,
+        key=lambda row: (row["units"], row["revenue"]),
+        reverse=True,
+    )[:top_n]
+
+    trend_item_ids = [row["item_id"] for row in top_sellers_ytd[:top_n]]
+    trend_map: dict[tuple[int, str], dict[str, Decimal]] = {}
+    for row in trend_rows:
+        if row.item_id not in trend_item_ids or row.issue_date is None:
+            continue
+        period_key = row.issue_date.strftime("%Y-%m")
+        bucket = trend_map.setdefault((row.item_id, period_key), {"revenue": Decimal("0"), "units": Decimal("0")})
+        bucket["revenue"] += Decimal(row.revenue or 0)
+        bucket["units"] += Decimal(row.units or 0)
+    trend_points: list[dict] = []
+    month_cursor = trend_start
+    while month_cursor <= current_month_start:
+        period_label = month_cursor.strftime("%Y-%m")
+        for item_id in trend_item_ids:
+            item = item_map[item_id]
+            row = trend_map.get((item_id, period_label))
+            trend_points.append({
+                "period": period_label,
+                "item_id": item_id,
+                "item_code": item.item_code or item.sku,
+                "item_name": item.name,
+                "revenue": quantize_money(Decimal(row["revenue"] or 0)) if row else Decimal("0.00"),
+                "units": Decimal(row["units"] or 0) if row else Decimal("0"),
+            })
+        month_cursor = _add_months(month_cursor, 1)
+
+    return {
+        "period": active_period,
+        "dead_stock_count": dead_stock_count,
+        "low_stock_high_demand_count": low_stock_high_demand_count,
+        "top_sellers": top_sellers,
+        "top_sellers_ytd": top_sellers_ytd,
+        "rising_items": rising_items,
+        "declining_items": declining_items,
+        "dead_stock": dead_stock,
+        "low_stock_high_demand": low_stock_high_demand,
+        "trend": trend_points,
+    }
 
 
 def get_customer_insights(db: Session, customer_id: int) -> dict:
@@ -1031,6 +1391,287 @@ def get_customers_enriched(
             "payment_score": score,
         })
     return result
+
+
+def get_customers_intelligence(db: Session, *, period: str = "ytd", top_n: int = 5) -> dict:
+    today = date.today()
+    active_period = period.lower()
+    current_start = _period_start(today, active_period)
+    current_days = max((today - current_start).days, 0)
+    previous_end = current_start - timedelta(days=1)
+    previous_start = previous_end - timedelta(days=current_days)
+    dormancy_cutoff = today - timedelta(days=180)
+    current_month_start = date(today.year, today.month, 1)
+    trend_start = _add_months(current_month_start, -11)
+
+    customers = db.query(Customer).filter(Customer.is_active == True).all()
+    customer_map = {customer.id: customer for customer in customers}
+    customer_ids = list(customer_map.keys())
+    if not customer_ids:
+        return {
+            "period": active_period,
+            "dormant_count": 0,
+            "collections_priority_count": 0,
+            "fastest_growing": [],
+            "biggest_declines": [],
+            "largest_overdue": [],
+            "dormant_customers": [],
+            "collections_priority": [],
+            "concentration": {
+                "top_customer_share_percent": 0,
+                "top_5_share_percent": 0,
+                "top_10_share_percent": 0,
+            },
+            "trend": [],
+        }
+
+    current_rows = (
+        db.query(
+            Invoice.customer_id.label("customer_id"),
+            func.coalesce(func.sum(Invoice.total), 0).label("revenue"),
+            func.count(Invoice.id).label("invoice_count"),
+        )
+        .filter(
+            Invoice.customer_id.in_(customer_ids),
+            Invoice.status != "VOID",
+            Invoice.issue_date >= current_start,
+            Invoice.issue_date <= today,
+        )
+        .group_by(Invoice.customer_id)
+        .all()
+    )
+    current_map = {
+        row.customer_id: {
+            "revenue": Decimal(row.revenue or 0),
+            "invoice_count": int(row.invoice_count or 0),
+        }
+        for row in current_rows
+    }
+
+    previous_map: dict[int, Decimal] = {}
+    if previous_end >= previous_start:
+        previous_rows = (
+            db.query(
+                Invoice.customer_id.label("customer_id"),
+                func.coalesce(func.sum(Invoice.total), 0).label("revenue"),
+            )
+            .filter(
+                Invoice.customer_id.in_(customer_ids),
+                Invoice.status != "VOID",
+                Invoice.issue_date >= previous_start,
+                Invoice.issue_date <= previous_end,
+            )
+            .group_by(Invoice.customer_id)
+            .all()
+        )
+        previous_map = {row.customer_id: Decimal(row.revenue or 0) for row in previous_rows}
+
+    outstanding_rows = (
+        db.query(
+            Invoice.customer_id.label("customer_id"),
+            func.coalesce(func.sum(Invoice.amount_due), 0).label("outstanding"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (((Invoice.due_date < today) & (Invoice.amount_due > 0)), Invoice.amount_due),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("overdue"),
+        )
+        .filter(
+            Invoice.customer_id.in_(customer_ids),
+            Invoice.status != "VOID",
+            Invoice.amount_due > 0,
+        )
+        .group_by(Invoice.customer_id)
+        .all()
+    )
+    outstanding_map = {
+        row.customer_id: {
+            "outstanding": Decimal(row.outstanding or 0),
+            "overdue": Decimal(row.overdue or 0),
+        }
+        for row in outstanding_rows
+    }
+
+    lifetime_rows = (
+        db.query(
+            Invoice.customer_id.label("customer_id"),
+            func.coalesce(func.sum(Invoice.total), 0).label("revenue"),
+            func.count(Invoice.id).label("invoice_count"),
+            func.max(Invoice.issue_date).label("last_invoice_date"),
+        )
+        .filter(
+            Invoice.customer_id.in_(customer_ids),
+            Invoice.status != "VOID",
+        )
+        .group_by(Invoice.customer_id)
+        .all()
+    )
+    lifetime_map = {
+        row.customer_id: {
+            "revenue": Decimal(row.revenue or 0),
+            "invoice_count": int(row.invoice_count or 0),
+            "last_invoice_date": row.last_invoice_date,
+        }
+        for row in lifetime_rows
+    }
+
+    trend_rows = (
+        db.query(
+            Invoice.customer_id.label("customer_id"),
+            Invoice.issue_date.label("issue_date"),
+            func.coalesce(func.sum(Invoice.total), 0).label("revenue"),
+        )
+        .filter(
+            Invoice.customer_id.in_(customer_ids),
+            Invoice.status != "VOID",
+            Invoice.issue_date >= trend_start,
+            Invoice.issue_date <= today,
+        )
+        .group_by(Invoice.customer_id, Invoice.issue_date)
+        .all()
+    )
+
+    def payment_score(customer_id: int) -> str:
+        outstanding = outstanding_map.get(customer_id, {}).get("outstanding", Decimal("0"))
+        overdue = outstanding_map.get(customer_id, {}).get("overdue", Decimal("0"))
+        if overdue <= 0:
+            return "good"
+        overdue_ratio = float(overdue / outstanding) if outstanding > 0 else 1.0
+        if overdue_ratio > 0.5:
+            return "at-risk"
+        if overdue_ratio > 0.2:
+            return "slow"
+        return "average"
+
+    def spotlight(customer_id: int, revenue: Decimal, change_percent: float | None = None) -> dict:
+        customer = customer_map[customer_id]
+        outstanding = outstanding_map.get(customer_id, {})
+        lifetime = lifetime_map.get(customer_id, {})
+        return {
+            "customer_id": customer.id,
+            "customer_number": customer.customer_number,
+            "customer_name": customer.name,
+            "revenue": quantize_money(revenue),
+            "outstanding_ar": quantize_money(outstanding.get("outstanding", Decimal("0"))),
+            "overdue_amount": quantize_money(outstanding.get("overdue", Decimal("0"))),
+            "invoice_count": int(current_map.get(customer_id, {}).get("invoice_count", lifetime.get("invoice_count", 0))),
+            "last_invoice_date": lifetime.get("last_invoice_date"),
+            "payment_score": payment_score(customer_id),
+            "change_percent": change_percent,
+        }
+
+    fastest_growing_candidates: list[dict] = []
+    biggest_declines_candidates: list[dict] = []
+    for customer_id in customer_ids:
+        current_revenue = current_map.get(customer_id, {}).get("revenue", Decimal("0"))
+        previous_revenue = previous_map.get(customer_id, Decimal("0"))
+        if current_revenue <= 0 and previous_revenue <= 0:
+            continue
+        change_value = current_revenue - previous_revenue
+        baseline = previous_revenue if previous_revenue > 0 else Decimal("1.00")
+        change_percent = float((change_value / baseline) * Decimal("100"))
+        row = spotlight(customer_id, current_revenue, change_percent)
+        row["_change"] = change_value
+        if change_value > 0:
+            fastest_growing_candidates.append(row)
+        elif change_value < 0:
+            biggest_declines_candidates.append(row)
+
+    fastest_growing = sorted(
+        fastest_growing_candidates,
+        key=lambda row: (row["_change"], row["revenue"]),
+        reverse=True,
+    )[:top_n]
+    biggest_declines = sorted(
+        biggest_declines_candidates,
+        key=lambda row: (row["_change"], -row["revenue"]),
+    )[:top_n]
+    for row in fastest_growing + biggest_declines:
+        row.pop("_change", None)
+
+    largest_overdue = [
+        spotlight(customer_id, current_map.get(customer_id, {}).get("revenue", Decimal("0")))
+        for customer_id, amounts in sorted(
+            outstanding_map.items(),
+            key=lambda entry: (entry[1]["overdue"], entry[1]["outstanding"]),
+            reverse=True,
+        )
+        if amounts["overdue"] > 0
+    ][:top_n]
+
+    dormant_candidates = [
+        spotlight(customer_id, lifetime_map.get(customer_id, {}).get("revenue", Decimal("0")))
+        for customer_id, data in lifetime_map.items()
+        if data.get("invoice_count", 0) > 0 and data.get("last_invoice_date") and data["last_invoice_date"] < dormancy_cutoff
+    ]
+    dormant_count = len(dormant_candidates)
+    dormant_customers = sorted(
+        dormant_candidates,
+        key=lambda row: (row["revenue"], row["overdue_amount"]),
+        reverse=True,
+    )[:top_n]
+
+    collections_candidates = [
+        spotlight(customer_id, current_map.get(customer_id, {}).get("revenue", Decimal("0")))
+        for customer_id, amounts in outstanding_map.items()
+        if amounts["overdue"] > 0 and current_map.get(customer_id, {}).get("revenue", Decimal("0")) > 0
+    ]
+    collections_priority_count = len(collections_candidates)
+    collections_priority = sorted(
+        collections_candidates,
+        key=lambda row: (row["overdue_amount"], row["revenue"], row["outstanding_ar"]),
+        reverse=True,
+    )[:top_n]
+
+    current_total = sum((values.get("revenue", Decimal("0")) for values in current_map.values()), Decimal("0"))
+    sorted_current = sorted(current_map.items(), key=lambda entry: entry[1]["revenue"], reverse=True)
+    top_customer_share = float((sorted_current[0][1]["revenue"] / current_total) * Decimal("100")) if current_total > 0 and sorted_current else 0.0
+    top_5_share = float((sum((row[1]["revenue"] for row in sorted_current[:5]), Decimal("0")) / current_total) * Decimal("100")) if current_total > 0 else 0.0
+    top_10_share = float((sum((row[1]["revenue"] for row in sorted_current[:10]), Decimal("0")) / current_total) * Decimal("100")) if current_total > 0 else 0.0
+
+    trend_customer_ids = [customer_id for customer_id, _ in sorted_current[:top_n]]
+    trend_map: dict[tuple[int, str], Decimal] = {}
+    for row in trend_rows:
+        if row.customer_id not in trend_customer_ids or row.issue_date is None:
+            continue
+        period_key = row.issue_date.strftime("%Y-%m")
+        trend_map[(row.customer_id, period_key)] = trend_map.get((row.customer_id, period_key), Decimal("0")) + Decimal(row.revenue or 0)
+
+    trend: list[dict] = []
+    month_cursor = trend_start
+    while month_cursor <= current_month_start:
+        period_label = month_cursor.strftime("%Y-%m")
+        for customer_id in trend_customer_ids:
+            customer = customer_map[customer_id]
+            trend.append({
+                "period": period_label,
+                "customer_id": customer_id,
+                "customer_name": customer.name,
+                "customer_number": customer.customer_number,
+                "revenue": quantize_money(trend_map.get((customer_id, period_label), Decimal("0"))),
+            })
+        month_cursor = _add_months(month_cursor, 1)
+
+    return {
+        "period": active_period,
+        "dormant_count": dormant_count,
+        "collections_priority_count": collections_priority_count,
+        "fastest_growing": fastest_growing,
+        "biggest_declines": biggest_declines,
+        "largest_overdue": largest_overdue,
+        "dormant_customers": dormant_customers,
+        "collections_priority": collections_priority,
+        "concentration": {
+            "top_customer_share_percent": top_customer_share,
+            "top_5_share_percent": top_5_share,
+            "top_10_share_percent": top_10_share,
+        },
+        "trend": trend,
+    }
 
 
 def _stock_status(on_hand: Decimal, reserved: Decimal, reorder: Decimal | None) -> str:

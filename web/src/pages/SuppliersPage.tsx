@@ -611,7 +611,7 @@ export default function SuppliersPage() {
           </div>
         )
       ) : (
-
+      <>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
         {[
           { label: "Active Suppliers", value: summary?.active_suppliers ?? 0, onClick: () => setQueue("active") },
@@ -662,6 +662,7 @@ export default function SuppliersPage() {
           </div>
         </div>
       </div>
+      </>
       )}
 
       {showForm && !isSupplierDetailPage ? (

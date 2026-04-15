@@ -119,6 +119,8 @@ const supplierToForm = (supplier: Supplier) => ({
 export default function SuppliersPage() {
   const navigate = useNavigate();
   const { id: supplierRouteId } = useParams<{ id?: string }>();
+  const routeSupplierId = supplierRouteId ? Number(supplierRouteId) : null;
+  const isSupplierDetailPage = Number.isFinite(routeSupplierId);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierUniverse, setSupplierUniverse] = useState<Supplier[]>([]);
   const [supplierCatalogMetrics, setSupplierCatalogMetrics] = useState<Record<number, SupplierCatalogMetrics>>({});
@@ -151,6 +153,31 @@ export default function SuppliersPage() {
   const routeSupplierHandledRef = useRef<string | null>(null);
 
   const loadSuppliers = async () => {
+    if (isSupplierDetailPage && routeSupplierId) {
+      setLoading(true);
+      setRefreshing(false);
+      setError("");
+      try {
+        const [supplierData, supplierCatalogData, itemData] = await Promise.all([
+          apiFetch<Supplier>(`/suppliers/${routeSupplierId}`),
+          apiFetch<SupplierItem[]>(`/suppliers/${routeSupplierId}/items`),
+          apiFetch<Item[]>("/items"),
+        ]);
+        setSelected(supplierData);
+        setCatalog(supplierCatalogData);
+        setItems(itemData);
+        setSuppliers([]);
+        setSupplierUniverse([]);
+        setSupplierCatalogMetrics({});
+        setSummary(null);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const showInitialLoading = suppliers.length === 0 && supplierUniverse.length === 0 && summary === null;
     if (showInitialLoading) {
       setLoading(true);
@@ -200,18 +227,17 @@ export default function SuppliersPage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  useEffect(() => { void loadSuppliers(); }, [debouncedSearch, queue, range]);
+  useEffect(() => { void loadSuppliers(); }, [debouncedSearch, queue, range, isSupplierDetailPage, routeSupplierId]);
 
   const routeSupplier = useMemo(() => {
-    if (!supplierRouteId) return null;
-    const supplierId = Number(supplierRouteId);
-    if (!Number.isFinite(supplierId)) return null;
-    return supplierUniverse.find((supplier) => supplier.id === supplierId) ?? suppliers.find((supplier) => supplier.id === supplierId) ?? null;
-  }, [supplierRouteId, supplierUniverse, suppliers]);
-  const isSupplierDetailPage = Boolean(supplierRouteId);
+    if (!routeSupplierId) return null;
+    return selected?.id === routeSupplierId
+      ? selected
+      : supplierUniverse.find((supplier) => supplier.id === routeSupplierId) ?? suppliers.find((supplier) => supplier.id === routeSupplierId) ?? null;
+  }, [routeSupplierId, selected, supplierUniverse, suppliers]);
 
   useEffect(() => {
-    if (!supplierRouteId) {
+    if (!isSupplierDetailPage || !supplierRouteId) {
       routeSupplierHandledRef.current = null;
       return;
     }
@@ -230,8 +256,6 @@ export default function SuppliersPage() {
     }
 
     routeSupplierHandledRef.current = supplierRouteId;
-    setSelected(routeSupplier);
-    void loadCatalog(routeSupplier.id);
     const nextForm = supplierToForm(routeSupplier);
     setEditingId(routeSupplier.id);
     setForm(nextForm);

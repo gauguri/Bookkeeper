@@ -39,7 +39,7 @@ export default function ItemSupplierTable({ suppliers }: Props) {
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <Link
-                      to={`/sales/suppliers/${s.supplier_id}`}
+                      to={`/procurement/suppliers/${s.supplier_id}`}
                       className="font-medium text-primary hover:underline"
                       onClick={(event) => event.stopPropagation()}
                     >

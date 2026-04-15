@@ -202,6 +202,14 @@ export default function SuppliersPage() {
 
   useEffect(() => { void loadSuppliers(); }, [debouncedSearch, queue, range]);
 
+  const routeSupplier = useMemo(() => {
+    if (!supplierRouteId) return null;
+    const supplierId = Number(supplierRouteId);
+    if (!Number.isFinite(supplierId)) return null;
+    return supplierUniverse.find((supplier) => supplier.id === supplierId) ?? suppliers.find((supplier) => supplier.id === supplierId) ?? null;
+  }, [supplierRouteId, supplierUniverse, suppliers]);
+  const isSupplierDetailPage = Boolean(supplierRouteId);
+
   useEffect(() => {
     if (!supplierRouteId) {
       routeSupplierHandledRef.current = null;
@@ -263,13 +271,6 @@ export default function SuppliersPage() {
   const visibleSupplierIds = useMemo(() => suppliers.map((supplier) => supplier.id), [suppliers]);
   const allVisibleSelected = visibleSupplierIds.length > 0 && visibleSupplierIds.every((id) => selectedRows.includes(id));
   const someVisibleSelected = visibleSupplierIds.some((id) => selectedRows.includes(id));
-  const routeSupplier = useMemo(() => {
-    if (!supplierRouteId) return null;
-    const supplierId = Number(supplierRouteId);
-    if (!Number.isFinite(supplierId)) return null;
-    return supplierUniverse.find((supplier) => supplier.id === supplierId) ?? suppliers.find((supplier) => supplier.id === supplierId) ?? null;
-  }, [supplierRouteId, supplierUniverse, suppliers]);
-  const isSupplierDetailPage = Boolean(supplierRouteId);
 
   useEffect(() => {
     if (!selectAllRef.current) return;

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Star } from "lucide-react";
 import type { ItemSupplierInfo } from "../../hooks/useItems";
 import { formatCurrency } from "../../utils/formatters";
@@ -37,7 +38,13 @@ export default function ItemSupplierTable({ suppliers }: Props) {
               <tr key={s.supplier_id} className="border-b last:border-0 hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition">
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{s.supplier_name}</span>
+                    <Link
+                      to={`/sales/suppliers/${s.supplier_id}`}
+                      className="font-medium text-primary hover:underline"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {s.supplier_name}
+                    </Link>
                     {s.is_preferred && (
                       <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                     )}

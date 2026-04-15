@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useNavigate, useParams } from "react-router-dom";
 import { Building2, Download, FileUp, Plus, Search, Settings2, X } from "lucide-react";
 import { apiFetch } from "../api";
 import SupplierItemLinkModal, { SupplierItemLinkForm } from "../components/SupplierItemLinkModal";
@@ -97,6 +98,8 @@ const emptyCatalogLinkForm: SupplierItemLinkForm = {
 };
 
 export default function SuppliersPage() {
+  const navigate = useNavigate();
+  const { id: supplierRouteId } = useParams<{ id?: string }>();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierUniverse, setSupplierUniverse] = useState<Supplier[]>([]);
   const [supplierCatalogMetrics, setSupplierCatalogMetrics] = useState<Record<number, SupplierCatalogMetrics>>({});
@@ -126,6 +129,7 @@ export default function SuppliersPage() {
   const [toast, setToast] = useState("");
   const modalRef = useRef<HTMLDivElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
+  const routeSupplierHandledRef = useRef<string | null>(null);
 
   const loadSuppliers = async () => {
     const showInitialLoading = suppliers.length === 0 && supplierUniverse.length === 0 && summary === null;
@@ -178,6 +182,36 @@ export default function SuppliersPage() {
   }, [search]);
 
   useEffect(() => { void loadSuppliers(); }, [debouncedSearch, queue, range]);
+
+  useEffect(() => {
+    if (!supplierRouteId) {
+      routeSupplierHandledRef.current = null;
+      return;
+    }
+
+    if (routeSupplierHandledRef.current === supplierRouteId) {
+      return;
+    }
+
+    const supplierId = Number(supplierRouteId);
+    if (!Number.isFinite(supplierId)) {
+      routeSupplierHandledRef.current = supplierRouteId;
+      return;
+    }
+
+    const routeSupplier =
+      supplierUniverse.find((supplier) => supplier.id === supplierId) ??
+      suppliers.find((supplier) => supplier.id === supplierId);
+
+    if (!routeSupplier) {
+      return;
+    }
+
+    routeSupplierHandledRef.current = supplierRouteId;
+    setSelected(routeSupplier);
+    void loadCatalog(routeSupplier.id);
+    openEditModal(routeSupplier);
+  }, [supplierRouteId, supplierUniverse, suppliers]);
 
   const loadCatalog = async (supplierId: number) => {
     try {
@@ -416,6 +450,9 @@ export default function SuppliersPage() {
     setFormSubmitError("");
     setForm(emptyForm);
     setInitialForm(emptyForm);
+    if (supplierRouteId) {
+      navigate("/procurement/suppliers", { replace: true });
+    }
   };
 
   useEffect(() => {
@@ -572,7 +609,7 @@ export default function SuppliersPage() {
             <p className="mt-2 text-sm text-muted">You have unsaved edits. Do you want to discard them?</p>
             <div className="mt-4 flex justify-end gap-2">
               <button className="app-button-secondary" onClick={() => setShowDiscardConfirm(false)}>Keep editing</button>
-              <button className="app-button" onClick={() => { setShowDiscardConfirm(false); setShowForm(false); setEditingId(null); setForm(emptyForm); setInitialForm(emptyForm); setFormErrors({}); setFormSubmitError(""); }}>Discard</button>
+              <button className="app-button" onClick={() => { setShowDiscardConfirm(false); setShowForm(false); setEditingId(null); setForm(emptyForm); setInitialForm(emptyForm); setFormErrors({}); setFormSubmitError(""); if (supplierRouteId) { navigate("/procurement/suppliers", { replace: true }); } }}>Discard</button>
             </div>
           </div>
         </div>

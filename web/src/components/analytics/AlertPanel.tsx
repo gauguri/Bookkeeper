@@ -1,5 +1,5 @@
 import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { AnomalyItem } from "../../hooks/useAnalytics";
 import { formatCurrency } from "../../utils/formatters";
 
@@ -9,6 +9,8 @@ type Props = {
 };
 
 export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: Props) {
+  const navigate = useNavigate();
+
   if (!anomalies.length) {
     return (
       <div className="app-card p-4">
@@ -31,11 +33,16 @@ export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: 
         {anomalies.map((anomaly) => (
           <div
             key={anomaly.id}
+            onClick={
+              anomaly.entity_type === "invoice"
+                ? () => navigate(`/invoices/${anomaly.entity_id}`)
+                : undefined
+            }
             className={`rounded-lg border p-3 ${
               anomaly.severity === "high"
                 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10"
                 : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/10"
-            }`}
+            } ${anomaly.entity_type === "invoice" ? "cursor-pointer transition hover:shadow-sm" : ""}`}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">

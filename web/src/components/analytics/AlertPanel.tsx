@@ -43,7 +43,7 @@ export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: 
                   <div className="space-y-1">
                     <Link
                       className="inline-flex items-center text-sm font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
-                      to={`/invoices/${encodeURIComponent(anomaly.reference)}`}
+                      to={`/invoices/${anomaly.entity_id}`}
                     >
                       Open invoice {anomaly.reference}
                     </Link>

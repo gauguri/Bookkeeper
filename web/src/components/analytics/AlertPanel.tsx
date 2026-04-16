@@ -1,4 +1,5 @@
 import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { AnomalyItem } from "../../hooks/useAnalytics";
 import { formatCurrency } from "../../utils/formatters";
 
@@ -38,7 +39,16 @@ export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: 
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <p className="text-sm font-medium">{anomaly.description}</p>
+                {anomaly.entity_type === "invoice" ? (
+                  <Link
+                    className="text-sm font-medium text-primary hover:underline"
+                    to={`/invoices/${encodeURIComponent(anomaly.reference)}`}
+                  >
+                    {anomaly.description}
+                  </Link>
+                ) : (
+                  <p className="text-sm font-medium">{anomaly.description}</p>
+                )}
                 <p className="mt-1 text-xs text-muted">{anomaly.reason}</p>
               </div>
               <span className="ml-2 shrink-0 text-sm font-bold">{formatCurrency(anomaly.value, true)}</span>

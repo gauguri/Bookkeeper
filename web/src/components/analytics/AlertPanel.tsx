@@ -40,12 +40,15 @@ export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: 
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 {anomaly.entity_type === "invoice" ? (
-                  <Link
-                    className="text-sm font-medium text-primary hover:underline"
-                    to={`/invoices/${encodeURIComponent(anomaly.reference)}`}
-                  >
-                    {anomaly.description}
-                  </Link>
+                  <div className="space-y-1">
+                    <Link
+                      className="inline-flex items-center text-sm font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+                      to={`/invoices/${encodeURIComponent(anomaly.reference)}`}
+                    >
+                      Open invoice {anomaly.reference}
+                    </Link>
+                    <p className="text-sm font-medium">{anomaly.description}</p>
+                  </div>
                 ) : (
                   <p className="text-sm font-medium">{anomaly.description}</p>
                 )}

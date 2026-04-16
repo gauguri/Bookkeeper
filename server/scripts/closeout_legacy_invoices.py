@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import date, datetime, time
 from decimal import Decimal
+from pathlib import Path
+
+
+SERVER_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 
 from app.db import SessionLocal
 from app.accounting.gl_engine import postJournalEntries

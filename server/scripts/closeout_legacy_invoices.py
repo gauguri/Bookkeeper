@@ -13,7 +13,8 @@ if str(SERVER_ROOT) not in sys.path:
 
 from app.db import SessionLocal
 from app.accounting.gl_engine import postJournalEntries
-from app.models import Invoice
+from app.inventory.service import create_inventory_movement
+from app.models import Inventory, InventoryMovement, Invoice
 from app.sales.service import apply_payment, recalculate_invoice_balance, update_invoice_status
 from app.services.gl_posting_service import InvoiceGLPostingError, post_invoice_to_gl
 
@@ -32,6 +33,71 @@ def _shipment_timestamp(invoice: Invoice) -> datetime:
 
 def _shipment_posting_date(invoice: Invoice) -> date:
     return invoice.issue_date or invoice.due_date or date.today()
+
+
+def _backfill_shipment_inventory(db, invoice: Invoice, *, dry_run: bool) -> list[str]:
+    actions: list[str] = []
+    for line in invoice.lines:
+        if line.item_id is None:
+            continue
+
+        qty_shipped = Decimal(line.quantity or 0)
+        if qty_shipped <= 0:
+            continue
+
+        inventory = (
+            db.query(Inventory)
+            .filter(Inventory.item_id == line.item_id)
+            .with_for_update()
+            .first()
+        )
+        if inventory is None:
+            actions.append(f"inventory_missing:{line.item_id}")
+            continue
+
+        movement_rows = (
+            db.query(InventoryMovement.qty_delta)
+            .filter(
+                InventoryMovement.item_id == line.item_id,
+                InventoryMovement.ref_type == "invoice",
+                InventoryMovement.ref_id == invoice.id,
+                InventoryMovement.reason == "SHIPMENT",
+            )
+            .all()
+        )
+        already_applied = sum((abs(Decimal(row.qty_delta or 0)) for row in movement_rows), Decimal("0"))
+        remaining_qty = qty_shipped - already_applied
+        if remaining_qty <= 0:
+            actions.append(f"inventory_already_shipped:{line.item_id}")
+            continue
+
+        on_hand = Decimal(inventory.quantity_on_hand or 0)
+        qty_to_apply = min(on_hand, remaining_qty) if on_hand > 0 else Decimal("0")
+        if qty_to_apply <= 0:
+            actions.append(f"inventory_no_on_hand:{line.item_id}")
+            continue
+
+        if not dry_run:
+            new_qty = on_hand - qty_to_apply
+            inventory.quantity_on_hand = new_qty
+            inventory.total_value = new_qty * Decimal(inventory.landed_unit_cost or 0)
+            if getattr(inventory, "item", None) is not None:
+                inventory.item.on_hand_qty = new_qty
+            create_inventory_movement(
+                db,
+                item_id=line.item_id,
+                qty_delta=-qty_to_apply,
+                reason="SHIPMENT",
+                ref_type="invoice",
+                ref_id=invoice.id,
+            )
+
+        if qty_to_apply < remaining_qty:
+            actions.append(f"inventory_partial:{line.item_id}:{qty_to_apply}/{remaining_qty}")
+        else:
+            actions.append(f"inventory_shipped:{line.item_id}:{qty_to_apply}")
+
+    return actions
 
 
 def _close_invoice(db, invoice: Invoice, *, dry_run: bool, payment_method: str, payment_note: str) -> dict:
@@ -78,6 +144,8 @@ def _close_invoice(db, invoice: Invoice, *, dry_run: bool, payment_method: str, 
         actions.append("post_invoice_gl")
         if not dry_run:
             post_invoice_to_gl(db, invoice.id, company_id=1)
+
+    actions.extend(_backfill_shipment_inventory(db, invoice, dry_run=dry_run))
 
     actions.append("post_shipment_gl")
     if not dry_run:
@@ -138,9 +206,20 @@ def main() -> None:
         description="Mark legacy invoices as sent/shipped and record full payment for invoices on or before a cutoff date."
     )
     parser.add_argument(
+        "--from-date",
+        default=None,
+        help="Optional inclusive start issue-date in YYYY-MM-DD format.",
+    )
+    parser.add_argument(
         "--through",
         default="2024-12-31",
         help="Inclusive invoice issue-date cutoff in YYYY-MM-DD format. Default: 2024-12-31",
+    )
+    parser.add_argument(
+        "--status",
+        action="append",
+        default=[],
+        help="Optional invoice status filter. Can be supplied multiple times.",
     )
     parser.add_argument(
         "--apply",
@@ -165,15 +244,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    start_date = date.fromisoformat(args.from_date) if args.from_date else None
     cutoff = date.fromisoformat(args.through)
+    statuses = [status.upper() for status in args.status]
 
     db = SessionLocal()
     try:
-        query = (
-            db.query(Invoice)
-            .filter(Invoice.issue_date <= cutoff)
-            .order_by(Invoice.issue_date.asc(), Invoice.id.asc())
-        )
+        query = db.query(Invoice).filter(Invoice.issue_date <= cutoff)
+        if start_date is not None:
+            query = query.filter(Invoice.issue_date >= start_date)
+        if statuses:
+            query = query.filter(Invoice.status.in_(statuses))
+        query = query.order_by(Invoice.issue_date.asc(), Invoice.id.asc())
         if args.limit > 0:
             query = query.limit(args.limit)
         invoices = query.all()
@@ -183,7 +265,10 @@ def main() -> None:
         failed = 0
 
         print(
-            f"[START] mode={'APPLY' if args.apply else 'DRY-RUN'} cutoff_inclusive={cutoff.isoformat()} invoices={len(invoices)}"
+            f"[START] mode={'APPLY' if args.apply else 'DRY-RUN'} "
+            f"from_inclusive={(start_date.isoformat() if start_date else 'None')} "
+            f"cutoff_inclusive={cutoff.isoformat()} statuses={','.join(statuses) if statuses else 'ALL'} "
+            f"invoices={len(invoices)}"
         )
 
         for invoice in invoices:

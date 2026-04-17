@@ -3,10 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from typing import Iterable, Sequence
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models import (
     GLAccount,
@@ -56,13 +58,23 @@ def validate_balanced(lines: Sequence[GLJournalLine]) -> tuple[Decimal, Decimal]
 
 
 def next_doc_number(db: Session, ledger_id: int, fiscal_year: int) -> str:
-    count = (
-        db.query(func.count(GLJournalHeader.id))
-        .filter(GLJournalHeader.ledger_id == ledger_id, GLJournalHeader.fiscal_year == fiscal_year)
-        .scalar()
-        or 0
+    prefix = f"GL-{fiscal_year}-"
+    latest = (
+        db.query(GLJournalHeader.document_number)
+        .filter(
+            GLJournalHeader.ledger_id == ledger_id,
+            GLJournalHeader.fiscal_year == fiscal_year,
+            GLJournalHeader.document_number.like(f"{prefix}%"),
+        )
+        .order_by(GLJournalHeader.document_number.desc())
+        .first()
     )
-    return f"GL-{fiscal_year}-{count + 1:06d}"
+    next_number = 1
+    if latest and latest[0]:
+        match = re.match(rf"^GL-{fiscal_year}-(\d+)$", latest[0])
+        if match:
+            next_number = int(match.group(1)) + 1
+    return f"{prefix}{next_number:06d}"
 
 
 def apply_balances(db: Session, header: GLJournalHeader, reverse: bool = False) -> None:
@@ -110,6 +122,22 @@ def create_journal(db: Session, payload) -> GLJournalHeader:
     fiscal_year, period_number = _get_period(payload.posting_date)
     ensure_period_open(db, payload.company_code_id, fiscal_year, period_number)
 
+    def _existing_by_idempotency() -> GLJournalHeader | None:
+        if not payload.idempotency_key:
+            return None
+        return (
+            db.query(GLJournalHeader)
+            .filter(
+                GLJournalHeader.ledger_id == payload.ledger_id,
+                GLJournalHeader.idempotency_key == payload.idempotency_key,
+            )
+            .first()
+        )
+
+    existing = _existing_by_idempotency()
+    if existing:
+        return existing
+
     line_account_ids = {line.gl_account_id for line in payload.lines}
     if line_account_ids:
         valid_ids = {
@@ -122,40 +150,57 @@ def create_journal(db: Session, payload) -> GLJournalHeader:
         if missing_ids:
             raise ValueError(f"Invalid GL account(s) for company_code_id={payload.company_code_id}: {', '.join(str(i) for i in missing_ids)}")
 
-    header = GLJournalHeader(
-        company_code_id=payload.company_code_id,
-        ledger_id=payload.ledger_id,
-        document_number=next_doc_number(db, payload.ledger_id, fiscal_year),
-        document_type=payload.document_type,
-        posting_date=payload.posting_date,
-        document_date=payload.document_date,
-        fiscal_year=fiscal_year,
-        period_number=period_number,
-        currency=payload.currency,
-        reference=payload.reference,
-        header_text=payload.header_text,
-        source_module=payload.source_module,
-        created_by=payload.created_by,
-        idempotency_key=payload.idempotency_key,
-        status="DRAFT",
-    )
-    db.add(header)
-    db.flush()
-    for idx, line in enumerate(payload.lines, start=1):
-        db.add(
-            GLJournalLine(
-                header_id=header.id,
-                line_number=idx,
-                gl_account_id=line.gl_account_id,
-                description=line.description,
-                debit_amount=_to_decimal(line.debit_amount),
-                credit_amount=_to_decimal(line.credit_amount),
-                amount_in_doc_currency=_to_decimal(line.debit_amount or line.credit_amount),
-                currency=payload.currency,
-            )
-        )
-    db.flush()
-    return header
+    last_error: IntegrityError | None = None
+    for _attempt in range(5):
+        try:
+            with db.begin_nested():
+                header = GLJournalHeader(
+                    company_code_id=payload.company_code_id,
+                    ledger_id=payload.ledger_id,
+                    document_number=next_doc_number(db, payload.ledger_id, fiscal_year),
+                    document_type=payload.document_type,
+                    posting_date=payload.posting_date,
+                    document_date=payload.document_date,
+                    fiscal_year=fiscal_year,
+                    period_number=period_number,
+                    currency=payload.currency,
+                    reference=payload.reference,
+                    header_text=payload.header_text,
+                    source_module=payload.source_module,
+                    created_by=payload.created_by,
+                    idempotency_key=payload.idempotency_key,
+                    status="DRAFT",
+                )
+                db.add(header)
+                db.flush()
+                for idx, line in enumerate(payload.lines, start=1):
+                    db.add(
+                        GLJournalLine(
+                            header_id=header.id,
+                            line_number=idx,
+                            gl_account_id=line.gl_account_id,
+                            description=line.description,
+                            debit_amount=_to_decimal(line.debit_amount),
+                            credit_amount=_to_decimal(line.credit_amount),
+                            amount_in_doc_currency=_to_decimal(line.debit_amount or line.credit_amount),
+                            currency=payload.currency,
+                        )
+                    )
+                db.flush()
+            return header
+        except IntegrityError as exc:
+            last_error = exc
+            existing = _existing_by_idempotency()
+            if existing:
+                return existing
+            message = str(exc.orig) if getattr(exc, "orig", None) else str(exc)
+            if "uq_gl_doc_number_year" in message:
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError("Failed to create journal header after retries.")
 
 
 def post_journal(db: Session, header: GLJournalHeader, posted_by: str | None = None) -> GLJournalHeader:

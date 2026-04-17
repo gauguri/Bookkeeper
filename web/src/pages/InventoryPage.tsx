@@ -244,6 +244,12 @@ export default function InventoryPage() {
   }, [overview.error]);
 
   useEffect(() => {
+    if (!searchInput.trim() && appliedSearch) {
+      setAppliedSearch("");
+    }
+  }, [searchInput, appliedSearch]);
+
+  useEffect(() => {
     if (analyticsQuery.error instanceof Error) {
       setError(analyticsQuery.error.message);
       return;
@@ -624,6 +630,20 @@ export default function InventoryPage() {
           <div className="mb-3 flex items-center justify-between">
             <h3 className="font-semibold">Inventory Items Grid</h3>
             <div className="flex items-center gap-2">
+              {appliedSearch && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                  Search: {appliedSearch}
+                  <button
+                    className="underline"
+                    onClick={() => {
+                      setSearchInput("");
+                      setAppliedSearch("");
+                    }}
+                  >
+                    × Clear
+                  </button>
+                </span>
+              )}
               {breakdownFilter !== "all" && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs text-primary">
                   Filtered: {breakdownFilter}

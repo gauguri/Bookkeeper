@@ -1,4 +1,5 @@
 import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import type { AnomalyItem } from "../../hooks/useAnalytics";
 import { formatCurrency } from "../../utils/formatters";
 
@@ -8,6 +9,8 @@ type Props = {
 };
 
 export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: Props) {
+  const navigate = useNavigate();
+
   if (!anomalies.length) {
     return (
       <div className="app-card p-4">
@@ -30,15 +33,32 @@ export default function AlertPanel({ anomalies, title = "Alerts & Anomalies" }: 
         {anomalies.map((anomaly) => (
           <div
             key={anomaly.id}
+            onClick={
+              anomaly.entity_type === "invoice"
+                ? () => navigate(`/invoices/${anomaly.entity_id}`)
+                : undefined
+            }
             className={`rounded-lg border p-3 ${
               anomaly.severity === "high"
                 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10"
                 : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/10"
-            }`}
+            } ${anomaly.entity_type === "invoice" ? "cursor-pointer transition hover:shadow-sm" : ""}`}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <p className="text-sm font-medium">{anomaly.description}</p>
+                {anomaly.entity_type === "invoice" ? (
+                  <div className="space-y-1">
+                    <Link
+                      className="inline-flex items-center text-sm font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+                      to={`/invoices/${anomaly.entity_id}`}
+                    >
+                      Open invoice {anomaly.reference}
+                    </Link>
+                    <p className="text-sm font-medium">{anomaly.description}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm font-medium">{anomaly.description}</p>
+                )}
                 <p className="mt-1 text-xs text-muted">{anomaly.reason}</p>
               </div>
               <span className="ml-2 shrink-0 text-sm font-bold">{formatCurrency(anomaly.value, true)}</span>

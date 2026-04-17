@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from typing import Iterable, Sequence
 
 from sqlalchemy import and_, func, or_
@@ -56,13 +57,23 @@ def validate_balanced(lines: Sequence[GLJournalLine]) -> tuple[Decimal, Decimal]
 
 
 def next_doc_number(db: Session, ledger_id: int, fiscal_year: int) -> str:
-    count = (
-        db.query(func.count(GLJournalHeader.id))
-        .filter(GLJournalHeader.ledger_id == ledger_id, GLJournalHeader.fiscal_year == fiscal_year)
-        .scalar()
-        or 0
+    prefix = f"GL-{fiscal_year}-"
+    latest = (
+        db.query(GLJournalHeader.document_number)
+        .filter(
+            GLJournalHeader.ledger_id == ledger_id,
+            GLJournalHeader.fiscal_year == fiscal_year,
+            GLJournalHeader.document_number.like(f"{prefix}%"),
+        )
+        .order_by(GLJournalHeader.document_number.desc())
+        .first()
     )
-    return f"GL-{fiscal_year}-{count + 1:06d}"
+    next_number = 1
+    if latest and latest[0]:
+        match = re.match(rf"^GL-{fiscal_year}-(\d+)$", latest[0])
+        if match:
+            next_number = int(match.group(1)) + 1
+    return f"{prefix}{next_number:06d}"
 
 
 def apply_balances(db: Session, header: GLJournalHeader, reverse: bool = False) -> None:
@@ -109,6 +120,18 @@ def apply_balances(db: Session, header: GLJournalHeader, reverse: bool = False) 
 def create_journal(db: Session, payload) -> GLJournalHeader:
     fiscal_year, period_number = _get_period(payload.posting_date)
     ensure_period_open(db, payload.company_code_id, fiscal_year, period_number)
+
+    if payload.idempotency_key:
+        existing = (
+            db.query(GLJournalHeader)
+            .filter(
+                GLJournalHeader.ledger_id == payload.ledger_id,
+                GLJournalHeader.idempotency_key == payload.idempotency_key,
+            )
+            .first()
+        )
+        if existing:
+            return existing
 
     line_account_ids = {line.gl_account_id for line in payload.lines}
     if line_account_ids:

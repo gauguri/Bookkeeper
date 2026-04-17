@@ -23,9 +23,11 @@ export default function ItemSalesChart({ data }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
             <Tooltip
-              formatter={(value: number, name: string) =>
-                [name === "revenue" ? `$${value.toLocaleString()}` : value.toLocaleString(), name === "revenue" ? "Revenue" : "Units"]
-              }
+              formatter={(value: number, name: string) => {
+                const key = String(name || "").toLowerCase();
+                const isRevenue = key === "revenue";
+                return [isRevenue ? `$${value.toLocaleString()}` : value.toLocaleString(), isRevenue ? "Revenue" : "Units"];
+              }}
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
             />
             <Legend wrapperStyle={{ fontSize: 11 }} />
